@@ -1,0 +1,2 @@
+# Ignore all target files under server
+server/target/
