@@ -1,0 +1,92 @@
+:root {
+  color-scheme: dark;
+  font-family: Segoe UI, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #111827;
+  color: #e5e7eb;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  min-height: 100vh;
+}
+
+.hud {
+  border-right: 1px solid #374151;
+  padding: 16px;
+  background: #0f172a;
+}
+
+h1 {
+  margin-top: 0;
+  font-size: 1.25rem;
+}
+
+.stats,
+.controls {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+button {
+  border: 1px solid #4b5563;
+  background: #1f2937;
+  color: #e5e7eb;
+  padding: 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #374151;
+}
+
+input {
+  border: 1px solid #4b5563;
+  background: #111827;
+  color: #e5e7eb;
+  padding: 8px;
+  border-radius: 6px;
+}
+
+.net-controls {
+  margin-top: 6px;
+}
+
+.status {
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  background: #111827;
+}
+
+.muted {
+  color: #9ca3af;
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.game-wrap {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+}
+
+canvas {
+  width: min(1200px, 100%);
+  height: auto;
+  border: 1px solid #374151;
+  background: #1f2937;
+}

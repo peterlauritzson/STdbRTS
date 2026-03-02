@@ -1,2 +1,8 @@
 # Ignore all target files under server
 server/target/
+
+# Ignore all node modules
+node_modules/
+
+# Ignore all log files
+*.log

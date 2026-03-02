@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>STdbRTS - Quick MVP</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="hud">
+      <h1>Spacetime RTS</h1>
+      
+      <div id="minimap-container" style="margin-bottom: 1rem;">
+          <canvas id="minimap" width="200" height="120" style="background:#111; border:1px solid #444; width:100%; display:block;"></canvas>
+      </div>
+
+      <div class="stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 1rem;">
+        <div class="stat-item">Resource: <span id="resources" style="color: #fbbf24; font-weight: bold;">0</span></div>
+        <div class="stat-item">Selected: <span id="selected-count">0</span></div>
+        <div class="stat-item">HQ HP: <span id="hq-hp">0</span></div>
+        <div class="stat-item">Enemy: <span id="enemy-hq-hp">0</span></div>
+      </div>
+
+      <div class="panel" style="margin-bottom: 1rem;">
+        <h3 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; text-transform: uppercase; color: #aaa;">Actions</h3>
+        <div class="action-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;">
+           <button id="train-worker" class="btn-action" title="Train Worker (50)">Worker</button>
+           <button id="train-soldier" class="btn-action" title="Train Soldier (100)">Soldier</button>
+           <button id="build-barracks" class="btn-action" title="Build Barracks (200)">Barracks</button>
+           <!-- Placeholders -->
+           <button class="btn-action" disabled>&nbsp;</button>
+           <button class="btn-action" disabled>&nbsp;</button>
+           <button class="btn-action" disabled>&nbsp;</button>
+        </div>
+      </div>
+
+      <div class="controls net-controls">
+        <h3 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; text-transform: uppercase; color: #aaa;">Connection</h3>
+        <input id="stdb-host" type="text" value="ws://localhost:3000" placeholder="Host" style="width: 100%; margin-bottom: 4px; box-sizing: border-box;" />
+        <input id="stdb-db" type="text" value="server" placeholder="Database" style="width: 100%; margin-bottom: 4px; box-sizing: border-box;" />
+        <div id="status" class="status" style="font-size: 0.8rem; margin-bottom: 4px; color: #888;">Disconnected</div>
+        <button id="stdb-connect" style="width: 100%;">Connect</button>
+      </div>
+      
+      <div class="controls debug-controls" style="border-top: 1px solid #333; margin-top: 1rem; padding-top: 0.5rem">
+        <h4 style="margin: 0 0 0.5rem 0;">Dev Tools</h4>
+        <button id="reset-game" style="background: #991b1b; color: white; width: 100%; margin-bottom: 5px;">Reset Game</button>
+        <div style="display: flex; align-items: center; gap: 10px;">
+           <label style="font-size: 0.8rem;"><input type="checkbox" id="auto-sim" checked> Auto Sim</label>
+           <button id="manual-tick" style="flex: 1; padding: 2px;">Step</button>
+        </div>
+      </div>
+
+      <p class="muted small" style="margin-top: auto;">Shift+Click to queue waypoints.</p>
+    </aside>
+
+    <main class="game-wrap">
+      <canvas id="game" width="1200" height="700"></canvas>
+    </main>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
