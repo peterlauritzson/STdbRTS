@@ -142,6 +142,24 @@ function updateUnit(ctx: any, row: UnitRow) {
     serverX: row.x,
     serverY: row.y
   };
+  
+  // WAYPOINT SYNC: Prune completed waypoints if the unit has advanced
+  const wps = state.waypoints[Number(row.id)];
+  if (wps) {
+     // Identify if the NEW target corresponds to any existing waypoint in the queue
+     // We start from the beginning because waypoints are ordered
+     const matchIndex = wps.findIndex((wp: any) => 
+         Math.abs(wp.x - row.targetX) < 0.1 && Math.abs(wp.y - row.targetY) < 0.1
+     );
+     
+     if (matchIndex !== -1) {
+         // The unit is now targeting 'matchIndex'.
+         // This implies it has completed all previous waypoints (if any),
+         // and 'matchIndex' itself is now the active target, not a queued waypoint.
+         // So we remove everything up to and including 'matchIndex'.
+         wps.splice(0, matchIndex + 1);
+     }
+  }
 
   if (existingIndex !== -1) {
     const oldUnit = state.units[existingIndex];
