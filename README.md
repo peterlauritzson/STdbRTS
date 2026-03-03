@@ -13,73 +13,69 @@ This is a fast playable prototype focused on validating game feel first.
 - Win/loss on HQ destruction
 - Fixed-step simulation tick (20 TPS) for more deterministic updates
 
-## Run locally (PowerShell)
-From the repo root:
+## Development Pre-Requisites
+- **SpacetimeDB**: follow instructions at [spacetimedb.com](https://spacetimedb.com/install)
+- **Rust**: install via [rustup.rs](https://rustup.rs/) (for server build)
+- **Node/NPM**: LTS version recommended
 
+## Project Structure
+- `server/`: Rust source code for the SpacetimeDB module.
+- `src/`: TypeScript source code for the browser client.
+- `src/bindings/`: Generated code connecting client to server (do not edit manually).
+
+## Development Workflow
+
+This project uses SpacetimeDB for the backend simulation and Vite/React/TypeScript for the frontend.
+
+### 1. Start SpacetimeDB
+First, ensure you have SpacetimeDB installed and running.
 ```powershell
-python -m http.server 8080
-```
-
-Open:
-
-```text
-http://localhost:8080
-```
-
-## Start using SpacetimeDB (browser bindings)
-This client now supports an authoritative SpacetimeDB mode when generated bindings are present.
-
-1. Install and start SpacetimeDB locally:
-
-```powershell
-iwr https://windows.spacetimedb.com -useb | iex
 spacetime start
 ```
+Keep this terminal open.
 
-Canonical install/docs links:
-- https://spacetimedb.com/install
-- https://spacetimedb.com/docs
-
-2. Generate a browser module + bindings (reference flow):
-
-```powershell
-spacetime dev --template browser-ts
-```
-
-Then build the generated bindings bundle:
+### 2. Publish Server & Reset Data
+When you change Rust code (`server/src/lib.rs`), or just want to reset the game state, rebuild and publish the server module.
+The `--delete-data` flag ensures a clean slate, removing old entities.
 
 ```powershell
-npm install
-npm run build
+cd server
+spacetime publish --server local -y --delete-data server
 ```
 
-Reference quickstart used:
-- https://spacetimedb.com/docs/quickstarts/browser
+### 3. Generate Client Bindings
+If you modified the schema (tables/reducers in Rust), you must regenerate the TypeScript bindings so the client knows about the changes.
 
-3. Copy the generated `dist/bindings.iife.js` into this project and load it before `src/main.js` in `index.html`.
+```powershell
+npm run generate
+```
+*Note: This runs `spacetime generate` targeting the `src/bindings` folder.*
 
-4. In-game HUD:
-- Set `SpacetimeDB Host` (default `ws://localhost:3000`)
-- Set `Database Name` (your published module/database)
-- Click `Connect SpacetimeDB`
+### 4. Run the Client
+Start the Vite development server.
 
-If RTS tables/reducers are available, commands are sent as reducers (`issue_move`, `issue_attack`, `issue_gather`, `train_unit`) and local simulation pauses.
+```powershell
+npm run dev
+```
+Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-If your module uses different table or reducer names, update `src/main.js` mappings accordingly (verify against canonical docs before finalizing):
-- https://spacetimedb.com/docs/clients
-- https://spacetimedb.com/docs/clients/subscriptions
+### 5. Verification
+To verify everything is working:
+1. Open the browser console (F12).
+2. Look for "Connected with identity: ..." and "Status: Subscribed & Ready".
+3. If you see "RangeError" or serialization issues, it usually means your **bindings are out of sync** with the server. Repeat steps 2 and 3.
 
 ## Controls
 - Left click: select one unit
 - Left drag: box select units
-- Right click on ground: move selected units
+- Right click on ground: move selected units (Shift-click to queue waypoints)
 - Right click on enemy: attack
 - Right click on resource node: workers gather
-- Buttons: train units from HQ
+- Buttons: update config or reset game
 
 ## Notes
-- This is intentionally not optimized (no advanced pathfinding, no spatial partitioning).
-- Networking/authority is not wired yet; this is a gameplay sandbox to validate the loop quickly.
+- This is a prototype MVP.
+- Networking/authority is handled by SpacetimeDB.
 
 For SpacetimeDB implementation details, use canonical docs:
 - https://spacetimedb.com/docs

@@ -143,22 +143,26 @@ function updateUnit(ctx: any, row: UnitRow) {
     serverY: row.y
   };
   
-  // WAYPOINT SYNC: Prune completed waypoints if the unit has advanced
+  // WAYPOINT SYNC: 
+  // If the unit moved to a new target, clean up any ghosts or promoted waypoints.
   const wps = state.waypoints[Number(row.id)];
-  if (wps) {
-     // Identify if the NEW target corresponds to any existing waypoint in the queue
-     // We start from the beginning because waypoints are ordered
-     const matchIndex = wps.findIndex((wp: any) => 
-         Math.abs(wp.x - row.targetX) < 0.1 && Math.abs(wp.y - row.targetY) < 0.1
-     );
+  if (wps && wps.length > 0) {
+     // 1. If we have any GHOSTS that match the new target, removing them fixes the gap.
+     // 2. If the new target matches a normal waypoint, it's a promotion.
      
-     if (matchIndex !== -1) {
-         // The unit is now targeting 'matchIndex'.
-         // This implies it has completed all previous waypoints (if any),
-         // and 'matchIndex' itself is now the active target, not a queued waypoint.
-         // So we remove everything up to and including 'matchIndex'.
-         wps.splice(0, matchIndex + 1);
-     }
+     // Filter out any waypoints (ghost or not) that match the new target.
+     // ALSO, filter out any ghosts that DO NOT match (stale ghosts from cancelled commands).
+     
+     state.waypoints[Number(row.id)] = wps.filter((wp: any) => {
+         const dx = Math.abs(wp.x - row.targetX);
+         const dy = Math.abs(wp.y - row.targetY);
+         const isMatch = (dx < 0.1 && dy < 0.1);
+         
+         if (isMatch) return false; // Arrived/Promoted -> Remove from queue
+         if (wp.isGhost && !isMatch) return false; // Stale ghost -> Remove
+         
+         return true; // Keep future waypoints
+     });
   }
 
   if (existingIndex !== -1) {
@@ -222,8 +226,37 @@ function updateWaypoint(ctx: any, row: WaypointRow) {
 
 function deleteWaypoint(ctx: any, row: WaypointRow) {
   const uid = Number(row.unitId);
-  if (state.waypoints[uid]) {
-    state.waypoints[uid] = state.waypoints[uid].filter((w: any) => w.id !== Number(row.id));
+  const list = state.waypoints[uid];
+  if (!list) return;
+  
+  const unit = state.units.find((u: any) => u.id === uid);
+  const wpIndex = list.findIndex((w: any) => w.id === Number(row.id));
+  if (wpIndex === -1) return;
+  
+  // LOGIC: If we delete a waypoint that matches the CURRENT unit target,
+  // it means we are just cleaning up after arrival. We can delete it.
+  // BUT if we delete a waypoint that is NOT the current target,
+  // it means the server has promoted it to current target, but the Unit update 
+  // hasn't reached us yet. In this case, we KEEP it as a ghost to bridge the gap.
+  // Exception: If the unit doesn't exist or is undetermined, just delete.
+  
+  let shouldKeepGhost = false;
+  
+  if (unit) {
+      const wp = list[wpIndex];
+      const dx = Math.abs(unit.targetX - wp.x);
+      const dy = Math.abs(unit.targetY - wp.y);
+      const isCurrentTarget = (dx < 0.1 && dy < 0.1);
+      
+      if (!isCurrentTarget) {
+          shouldKeepGhost = true; 
+      }
+  }
+
+  if (shouldKeepGhost) {
+      list[wpIndex].isGhost = true;
+  } else {
+      list.splice(wpIndex, 1);
   }
 }
 
@@ -689,7 +722,6 @@ function drawWorld() {
        ctx.lineWidth = 1;
        ctx.stroke();
        
-       // Update start for next segments
        startX = unit.targetX;
        startY = unit.targetY;
     }
@@ -713,6 +745,8 @@ function drawWorld() {
       for (const wp of wps) {
          ctx.fillStyle = "rgba(100, 200, 255, 0.8)";
          ctx.beginPath();
+         // Debug visual for ghosts
+         // ctx.fillStyle = wp.isGhost ? "rgba(255, 100, 100, 0.8)" : "rgba(100, 200, 255, 0.8)";
          ctx.arc(wp.x, wp.y, 2, 0, Math.PI * 2);
          ctx.fill();
       }
