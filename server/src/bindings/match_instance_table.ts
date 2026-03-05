@@ -11,9 +11,9 @@ import {
 } from "spacetimedb";
 
 export default __t.row({
-  identity: __t.identity().primaryKey(),
-  matchId: __t.u64().name("match_id"),
-  name: __t.string(),
-  resources: __t.u32(),
-  online: __t.bool(),
+  id: __t.u64().primaryKey(),
+  isMultiplayer: __t.bool().name("is_multiplayer"),
+  active: __t.bool(),
+  host: __t.identity(),
+  lastTick: __t.u64().name("last_tick"),
 });

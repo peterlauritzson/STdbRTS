@@ -7,9 +7,56 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="app">
+  <!-- Main Menu Overlay -->
+  <div id="main-menu" class="main-menu">
+    <div class="menu-content">
+      <h1 class="game-title">Spacetime RTS</h1>
+      <button class="menu-btn" onclick="startGame('single')">Single Player</button>
+      <button class="menu-btn" onclick="showMultiLobby()">Multiplayer</button>
+      <button class="menu-btn" onclick="alert('Options coming soon')">Options</button>
+      <button class="menu-btn" onclick="alert('Exit game disabled in web')">Exit game</button>
+    </div>
+  </div>
+
+  <!-- Multiplayer Lobby Overlay -->
+  <div id="multi-lobby" class="main-menu" style="display: none;">
+    <div class="menu-content" style="min-width: 380px;">
+      <h2 class="game-title" style="font-size: 1.6rem;">Multiplayer</h2>
+      <div style="margin-bottom: 1rem;">
+        <label style="display:block; margin-bottom: 4px; color: #aaa; font-size: 0.85rem;">Your Name</label>
+        <input id="player-name" type="text" placeholder="Enter your name" maxlength="20"
+          style="width: 100%; box-sizing: border-box; padding: 8px; background: #1a1a2e; border: 1px solid #444; color: white; border-radius: 4px; font-size: 1rem;" />
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 1rem;">
+        <button class="menu-btn" style="flex: 1; margin: 0;" onclick="hostMultiMatch()">Host Match</button>
+        <button class="menu-btn" style="flex: 1; margin: 0; background: #374151;" onclick="refreshLobby()">Refresh</button>
+      </div>
+      <div style="border-top: 1px solid #333; padding-top: 0.75rem; margin-bottom: 0.75rem;">
+        <h4 style="margin: 0 0 0.5rem 0; color: #aaa; font-size: 0.85rem; text-transform: uppercase;">Open Matches</h4>
+        <div id="lobby-list" style="min-height: 80px; max-height: 240px; overflow-y: auto; color: #888; font-size: 0.9rem;">
+          — connect first, then refresh —
+        </div>
+      </div>
+      <button class="menu-btn" style="background: #374151; margin: 0;" onclick="document.getElementById('multi-lobby').style.display='none'; document.getElementById('main-menu').style.display='flex';">Back</button>
+    </div>
+  </div>
+
+  <!-- In-game Menu Overlay -->
+  <div id="in-game-menu" class="main-menu" style="display: none;">
+    <div class="menu-content">
+      <h2 class="game-title">Paused</h2>
+      <button class="menu-btn" onclick="document.getElementById('in-game-menu').style.display = 'none'">Resume</button>
+      <button class="menu-btn" onclick="leaveGame()">Main Menu</button>
+      <button class="menu-btn" onclick="alert('Exit game disabled in web')">Exit Game</button>
+    </div>
+  </div>
+
+  <div class="app" id="game-app" style="display: none;">
     <aside class="hud">
-      <h1>Spacetime RTS</h1>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h1 style="margin: 0;">Spacetime RTS</h1>
+        <button onclick="document.getElementById('in-game-menu').style.display = 'flex'" style="padding: 4px 8px; font-size: 0.8rem;">Menu</button>
+      </div>
       
       <div id="minimap-container" style="margin-bottom: 1rem;">
           <canvas id="minimap" width="200" height="120" style="background:#111; border:1px solid #444; width:100%; display:block;"></canvas>
@@ -27,7 +74,7 @@
         <div class="action-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;">
            <button id="train-worker" class="btn-action" title="Train Worker (50)">Worker</button>
            <button id="train-soldier" class="btn-action" title="Train Soldier (100)">Soldier</button>
-           <button id="build-barracks" class="btn-action" title="Build Barracks (200)">Barracks</button>
+           <button id="build-barracks" class="btn-action" title="Build Catapult (200)">Catapult</button>
            <!-- Placeholders -->
            <button class="btn-action" disabled>&nbsp;</button>
            <button class="btn-action" disabled>&nbsp;</button>
@@ -38,7 +85,7 @@
       <div class="controls net-controls">
         <h3 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; text-transform: uppercase; color: #aaa;">Connection</h3>
         <input id="stdb-host" type="text" value="ws://localhost:3000" placeholder="Host" style="width: 100%; margin-bottom: 4px; box-sizing: border-box;" />
-        <input id="stdb-db" type="text" value="server" placeholder="Database" style="width: 100%; margin-bottom: 4px; box-sizing: border-box;" />
+        <input id="stdb-db" type="text" value="main" placeholder="Database" style="width: 100%; margin-bottom: 4px; box-sizing: border-box;" />
         <div id="status" class="status" style="font-size: 0.8rem; margin-bottom: 4px; color: #888;">Disconnected</div>
         <button id="stdb-connect" style="width: 100%;">Connect</button>
       </div>
@@ -46,20 +93,55 @@
       <div class="controls debug-controls" style="border-top: 1px solid #333; margin-top: 1rem; padding-top: 0.5rem">
         <h4 style="margin: 0 0 0.5rem 0;">Dev Tools</h4>
         <button id="reset-game" style="background: #991b1b; color: white; width: 100%; margin-bottom: 5px;">Reset Game</button>
-        <div style="display: flex; align-items: center; gap: 10px;">
-           <label style="font-size: 0.8rem;"><input type="checkbox" id="auto-sim" checked> Auto Sim</label>
-           <button id="manual-tick" style="flex: 1; padding: 2px;">Step</button>
-        </div>
       </div>
 
       <p class="muted small" style="margin-top: auto;">Shift+Click to queue waypoints.</p>
     </aside>
 
-    <main class="game-wrap">
-      <canvas id="game" width="1200" height="700"></canvas>
+    <main class="game-wrap" id="game-wrap">
+      <div id="scroll-container" class="scroll-container">
+        <canvas id="game" width="3000" height="3000"></canvas>
+      </div>
     </main>
   </div>
 
+  <script>
+    function startGame(mode) {
+      document.getElementById('main-menu').style.display = 'none';
+      document.getElementById('multi-lobby').style.display = 'none';
+      document.getElementById('game-app').style.display = 'grid';
+      window.gameMode = mode;
+      document.getElementById('stdb-host').value = 'ws://localhost:3000';
+      document.getElementById('stdb-db').value = 'main';
+      setTimeout(() => document.getElementById('stdb-connect').click(), 200);
+    }
+
+    function showMultiLobby() {
+      document.getElementById('main-menu').style.display = 'none';
+      document.getElementById('multi-lobby').style.display = 'flex';
+      window.gameMode = 'multi';
+      // Connect in background if not already connected
+      document.getElementById('stdb-host').value = 'ws://localhost:3000';
+      document.getElementById('stdb-db').value = 'main';
+      if (window.connectSpacetimeDb) window.connectSpacetimeDb();
+    }
+
+    function hostMultiMatch() {
+      const name = document.getElementById('player-name').value.trim();
+      if (!name) { alert('Please enter your name first.'); return; }
+      if (window.onHostMultiMatch) window.onHostMultiMatch(name);
+    }
+
+    function refreshLobby() {
+      if (window.onRefreshLobby) window.onRefreshLobby();
+    }
+
+    function leaveGame() {
+      // Disconnect and leave server match room
+      if (window.onLeaveGame) window.onLeaveGame();
+      setTimeout(() => location.reload(), 300);
+    }
+  </script>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

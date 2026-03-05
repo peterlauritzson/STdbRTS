@@ -18,8 +18,32 @@ export const Config = __t.object("Config", {
 });
 export type Config = __Infer<typeof Config>;
 
+export const FinishedMatch = __t.object("FinishedMatch", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  winnerIdentity: __t.string(),
+  finalTick: __t.u64(),
+});
+export type FinishedMatch = __Infer<typeof FinishedMatch>;
+
+export const GameTickSchedule = __t.object("GameTickSchedule", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type GameTickSchedule = __Infer<typeof GameTickSchedule>;
+
+export const MatchInstance = __t.object("MatchInstance", {
+  id: __t.u64(),
+  isMultiplayer: __t.bool(),
+  active: __t.bool(),
+  host: __t.identity(),
+  lastTick: __t.u64(),
+});
+export type MatchInstance = __Infer<typeof MatchInstance>;
+
 export const Player = __t.object("Player", {
   identity: __t.identity(),
+  matchId: __t.u64(),
   name: __t.string(),
   resources: __t.u32(),
   online: __t.bool(),
@@ -28,6 +52,7 @@ export type Player = __Infer<typeof Player>;
 
 export const Unit = __t.object("Unit", {
   id: __t.u64(),
+  matchId: __t.u64(),
   owner: __t.identity(),
   unitType: __t.string(),
   x: __t.f32(),

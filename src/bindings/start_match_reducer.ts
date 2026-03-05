@@ -11,5 +11,5 @@ import {
 } from "spacetimedb";
 
 export default {
-  args: __t.unit(),
+  isMultiplayer: __t.bool(),
 };

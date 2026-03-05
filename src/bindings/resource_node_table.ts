@@ -11,9 +11,10 @@ import {
 } from "spacetimedb";
 
 export default __t.row({
-  identity: __t.identity().primaryKey(),
+  id: __t.u64().primaryKey(),
   matchId: __t.u64().name("match_id"),
-  name: __t.string(),
-  resources: __t.u32(),
-  online: __t.bool(),
+  x: __t.f32(),
+  y: __t.f32(),
+  amount: __t.u32(),
+  maxAmount: __t.u32().name("max_amount"),
 });

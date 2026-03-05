@@ -12,6 +12,7 @@ import {
 
 export default __t.row({
   id: __t.u64().primaryKey(),
+  matchId: __t.u64().name("match_id"),
   owner: __t.identity(),
   unitType: __t.string().name("unit_type"),
   x: __t.f32(),

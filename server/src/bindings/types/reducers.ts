@@ -7,14 +7,14 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import BuildBuildingReducer from "../build_building_reducer";
-import GameTickReducer from "../game_tick_reducer";
 import MoveUnitReducer from "../move_unit_reducer";
 import ResetGameReducer from "../reset_game_reducer";
+import StartMatchReducer from "../start_match_reducer";
 import TrainUnitReducer from "../train_unit_reducer";
 
 export type BuildBuildingParams = __Infer<typeof BuildBuildingReducer>;
-export type GameTickParams = __Infer<typeof GameTickReducer>;
 export type MoveUnitParams = __Infer<typeof MoveUnitReducer>;
 export type ResetGameParams = __Infer<typeof ResetGameReducer>;
+export type StartMatchParams = __Infer<typeof StartMatchReducer>;
 export type TrainUnitParams = __Infer<typeof TrainUnitReducer>;
 

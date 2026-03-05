@@ -79,14 +79,57 @@ input {
 }
 
 .game-wrap {
-  display: grid;
-  place-items: center;
-  padding: 12px;
+  display: block;   /* Changed from grid to allow proper scrolling bounds */
+  padding: 0;       /* Removed padding to avoid weird scrollbars */
+  height: 100vh;
+  overflow: hidden;
+}
+
+.scroll-container {
+  width: 100%;
+  height: 100%;
+  overflow: auto; /* enables scrolling */
+  position: relative;
 }
 
 canvas {
-  width: min(1200px, 100%);
-  height: auto;
+  /* don't strictly constrain to 100% width since we want to be able to scroll */
   border: 1px solid #374151;
   background: #1f2937;
+  display: block;
+}
+
+/* Main Menu Styles */
+.main-menu {
+  position: fixed;
+  inset: 0;
+  background: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.menu-content {
+  background: #1f2937;
+  padding: 40px;
+  border-radius: 12px;
+  border: 1px solid #374151;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 320px;
+  text-align: center;
+}
+
+.game-title {
+  margin: 0 0 20px 0;
+  font-size: 2rem;
+  color: #fbbf24;
+}
+
+.menu-btn {
+  padding: 12px;
+  font-size: 1.1rem;
+  font-weight: bold;
 }

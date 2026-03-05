@@ -35,15 +35,17 @@ import {
 
 // Import all reducer arg schemas
 import BuildBuildingReducer from "./build_building_reducer";
-import GameTickReducer from "./game_tick_reducer";
 import MoveUnitReducer from "./move_unit_reducer";
 import ResetGameReducer from "./reset_game_reducer";
+import StartMatchReducer from "./start_match_reducer";
 import TrainUnitReducer from "./train_unit_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
 import ConfigRow from "./config_table";
+import FinishedMatchRow from "./finished_match_table";
+import MatchInstanceRow from "./match_instance_table";
 import PlayerRow from "./player_table";
 import UnitRow from "./unit_table";
 import WaypointRow from "./waypoint_table";
@@ -63,6 +65,28 @@ const tablesSchema = __schema({
       { name: 'config_version_key', constraint: 'unique', columns: ['version'] },
     ],
   }, ConfigRow),
+  finished_match: __table({
+    name: 'finished_match',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'finished_match_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, FinishedMatchRow),
+  match_instance: __table({
+    name: 'match_instance',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'match_instance_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MatchInstanceRow),
   player: __table({
     name: 'player',
     indexes: [
@@ -101,9 +125,9 @@ const tablesSchema = __schema({
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("build_building", BuildBuildingReducer),
-  __reducerSchema("game_tick", GameTickReducer),
   __reducerSchema("move_unit", MoveUnitReducer),
   __reducerSchema("reset_game", ResetGameReducer),
+  __reducerSchema("start_match", StartMatchReducer),
   __reducerSchema("train_unit", TrainUnitReducer),
 );
 

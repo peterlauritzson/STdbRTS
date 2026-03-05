@@ -6,11 +6,13 @@ import ConfigRowSchema from "./bindings/config_table";
 import PlayerRowSchema from "./bindings/player_table";
 import UnitRowSchema from "./bindings/unit_table";
 import WaypointRowSchema from "./bindings/waypoint_table";
+import ResourceNodeRowSchema from "./bindings/resource_node_table";
 
 type ConfigRow = Infer<typeof ConfigRowSchema>;
 type PlayerRow = Infer<typeof PlayerRowSchema>;
 type UnitRow = Infer<typeof UnitRowSchema>;
 type WaypointRow = Infer<typeof WaypointRowSchema>;
+type ResourceNodeRow = Infer<typeof ResourceNodeRowSchema>;
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
@@ -28,8 +30,6 @@ const ui = {
   stdbDb: document.getElementById("stdb-db") as HTMLInputElement,
   stdbConnect: document.getElementById("stdb-connect")!,
   resetGame: document.getElementById("reset-game")!,
-  autoSim: document.getElementById("auto-sim") as HTMLInputElement,
-  manualTick: document.getElementById("manual-tick")!,
   minimapCanvas: document.getElementById("minimap") as HTMLCanvasElement,
 };
 
@@ -39,10 +39,10 @@ const WORLD = { w: canvas.width, h: canvas.height };
 
 // Stats for rendering / defaults
 const UNIT_STATS: any = {
-  worker: { hp: 40, radius: 8, color: "#cbd5e1" },
-  soldier: { hp: 90, radius: 10, color: "#93c5fd" },
-  barracks: { hp: 500, radius: 25, color: "#fcd34d" },
-  hq: { hp: 1000, radius: 30, color: "#fca5a5" }
+  worker:   { hp: 40,   radius: 8,  attackRange: 0   },
+  soldier:  { hp: 90,   radius: 10, attackRange: 80  },
+  catapult: { hp: 400,  radius: 22, attackRange: 300 },
+  hq:       { hp: 1000, radius: 30, attackRange: 0   },
 };
 
 const BUILDING_STATS = {
@@ -62,19 +62,26 @@ const state: any = {
   predictions: new Map(), // Client-side move predictions
   players: {},    // Mapped from PlayerRow
   config: null,   // Mapped from ConfigRow
+  resourceNodes: [] as any[], // Mapped from ResourceNodeRow
   
   // Client-side UI state
   selectedIds: new Set(),
   selectionBox: null,
   mouse: { x: 0, y: 0 },
+  projectiles: [] as any[],
+  gameResult: null as string | null,
   
   // Connection state
   conn: null as DbConnection | null,
   connected: false,
   connecting: false,
+  subscriptionReady: false,
   lastError: null as string | null,
   identity: null as Identity | null,
   simInterval: null as any,
+  // Set to true only when the player has explicitly started/joined a match,
+  // so updateMatchInstance doesn't auto-enter the game on stale subscription data.
+  expectingGame: false,
 };
 
 // -----------------------------------------------------------------------------
@@ -92,12 +99,25 @@ function updatePlayer(ctx: any, row: PlayerRow) {
   const isMe = state.identity && row.identity.isEqual(state.identity);
   const internalId = isMe ? 1 : 2; // Simple mapping for UI colors
   
+  // If my matchId changed to 0 (left game), clear the canvas!
+  if (isMe && state.players[1] && Number(row.matchId) !== Number(state.players[1].matchId)) {
+     if (Number(row.matchId) === 0) {
+        state.units = [];
+        state.waypoints = {};
+        state.selectedIds.clear();
+        state.projectiles = [];
+        state.gameResult = null;
+        state.resourceNodes = [];
+     }
+  }
+
   state.players[internalId] = {
     identity: row.identity,
     name: row.name,
     resources: row.resources,
     online: row.online,
-    color: isMe ? "#4ade80" : "#f87171", // Green for me, Red for enemy
+    matchId: row.matchId,
+    color: isMe ? "#4ade80" : "#60a5fa", // Green for me, Blue for enemy
     internalId: internalId
   };
 }
@@ -131,9 +151,10 @@ function updateUnit(ctx: any, row: UnitRow) {
     pendingStartTick: row.pendingStartTick,
     
     // Stats
-    hp: stats.hp, 
+    hp: Number(row.hp ?? stats.hp),
     maxHp: stats.hp,
     radius: stats.radius,
+    attackRange: stats.attackRange ?? 0,
     pending: null, 
     cargo: 0,
     cargoMax: 25,
@@ -195,6 +216,34 @@ function updateUnit(ctx: any, row: UnitRow) {
 function deleteUnit(_ctx: any, row: UnitRow) {
   state.units = state.units.filter((u: any) => u.id !== Number(row.id));
   delete state.waypoints[Number(row.id)];
+  // HQ destroyed — show win/lose
+  if (row.unitType === "hq" && !state.gameResult) {
+    const isMyHQ = state.identity && row.owner.isEqual(state.identity);
+    state.gameResult = isMyHQ ? "DEFEAT" : "VICTORY";
+  }
+}
+
+function updateResourceNode(_ctx: any, row: ResourceNodeRow) {
+  const myPlayer = state.players[1];
+  if (!myPlayer || Number(row.matchId) !== Number(myPlayer.matchId)) return;
+  const idx = state.resourceNodes.findIndex((n: any) => n.id === Number(row.id));
+  const node = {
+    id: Number(row.id),
+    matchId: Number(row.matchId),
+    x: row.x,
+    y: row.y,
+    amount: Number(row.amount),
+    maxAmount: Number(row.maxAmount),
+  };
+  if (idx !== -1) {
+    state.resourceNodes[idx] = node;
+  } else {
+    state.resourceNodes.push(node);
+  }
+}
+
+function deleteResourceNode(_ctx: any, row: ResourceNodeRow) {
+  state.resourceNodes = state.resourceNodes.filter((n: any) => n.id !== Number(row.id));
 }
 
 function updateWaypoint(ctx: any, row: WaypointRow) {
@@ -260,6 +309,73 @@ function deleteWaypoint(ctx: any, row: WaypointRow) {
   }
 }
 
+function spawnProjectile(oldRow: any, newRow: any) {
+  // Find the attacker: closest enemy unit with attackRange > 0
+  const targetX = Number(newRow.x);
+  const targetY = Number(newRow.y);
+  const targetOwnerIsMe = state.identity && newRow.owner.isEqual(state.identity);
+  const attacker = state.units
+    .filter((u: any) => (u.ownerId === 1) !== targetOwnerIsMe && u.attackRange > 0)
+    .sort((a: any, b: any) => Math.hypot(a.x - targetX, a.y - targetY) - Math.hypot(b.x - targetX, b.y - targetY))[0];
+  if (!attacker) return;
+  const isCatapult = attacker.type === "catapult";
+  state.projectiles.push({
+    x: attacker.x, y: attacker.y,
+    tx: targetX,   ty: targetY,
+    speed: isCatapult ? 220 : 400,
+    color: attacker.ownerId === 1 ? "#fde047" : "#fb923c",
+    radius: isCatapult ? 5 : 3,
+    done: false,
+  });
+}
+
+function enterGame() {
+  state.expectingGame = false;
+  document.getElementById("main-menu")!.style.display = "none";
+  document.getElementById("multi-lobby")!.style.display = "none";
+  document.getElementById("in-game-menu")!.style.display = "none";
+  document.getElementById("game-app")!.style.display = "grid";
+  // Center viewport on own HQ (units may not be synced yet, retry briefly)
+  const tryCenter = (attempts: number) => {
+    const myHQ = state.units.find((u: any) => u.ownerId === 1 && u.type === "hq");
+    if (myHQ) {
+      const sc = document.getElementById("scroll-container");
+      if (sc) {
+        sc.scrollLeft = myHQ.x - sc.clientWidth / 2;
+        sc.scrollTop  = myHQ.y - sc.clientHeight / 2;
+      }
+    } else if (attempts > 0) {
+      setTimeout(() => tryCenter(attempts - 1), 300);
+    }
+  };
+  setTimeout(() => tryCenter(10), 100);
+}
+
+function updateMatchInstance(ctx: any, row: any) {
+  const myPlayer = state.players[1];
+  // Match by host identity (reliable for host) OR by matchId (reliable for joiner)
+  const isHostOfThisMatch = state.identity && row.host?.isEqual?.(state.identity);
+  const isInThisMatch = myPlayer && Number(row.id) === Number(myPlayer.matchId);
+
+  console.log("[matchInstance]", {
+    rowId: Number(row.id),
+    active: row.active,
+    isHostOfThisMatch,
+    isInThisMatch,
+    expectingGame: state.expectingGame,
+    myMatchId: myPlayer ? Number(myPlayer.matchId) : null,
+    identitySet: !!state.identity,
+  });
+
+  if (isHostOfThisMatch || isInThisMatch) {
+     if (!state.config) state.config = {};
+     state.config.lastTick = row.lastTick ?? row.last_tick;
+     if (row.active && state.expectingGame) {
+       enterGame();
+     }
+  }
+}
+
 function updateConfig(ctx: any, row: ConfigRow) {
   state.config = {
     version: row.version,
@@ -273,6 +389,9 @@ function updateConfig(ctx: any, row: ConfigRow) {
     WORLD.h = row.worldHeight;
     canvas.width = WORLD.w;
     canvas.height = WORLD.h;
+    // Don't squish canvas in scroll container
+    canvas.style.minWidth = WORLD.w + "px";
+    canvas.style.minHeight = WORLD.h + "px";
   }
 }
 
@@ -320,7 +439,7 @@ function connectSpacetimeDb() {
   ui.status.textContent = "Status: Connecting to SpacetimeDB...";
 
   try {
-    // 1. Setup connection
+    // 1. Setup connection — build() returns the connection object
     state.conn = DbConnection.builder()
       .withUri(host)
       .withDatabaseName(dbName)
@@ -332,24 +451,44 @@ function connectSpacetimeDb() {
         state.identity = identity;
         ui.status.textContent = "Status: Connected to SpacetimeDB";
         
-        syncSimLoop(); // Check checkbox state and start/stop
-        
         console.log("Connected with identity:", identity);
         console.log("Connection reducers available:", Object.keys(conn.reducers));
+
+        // Auto-start match only for single player; multiplayer users host/join manually
+        const isMulti = (window as any).gameMode === 'multi';
+        if (!isMulti && conn.reducers.startMatch) {
+            state.expectingGame = true;
+            conn.reducers.startMatch({ isMultiplayer: false });
+        }
         
         // 2. Subscribe
         conn.subscriptionBuilder()
           .onApplied(() => {
              ui.status.textContent = "Status: Subscribed & Ready";
+             state.subscriptionReady = true;
              console.log("Subscription applied");
+             // Auto-refresh lobby once data is ready (for the joining client)
+             if ((window as any).gameMode === 'multi' && (window as any).onRefreshLobby) {
+               (window as any).onRefreshLobby();
+             }
           })
-          .subscribe(["SELECT * FROM player", "SELECT * FROM unit", "SELECT * FROM config", "SELECT * FROM waypoint"]);
+          .subscribe([
+              "SELECT * FROM player", 
+              "SELECT * FROM unit", 
+              "SELECT * FROM config", 
+              "SELECT * FROM waypoint", 
+              "SELECT * FROM match_instance",
+              "SELECT * FROM resource_node"
+          ]);
 
       })
       .onDisconnect(() => {
         state.connected = false;
         state.connecting = false;
+        state.subscriptionReady = false;
         state.conn = null;
+        state.projectiles = [];
+        state.gameResult = null;
         if (state.simInterval) { clearInterval(state.simInterval); state.simInterval = null; }
         ui.status.textContent = "Status: Disconnected";
         console.log("Disconnected from SpacetimeDB");
@@ -367,18 +506,28 @@ function connectSpacetimeDb() {
 
     // 3. Register table callbacks on the connection instance
     state.conn.db.player.onInsert(updatePlayer);
-    state.conn.db.player.onUpdate(updatePlayer);
+    state.conn.db.player.onUpdate((ctx: any, _old: any, newRow: any) => updatePlayer(ctx, newRow));
 
     state.conn.db.unit.onInsert(updateUnit);
-    state.conn.db.unit.onUpdate(updateUnit);
+    state.conn.db.unit.onUpdate((ctx: any, oldRow: any, newRow: any) => {
+      updateUnit(ctx, newRow);
+      if (Number(oldRow.hp) > Number(newRow.hp)) spawnProjectile(oldRow, newRow);
+    });
     state.conn.db.unit.onDelete(deleteUnit);
 
     state.conn.db.config.onInsert(updateConfig);
-    state.conn.db.config.onUpdate(updateConfig);
+    state.conn.db.config.onUpdate((ctx: any, _old: any, newRow: any) => updateConfig(ctx, newRow));
 
     state.conn.db.waypoint.onInsert(updateWaypoint);
-    state.conn.db.waypoint.onUpdate(updateWaypoint);
+    state.conn.db.waypoint.onUpdate((ctx: any, _old: any, newRow: any) => updateWaypoint(ctx, newRow));
     state.conn.db.waypoint.onDelete(deleteWaypoint);
+
+    state.conn.db.resource_node.onInsert(updateResourceNode);
+    state.conn.db.resource_node.onUpdate((ctx: any, _old: any, newRow: any) => updateResourceNode(ctx, newRow));
+    state.conn.db.resource_node.onDelete(deleteResourceNode);
+
+    state.conn.db.match_instance.onInsert(updateMatchInstance);
+    state.conn.db.match_instance.onUpdate((ctx: any, _old: any, newRow: any) => updateMatchInstance(ctx, newRow));
 
   } catch (e: any) {
     console.error("Critical Setup Error:", e);
@@ -434,6 +583,24 @@ function selectSingle(x: number, y: number) {
   }
 }
 
+ui.minimapCanvas.addEventListener("mousedown", (e) => {
+  const rect = ui.minimapCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  
+  const sx = WORLD.w / ui.minimapCanvas.width;
+  const sy = WORLD.h / ui.minimapCanvas.height;
+  
+  const targetWorldX = mx * sx;
+  const targetWorldY = my * sy;
+  
+  const scrollContainer = document.getElementById("scroll-container");
+  if (scrollContainer) {
+     scrollContainer.scrollLeft = targetWorldX - scrollContainer.clientWidth / 2;
+     scrollContainer.scrollTop = targetWorldY - scrollContainer.clientHeight / 2;
+  }
+});
+
 // Input Event Listeners
 
 canvas.addEventListener("contextmenu", (e) => {
@@ -453,6 +620,9 @@ canvas.addEventListener("contextmenu", (e) => {
   const shiftHeld = e.shiftKey;
 
   for (const unit of selected) {
+      // HQ cannot be ordered to move
+      if (unit.type === "hq") continue;
+
       if (!shiftHeld) {
           // Optimistic prediction for IMMEDIATE move
           state.predictions.set(unit.id, { targetX: pos.x, targetY: pos.y });
@@ -495,10 +665,11 @@ canvas.addEventListener("mouseup", (e) => {
   state.selectionBox = null;
 });
 
-function getPlayerHQ(internalId: number) {
-  // We don't have buildings sync yet, so simulate HQ position for training spawn
-  if (internalId === 1) return { x: 160, y: 350 };
-  return { x: 1040, y: 350 };
+function getMyHQPos() {
+  const hq = state.units.find((u: any) => u.ownerId === 1 && u.type === "hq");
+  if (hq) return { x: hq.x, y: hq.y };
+  // Fallback: use known start positions based on player slot
+  return state.players[1]?.matchId ? { x: 2700, y: 2700 } : { x: 300, y: 300 };
 }
 
 ui.trainWorker.addEventListener("click", () => {
@@ -508,7 +679,7 @@ ui.trainWorker.addEventListener("click", () => {
     if (state.connected && state.conn) {
         console.log("  Reducers on conn:", Object.keys(state.conn.reducers));
         
-        const hq = getPlayerHQ(1);
+        const hq = getMyHQPos();
         const angle = Math.random() * Math.PI * 2;
         const r = 50;
 
@@ -535,7 +706,7 @@ ui.trainWorker.addEventListener("click", () => {
 ui.trainSoldier.addEventListener("click", () => {
   console.log("[Button] Train Soldier clicked");
   if (state.connected && state.conn) {
-    const hq = getPlayerHQ(1);
+    const hq = getMyHQPos();
     const angle = Math.random() * Math.PI * 2;
     const r = 50;
     
@@ -548,19 +719,16 @@ ui.trainSoldier.addEventListener("click", () => {
 });
 
 ui.buildBarracks.addEventListener("click", () => {
-  console.log("[Button] Build Barracks clicked");
+  console.log("[Button] Build Catapult clicked");
   if (state.connected && state.conn) {
-    const hq = getPlayerHQ(1);
-    // Spawn near HQ for now, later allow placement
+    const hq = getMyHQPos();
     const angle = Math.random() * Math.PI * 2;
     const r = 100;
-    
-    // We assume the reducer name is buildBuilding
     state.conn.reducers.buildBuilding({
-      buildingType: "barracks", 
-      x: hq.x + Math.cos(angle) * r, 
+      buildingType: "catapult",
+      x: hq.x + Math.cos(angle) * r,
       y: hq.y + Math.sin(angle) * r
-    }).catch((err: any) => console.error("Build Barracks failed:", err));
+    }).catch((err: any) => console.error("Build Catapult failed:", err));
   }
 });
 
@@ -606,25 +774,69 @@ function drawMinimap() {
   const sx = mw / WORLD.w;
   const sy = mh / WORLD.h;
   
+  // Draw resource nodes as gold dots
+  for (const node of state.resourceNodes) {
+    minimapCtx.fillStyle = "#fbbf24";
+    minimapCtx.fillRect(node.x * sx - 2, node.y * sy - 2, 4, 4);
+  }
+
   // Draw units as dots
   for (const unit of state.units) {
     const isMe = unit.ownerId === 1;
-    minimapCtx.fillStyle = isMe ? "#4ade80" : "#f87171";
+    minimapCtx.fillStyle = isMe ? "#4ade80" : "#60a5fa";
     const size = unit.type === "hq" || unit.type === "barracks" ? 4 : 2;
     minimapCtx.fillRect(unit.x * sx - size/2, unit.y * sy - size/2, size, size);
   }
+
+  // Start position markers on minimap
+  const startPositions = [{ x: 300, y: 300, color: "#4ade80" }, { x: 2700, y: 2700, color: "#60a5fa" }];
+  for (const sp of startPositions) {
+    minimapCtx.strokeStyle = sp.color;
+    minimapCtx.globalAlpha = 0.6;
+    minimapCtx.lineWidth = 1;
+    minimapCtx.strokeRect(sp.x * sx - 5, sp.y * sy - 5, 10, 10);
+    minimapCtx.globalAlpha = 1.0;
+  }
   
-  // Viewport rect (if we had a camera, draw it here)
-  minimapCtx.strokeStyle = "#ffffff";
-  minimapCtx.lineWidth = 1;
-  minimapCtx.strokeRect(0, 0, mw, mh);
+  // Viewport rect
+  const scrollContainer = document.getElementById("scroll-container");
+  if (scrollContainer) {
+    const vx = scrollContainer.scrollLeft * sx;
+    const vy = scrollContainer.scrollTop * sy;
+    const vw = scrollContainer.clientWidth * sx;
+    const vh = scrollContainer.clientHeight * sy;
+    minimapCtx.strokeStyle = "#ffffff";
+    minimapCtx.lineWidth = 1;
+    minimapCtx.strokeRect(vx, vy, vw, vh);
+  }
 }
 
 function drawWorld() {
   ctx.fillStyle = "#1f2937";
   ctx.fillRect(0, 0, WORLD.w, WORLD.h);
   drawGrid();
-  
+
+  // Start position zone markers
+  const startZones = [
+    { x: 300, y: 300,   color: "rgba(74, 222, 128, 0.08)", border: "rgba(74, 222, 128, 0.4)",  label: "P1 Start" },
+    { x: 2700, y: 2700, color: "rgba(96, 165, 250, 0.08)", border: "rgba(96, 165, 250, 0.4)",  label: "P2 Start" },
+  ];
+  for (const zone of startZones) {
+    ctx.beginPath();
+    ctx.arc(zone.x, zone.y, 160, 0, Math.PI * 2);
+    ctx.fillStyle = zone.color;
+    ctx.fill();
+    ctx.strokeStyle = zone.border;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = zone.border;
+    ctx.font = "bold 18px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(zone.label, zone.x, zone.y - 170);
+  }
+
   drawMinimap(); // Update minimap every frame
   
   // DEBUG: Show current tick
@@ -634,15 +846,43 @@ function drawWorld() {
   ctx.textAlign = "left";
   ctx.fillText("Server Tick: " + currentTick, 10, 20);
 
-  // Draw Units
+  // --- Resource Nodes ---
+  for (const node of state.resourceNodes) {
+    const pct = node.maxAmount > 0 ? node.amount / node.maxAmount : 0;
+    const r = 14;
+    // Glow
+    ctx.shadowColor = "#fbbf24";
+    ctx.shadowBlur = 12;
+    // Hexagon
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      const px = node.x + r * Math.cos(angle);
+      const py = node.y + r * Math.sin(angle);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = `rgba(251, 191, 36, ${0.3 + 0.5 * pct})`;
+    ctx.fill();
+    ctx.strokeStyle = "#fde68a";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // Amount label
+    ctx.fillStyle = "#fef3c7";
+    ctx.font = "bold 10px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(node.amount.toString(), node.x, node.y + 4);
+  }
+
+    // Draw Units
   for (const unit of state.units) {
     const isMe = unit.ownerId === 1;
-    // Basic color from stats or owner
-    let color = isMe ? "#4ade80" : "#f87171"; 
-    
-    // Buildings
-    if (unit.type === "hq") color = isMe ? "#fca5a5" : "#7f1d1d";
-    if (unit.type === "barracks") color = isMe ? "#fcd34d" : "#78350f";
+    let color = isMe ? "#4ade80" : "#60a5fa";
+
+    if (unit.type === "hq")      color = isMe ? "#86efac" : "#93c5fd";
+    if (unit.type === "barracks") color = isMe ? "#fcd34d" : "#818cf8";
+    if (unit.type === "catapult") color = isMe ? "#fcd34d" : "#818cf8";
 
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -655,11 +895,28 @@ function drawWorld() {
     }
 
     if (state.selectedIds.has(unit.id)) {
+      // Selection ring — rect for HQ, arc for others
       ctx.strokeStyle = "#fde047";
       ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(unit.x, unit.y, unit.radius + 4, 0, Math.PI * 2);
-      ctx.stroke();
+      if (unit.type === "hq") {
+        const s = unit.radius * 2 + 8;
+        ctx.strokeRect(unit.x - s / 2, unit.y - s / 2, s, s);
+      } else {
+        ctx.beginPath();
+        ctx.arc(unit.x, unit.y, unit.radius + 4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Draw attack range ring for units that have one
+      if (unit.attackRange > 0) {
+        ctx.beginPath();
+        ctx.arc(unit.x, unit.y, unit.attackRange, 0, Math.PI * 2);
+        ctx.strokeStyle = isMe ? "rgba(253,224,71,0.25)" : "rgba(96,165,250,0.25)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
     
     // Draw Pending Indicator
@@ -754,8 +1011,37 @@ function drawWorld() {
     ctx.setLineDash([]);
     // --- END WAYPOINTS ---
 
-    // Health bar (mocked for now as not in DB)
-    drawHealthBar(unit.x, unit.y - unit.radius - (unit.pending ? 20 : 10), 26, unit.hp, unit.maxHp);
+    // Health bar — position correctly for rect (HQ) vs circle
+    const hpBarY = unit.type === "hq"
+      ? unit.y + unit.radius + 4
+      : unit.y - unit.radius - (unit.pending ? 20 : 10);
+    drawHealthBar(unit.x, hpBarY, unit.type === "hq" ? 60 : 26, unit.hp, unit.maxHp);
+  }
+
+  // --- Projectiles ---
+  for (const proj of state.projectiles) {
+    ctx.beginPath();
+    ctx.arc(proj.x, proj.y, proj.radius, 0, Math.PI * 2);
+    ctx.fillStyle = proj.color;
+    ctx.shadowColor = proj.color;
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // --- Game Result Banner ---
+  if (state.gameResult) {
+    const cx = WORLD.w / 2;
+    const cy = WORLD.h / 2;
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(cx - 260, cy - 70, 520, 140);
+    ctx.font = "bold 72px monospace";
+    ctx.textAlign = "center";
+    ctx.fillStyle = state.gameResult === "VICTORY" ? "#4ade80" : "#f87171";
+    ctx.fillText(state.gameResult, cx, cy + 20);
+    ctx.font = "20px monospace";
+    ctx.fillStyle = "#e2e8f0";
+    ctx.fillText("Destroy the enemy HQ to win", cx, cy + 55);
   }
   
   // Selection Box
@@ -878,6 +1164,18 @@ function loop() {
       }
   }
 
+  // --- Advance projectiles ---
+  for (const proj of state.projectiles) {
+    const dx = proj.tx - proj.x;
+    const dy = proj.ty - proj.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 2) { proj.done = true; continue; }
+    const move = proj.speed * safeDt;
+    if (move >= dist) { proj.x = proj.tx; proj.y = proj.ty; proj.done = true; }
+    else { proj.x += (dx / dist) * move; proj.y += (dy / dist) * move; }
+  }
+  state.projectiles = state.projectiles.filter((p: any) => !p.done);
+
   drawWorld();
   updateUI();
   
@@ -898,6 +1196,14 @@ function loop() {
 // Initialization
 // -----------------------------------------------------------------------------
 
+(window as any).onLeaveGame = () => {
+    if (state.connected && state.conn) {
+        if (state.conn.reducers.leaveMatch) {
+            state.conn.reducers.leaveMatch({});
+        }
+    }
+};
+
 const prefs = loadStdbPrefs();
 // Always default to localhost:3000 for now to fix connection issues
 ui.stdbHost.value = "ws://localhost:3000"; 
@@ -905,46 +1211,20 @@ if (prefs?.dbName) {
   ui.stdbDb.value = prefs.dbName;
 } else {
   // Default suggestion
-  ui.stdbDb.value = "server";
+  ui.stdbDb.value = "main";
 }
 
 console.log("Available reducers:", Object.keys(reducers));
 
 // -----------------------------------------------------------------------------
-// Simulation Control
+// Reset button
 // -----------------------------------------------------------------------------
-
-function syncSimLoop() {
-  if (state.simInterval) clearInterval(state.simInterval);
-  state.simInterval = null;
-  
-  if (ui.autoSim.checked && state.connected && state.conn) {
-    state.simInterval = setInterval(() => {
-      // Must verify connection again inside interval
-      if (state.connected && state.conn) {
-        state.conn.reducers.gameTick({});
-      }
-    }, 100);
-  }
-}
-
-ui.autoSim.addEventListener("change", syncSimLoop);
-
-ui.manualTick.addEventListener("click", () => {
-    if (state.connected && state.conn) {
-        state.conn.reducers.gameTick({});
-    }
-});
 
 ui.resetGame.addEventListener("click", () => {
     if (state.connected && state.conn) {
         if (confirm("Are you sure you want to reset?")) {
-            console.log("Resetting game...", state.conn.reducers);
             if (state.conn.reducers.resetGame) {
                 state.conn.reducers.resetGame({});
-            } else {
-                console.error("resetGame reducer not found on connection object!", state.conn.reducers);
-                alert("Error: resetGame reducer missing inside bindings. Check console.");
             }
         }
     } else {
@@ -952,7 +1232,82 @@ ui.resetGame.addEventListener("click", () => {
     }
 });
 
-requestAnimationFrame(loop);
+// -----------------------------------------------------------------------------
+// Multiplayer Lobby API (called from index.html globals)
+// -----------------------------------------------------------------------------
 
-// Start loop
+(window as any).connectSpacetimeDb = () => {
+    if (!state.connected && !state.connecting) {
+        document.getElementById("stdb-connect")!.click();
+    }
+};
+
+(window as any).onHostMultiMatch = (name: string) => {
+    if (!state.connected || !state.conn) {
+        alert("Not connected yet — please wait a moment and try again.");
+        return;
+    }
+    state.conn.reducers.setName({ name });
+    state.expectingGame = true;
+    state.conn.reducers.startMatch({ isMultiplayer: true });
+    // Stay in lobby view — match is inactive until opponent joins.
+    // Poll every second as a fallback in case onUpdate doesn't fire in time.
+    document.getElementById("lobby-list")!.innerHTML =
+        "<em style='color:#fbbf24'>Waiting for opponent…</em>";
+    const pollId = setInterval(() => {
+        if (!state.expectingGame) { clearInterval(pollId); return; }
+        if (!state.conn) { clearInterval(pollId); return; }
+        const matchTable = (state.conn.db as any).match_instance;
+        if (!matchTable) return;
+        for (const m of matchTable.iter()) {
+            if (m.host?.isEqual?.(state.identity) && m.active) {
+                clearInterval(pollId);
+                enterGame();
+                return;
+            }
+        }
+    }, 500);
+};
+
+(window as any).onRefreshLobby = () => {
+    const list = document.getElementById("lobby-list")!;
+    if (!state.connected || !state.conn) {
+        list.innerHTML = "<em style='color:#666'>Connecting… please wait</em>";
+        return;
+    }
+    if (!state.subscriptionReady) {
+        list.innerHTML = "<em style='color:#666'>Syncing data… please wait</em>";
+        return;
+    }
+    // Call iter() directly on the table object to preserve `this` binding
+    const matchTable = (state.conn.db as any).match_instance;
+    const rows: any[] = matchTable ? [...matchTable.iter()] : [];
+    const open = rows.filter((m: any) => m.isMultiplayer && !m.active);
+    if (open.length === 0) {
+        list.innerHTML = "<em style='color:#666'>No open matches yet</em>";
+        return;
+    }
+    list.innerHTML = open.map((m: any) => {
+        const hostPlayer = Object.values(state.players).find(
+            (p: any) => p.identity?.isEqual?.(m.host)
+        ) as any;
+        const hostName = hostPlayer?.name || "Unknown";
+        const matchId = m.id.toString(); // safe BigInt → string for onclick
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #222;">
+            <span>${hostName}'s match</span>
+            <button onclick="window.joinMultiMatch('${matchId}')" style="padding:4px 10px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;">Join</button>
+        </div>`;
+    }).join("");
+};
+
+(window as any).joinMultiMatch = (matchId: number) => {
+    if (!state.connected || !state.conn) return;
+    const nameEl = document.getElementById("player-name") as HTMLInputElement;
+    const name = nameEl?.value.trim();
+    if (name) state.conn.reducers.setName({ name });
+    state.conn.reducers.joinMatch({ matchId: BigInt(matchId) });
+    // Enter the game immediately — the joiner activates the match
+    enterGame();
+};
+
 requestAnimationFrame(loop);
