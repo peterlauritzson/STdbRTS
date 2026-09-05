@@ -9,11 +9,24 @@ import {
   type AlgebraicTypeType as __AlgebraicTypeType,
   type Infer as __Infer,
 } from "spacetimedb";
+import {
+  Order,
+} from "./types";
+
 
 export default __t.row({
   id: __t.u64().primaryKey(),
-  isMultiplayer: __t.bool().name("is_multiplayer"),
-  active: __t.bool(),
-  host: __t.identity(),
-  lastTick: __t.u64().name("last_tick"),
+  matchId: __t.u64().name("match_id"),
+  issuer: __t.identity(),
+  requestId: __t.string().name("request_id"),
+  owner: __t.u8(),
+  units: __t.array(__t.u32()),
+  get order() {
+    return Order;
+  },
+  queued: __t.bool(),
+  issuedTick: __t.u64().name("issued_tick"),
+  executeTick: __t.u64().name("execute_tick"),
+  status: __t.string(),
+  reason: __t.string(),
 });

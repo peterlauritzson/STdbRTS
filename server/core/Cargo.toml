@@ -1,0 +1,13 @@
+[package]
+name = "rts-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "../src/rules.rs"
+
+[features]
+stdb = ["dep:spacetimedb"]
+
+[dependencies]
+spacetimedb = { version = "2.0", optional = true }

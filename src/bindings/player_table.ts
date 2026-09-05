@@ -14,6 +14,10 @@ export default __t.row({
   identity: __t.identity().primaryKey(),
   matchId: __t.u64().name("match_id"),
   name: __t.string(),
+  slot: __t.u8(),
   resources: __t.u32(),
+  ready: __t.bool(),
   online: __t.bool(),
+  lastOrderTick: __t.u64().name("last_order_tick"),
+  ordersThisTick: __t.u32().name("orders_this_tick"),
 });

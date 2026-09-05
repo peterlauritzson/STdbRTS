@@ -12,7 +12,13 @@ import {
 
 export default __t.row({
   id: __t.u64().primaryKey(),
-  matchId: __t.u64().name("match_id"),
-  winnerIdentity: __t.string().name("winner_identity"),
-  finalTick: __t.u64().name("final_tick"),
+  name: __t.string(),
+  host: __t.identity(),
+  capacity: __t.u8(),
+  state: __t.string(),
+  tick: __t.u64(),
+  commandDelay: __t.u64().name("command_delay"),
+  nextEntityId: __t.u32().name("next_entity_id"),
+  winner: __t.i16(),
+  lastActivityMicros: __t.i64().name("last_activity_micros"),
 });

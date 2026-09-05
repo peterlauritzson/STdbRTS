@@ -1,5 +1,11 @@
 # Multiplayer RTS + SpacetimeDB MVP Plan
 
+> Implementation status (2026-09-05): this document is the original design brief.
+> Current setup, controls, verified features, and limitations are in [README.md](README.md).
+> Architecture and acceptance evidence are in [docs/ENGINEERING.md](docs/ENGINEERING.md).
+> The implemented slice uses HQ production, workers/soldiers, an open map,
+> 20 TPS, and a one-second command delay. Production hardening remains separate.
+
 ## Short answer: does this make sense?
 Yes — this is a strong fit for SpacetimeDB. An RTS needs:
 - authoritative game state,

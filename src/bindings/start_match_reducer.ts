@@ -10,6 +10,4 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export default {
-  isMultiplayer: __t.bool(),
-};
+export default {};

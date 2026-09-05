@@ -10,70 +10,125 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export const Config = __t.object("Config", {
-  version: __t.u32(),
-  worldWidth: __t.u32(),
-  worldHeight: __t.u32(),
-  lastTick: __t.u64(),
-});
-export type Config = __Infer<typeof Config>;
-
-export const FinishedMatch = __t.object("FinishedMatch", {
+export const Command = __t.object("Command", {
   id: __t.u64(),
   matchId: __t.u64(),
-  winnerIdentity: __t.string(),
-  finalTick: __t.u64(),
+  issuer: __t.identity(),
+  requestId: __t.string(),
+  owner: __t.u8(),
+  units: __t.array(__t.u32()),
+  get order() {
+    return Order;
+  },
+  queued: __t.bool(),
+  issuedTick: __t.u64(),
+  executeTick: __t.u64(),
+  status: __t.string(),
+  reason: __t.string(),
 });
-export type FinishedMatch = __Infer<typeof FinishedMatch>;
+export type Command = __Infer<typeof Command>;
 
-export const GameTickSchedule = __t.object("GameTickSchedule", {
-  scheduledId: __t.u64(),
-  scheduledAt: __t.scheduleAt(),
+export const Connection = __t.object("Connection", {
+  id: __t.connectionId(),
+  identity: __t.identity(),
 });
-export type GameTickSchedule = __Infer<typeof GameTickSchedule>;
+export type Connection = __Infer<typeof Connection>;
 
-export const MatchInstance = __t.object("MatchInstance", {
-  id: __t.u64(),
-  isMultiplayer: __t.bool(),
-  active: __t.bool(),
-  host: __t.identity(),
-  lastTick: __t.u64(),
+export const Entity = __t.object("Entity", {
+  id: __t.u32(),
+  owner: __t.u8(),
+  kind: __t.string(),
+  x: __t.f32(),
+  y: __t.f32(),
+  hp: __t.i32(),
+  get order() {
+    return Order;
+  },
+  get queue() {
+    return __t.array(Order);
+  },
+  cargo: __t.u32(),
+  returning: __t.bool(),
+  nextAttack: __t.u64(),
+  shotTick: __t.u64(),
+  shotX: __t.f32(),
+  shotY: __t.f32(),
+  get production() {
+    return __t.array(Production);
+  },
 });
-export type MatchInstance = __Infer<typeof MatchInstance>;
+export type Entity = __Infer<typeof Entity>;
+
+export const Node = __t.object("Node", {
+  id: __t.u32(),
+  x: __t.f32(),
+  y: __t.f32(),
+  amount: __t.u32(),
+});
+export type Node = __Infer<typeof Node>;
+
+export const Order = __t.object("Order", {
+  kind: __t.string(),
+  x: __t.f32(),
+  y: __t.f32(),
+  target: __t.u32(),
+});
+export type Order = __Infer<typeof Order>;
 
 export const Player = __t.object("Player", {
   identity: __t.identity(),
   matchId: __t.u64(),
   name: __t.string(),
+  slot: __t.u8(),
   resources: __t.u32(),
+  ready: __t.bool(),
   online: __t.bool(),
+  lastOrderTick: __t.u64(),
+  ordersThisTick: __t.u32(),
 });
 export type Player = __Infer<typeof Player>;
+
+export const Production = __t.object("Production", {
+  kind: __t.string(),
+  finishTick: __t.u64(),
+});
+export type Production = __Infer<typeof Production>;
+
+export const ResourceNode = __t.object("ResourceNode", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  get data() {
+    return Node;
+  },
+});
+export type ResourceNode = __Infer<typeof ResourceNode>;
+
+export const Room = __t.object("Room", {
+  id: __t.u64(),
+  name: __t.string(),
+  host: __t.identity(),
+  capacity: __t.u8(),
+  state: __t.string(),
+  tick: __t.u64(),
+  commandDelay: __t.u64(),
+  nextEntityId: __t.u32(),
+  winner: __t.i16(),
+  lastActivityMicros: __t.i64(),
+});
+export type Room = __Infer<typeof Room>;
+
+export const TickSchedule = __t.object("TickSchedule", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type TickSchedule = __Infer<typeof TickSchedule>;
 
 export const Unit = __t.object("Unit", {
   id: __t.u64(),
   matchId: __t.u64(),
-  owner: __t.identity(),
-  unitType: __t.string(),
-  x: __t.f32(),
-  y: __t.f32(),
-  targetX: __t.f32(),
-  targetY: __t.f32(),
-  speed: __t.f32(),
-  moving: __t.bool(),
-  hp: __t.i32(),
-  pendingTargetX: __t.f32(),
-  pendingTargetY: __t.f32(),
-  pendingStartTick: __t.u64(),
+  get data() {
+    return Entity;
+  },
 });
 export type Unit = __Infer<typeof Unit>;
-
-export const Waypoint = __t.object("Waypoint", {
-  id: __t.u64(),
-  unitId: __t.u64(),
-  x: __t.f32(),
-  y: __t.f32(),
-  order: __t.u32(),
-});
-export type Waypoint = __Infer<typeof Waypoint>;
 

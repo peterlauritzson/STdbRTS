@@ -3,145 +3,67 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>STdbRTS - Quick MVP</title>
-  <link rel="stylesheet" href="styles.css" />
+  <meta name="theme-color" content="#182421" />
+  <title>Spacetime RTS</title>
 </head>
 <body>
-  <!-- Main Menu Overlay -->
-  <div id="main-menu" class="main-menu">
-    <div class="menu-content">
-      <h1 class="game-title">Spacetime RTS</h1>
-      <button class="menu-btn" onclick="startGame('single')">Single Player</button>
-      <button class="menu-btn" onclick="showMultiLobby()">Multiplayer</button>
-      <button class="menu-btn" onclick="alert('Options coming soon')">Options</button>
-      <button class="menu-btn" onclick="alert('Exit game disabled in web')">Exit game</button>
-    </div>
-  </div>
+  <header class="masthead">
+    <a class="brand" href="/" aria-label="Spacetime RTS"><i data-lucide="crosshair"></i><span>SPACETIME <b>RTS</b></span></a>
+    <div class="connection-status"><span id="connection-dot"></span><span id="status" role="status">Connecting</span></div>
+    <details id="connection-settings">
+      <summary>Connection</summary>
+      <form id="connection-form" class="connection-form">
+        <label>Server<input id="host" type="url" required value="ws://127.0.0.1:3000" /></label>
+        <label>Database<input id="database" required value="stdbrts-v2-dev" pattern="[a-z0-9-]+" /></label>
+        <button type="submit"><i data-lucide="radio"></i>Reconnect</button>
+      </form>
+    </details>
+  </header>
 
-  <!-- Multiplayer Lobby Overlay -->
-  <div id="multi-lobby" class="main-menu" style="display: none;">
-    <div class="menu-content" style="min-width: 380px;">
-      <h2 class="game-title" style="font-size: 1.6rem;">Multiplayer</h2>
-      <div style="margin-bottom: 1rem;">
-        <label style="display:block; margin-bottom: 4px; color: #aaa; font-size: 0.85rem;">Your Name</label>
-        <input id="player-name" type="text" placeholder="Enter your name" maxlength="20"
-          style="width: 100%; box-sizing: border-box; padding: 8px; background: #1a1a2e; border: 1px solid #444; color: white; border-radius: 4px; font-size: 1rem;" />
-      </div>
-      <div style="display: flex; gap: 8px; margin-bottom: 1rem;">
-        <button class="menu-btn" style="flex: 1; margin: 0;" onclick="hostMultiMatch()">Host Match</button>
-        <button class="menu-btn" style="flex: 1; margin: 0; background: #374151;" onclick="refreshLobby()">Refresh</button>
-      </div>
-      <div style="border-top: 1px solid #333; padding-top: 0.75rem; margin-bottom: 0.75rem;">
-        <h4 style="margin: 0 0 0.5rem 0; color: #aaa; font-size: 0.85rem; text-transform: uppercase;">Open Matches</h4>
-        <div id="lobby-list" style="min-height: 80px; max-height: 240px; overflow-y: auto; color: #888; font-size: 0.9rem;">
-          — connect first, then refresh —
+  <main id="lobby" class="lobby">
+    <div class="lobby-heading"><div><p class="eyebrow">OPERATIONS / 07</p><h1>Command Room</h1></div><span class="map-label">VERDANT BASIN</span></div>
+    <div class="lobby-layout">
+      <aside class="lobby-sidebar">
+        <form id="name-form"><label>Callsign<input id="callsign" maxlength="24" required value="Commander" autocomplete="nickname" /></label><button id="save-name" type="submit">Set Callsign</button></form>
+        <form id="create-form">
+          <h2>New Operation</h2>
+          <label>Room Name<input id="room-name" maxlength="24" required value="Basin skirmish" /></label>
+          <label>Player Limit<select id="capacity"><option value="2">2 players</option><option value="3">3 players</option><option value="4">4 players</option></select></label>
+          <button id="create-room" type="submit" class="primary"><i data-lucide="plus"></i>Create Room</button>
+        </form>
+        <dl class="map-facts"><div><dt>Battlefield</dt><dd>1600 x 1600</dd></div><div><dt>Command Delay</dt><dd>1.0 seconds</dd></div><div><dt>Unit Capacity</dt><dd>60 / player</dd></div></dl>
+      </aside>
+      <section class="operations">
+        <div id="room-browser"><div class="section-heading"><h2>Open Operations</h2><span id="room-count" class="mono">00</span></div><div id="room-list" class="room-list"></div></div>
+        <div id="waiting-room" hidden>
+          <div class="section-heading"><h2 id="waiting-name">Room</h2><span id="room-code" class="mono"></span></div>
+          <div id="roster" class="roster"></div>
+          <div class="room-actions"><label class="ready-control"><input type="checkbox" id="ready" />Ready</label><button id="start-match" class="primary"><i data-lucide="play"></i>Deploy</button><button id="leave-lobby"><i data-lucide="log-out"></i>Leave Room</button></div>
+          <p id="waiting-status" class="muted" role="status"></p>
         </div>
-      </div>
-      <button class="menu-btn" style="background: #374151; margin: 0;" onclick="document.getElementById('multi-lobby').style.display='none'; document.getElementById('main-menu').style.display='flex';">Back</button>
+        <div class="map-diagram" aria-hidden="true"><div class="contour contour-one"></div><div class="contour contour-two"></div><div class="contour contour-three"></div><span class="coordinate north">N / 1600</span><span class="coordinate south">VERDANT BASIN / 07</span><i class="map-base base-one"></i><i class="map-base base-two"></i><i class="map-base base-three"></i><i class="map-base base-four"></i></div>
+      </section>
     </div>
-  </div>
+  </main>
 
-  <!-- In-game Menu Overlay -->
-  <div id="in-game-menu" class="main-menu" style="display: none;">
-    <div class="menu-content">
-      <h2 class="game-title">Paused</h2>
-      <button class="menu-btn" onclick="document.getElementById('in-game-menu').style.display = 'none'">Resume</button>
-      <button class="menu-btn" onclick="leaveGame()">Main Menu</button>
-      <button class="menu-btn" onclick="alert('Exit game disabled in web')">Exit Game</button>
-    </div>
-  </div>
-
-  <div class="app" id="game-app" style="display: none;">
-    <aside class="hud">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h1 style="margin: 0;">Spacetime RTS</h1>
-        <button onclick="document.getElementById('in-game-menu').style.display = 'flex'" style="padding: 4px 8px; font-size: 0.8rem;">Menu</button>
-      </div>
-      
-      <div id="minimap-container" style="margin-bottom: 1rem;">
-          <canvas id="minimap" width="200" height="120" style="background:#111; border:1px solid #444; width:100%; display:block;"></canvas>
-      </div>
-
-      <div class="stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 1rem;">
-        <div class="stat-item">Resource: <span id="resources" style="color: #fbbf24; font-weight: bold;">0</span></div>
-        <div class="stat-item">Selected: <span id="selected-count">0</span></div>
-        <div class="stat-item">HQ HP: <span id="hq-hp">0</span></div>
-        <div class="stat-item">Enemy: <span id="enemy-hq-hp">0</span></div>
-      </div>
-
-      <div class="panel" style="margin-bottom: 1rem;">
-        <h3 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; text-transform: uppercase; color: #aaa;">Actions</h3>
-        <div class="action-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;">
-           <button id="train-worker" class="btn-action" title="Train Worker (50)">Worker</button>
-           <button id="train-soldier" class="btn-action" title="Train Soldier (100)">Soldier</button>
-           <button id="build-barracks" class="btn-action" title="Build Catapult (200)">Catapult</button>
-           <!-- Placeholders -->
-           <button class="btn-action" disabled>&nbsp;</button>
-           <button class="btn-action" disabled>&nbsp;</button>
-           <button class="btn-action" disabled>&nbsp;</button>
-        </div>
-      </div>
-
-      <div class="controls net-controls">
-        <h3 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; text-transform: uppercase; color: #aaa;">Connection</h3>
-        <input id="stdb-host" type="text" value="ws://localhost:3000" placeholder="Host" style="width: 100%; margin-bottom: 4px; box-sizing: border-box;" />
-        <input id="stdb-db" type="text" value="main" placeholder="Database" style="width: 100%; margin-bottom: 4px; box-sizing: border-box;" />
-        <div id="status" class="status" style="font-size: 0.8rem; margin-bottom: 4px; color: #888;">Disconnected</div>
-        <button id="stdb-connect" style="width: 100%;">Connect</button>
-      </div>
-      
-      <div class="controls debug-controls" style="border-top: 1px solid #333; margin-top: 1rem; padding-top: 0.5rem">
-        <h4 style="margin: 0 0 0.5rem 0;">Dev Tools</h4>
-        <button id="reset-game" style="background: #991b1b; color: white; width: 100%; margin-bottom: 5px;">Reset Game</button>
-      </div>
-
-      <p class="muted small" style="margin-top: auto;">Shift+Click to queue waypoints.</p>
-    </aside>
-
-    <main class="game-wrap" id="game-wrap">
-      <div id="scroll-container" class="scroll-container">
-        <canvas id="game" width="3000" height="3000"></canvas>
-      </div>
-    </main>
-  </div>
-
-  <script>
-    function startGame(mode) {
-      document.getElementById('main-menu').style.display = 'none';
-      document.getElementById('multi-lobby').style.display = 'none';
-      document.getElementById('game-app').style.display = 'grid';
-      window.gameMode = mode;
-      document.getElementById('stdb-host').value = 'ws://localhost:3000';
-      document.getElementById('stdb-db').value = 'main';
-      setTimeout(() => document.getElementById('stdb-connect').click(), 200);
-    }
-
-    function showMultiLobby() {
-      document.getElementById('main-menu').style.display = 'none';
-      document.getElementById('multi-lobby').style.display = 'flex';
-      window.gameMode = 'multi';
-      // Connect in background if not already connected
-      document.getElementById('stdb-host').value = 'ws://localhost:3000';
-      document.getElementById('stdb-db').value = 'main';
-      if (window.connectSpacetimeDb) window.connectSpacetimeDb();
-    }
-
-    function hostMultiMatch() {
-      const name = document.getElementById('player-name').value.trim();
-      if (!name) { alert('Please enter your name first.'); return; }
-      if (window.onHostMultiMatch) window.onHostMultiMatch(name);
-    }
-
-    function refreshLobby() {
-      if (window.onRefreshLobby) window.onRefreshLobby();
-    }
-
-    function leaveGame() {
-      // Disconnect and leave server match room
-      if (window.onLeaveGame) window.onLeaveGame();
-      setTimeout(() => location.reload(), 300);
-    }
-  </script>
+  <main id="match" class="match" hidden>
+    <div class="match-bar"><div class="operation-name"><span class="live-tag">OPERATION</span><strong id="match-name"></strong></div><div class="match-metrics"><span>ORE <b id="resources">250</b></span><span>UNITS <b id="unit-count">0 / 60</b></span><span id="match-clock" class="mono">00:00</span></div><button id="leave-match" class="icon-button danger" title="Surrender and leave" aria-label="Surrender and leave"><i data-lucide="log-out"></i></button></div>
+    <section class="battlefield-wrap">
+      <canvas id="battlefield" tabindex="0" aria-label="Battlefield"></canvas>
+      <div id="result" class="result" hidden><span id="result-title"></span></div>
+      <div id="battle-players" class="battle-players"></div>
+      <div class="camera-tools"><button id="camera-home" class="icon-button" title="Center on HQ" aria-label="Center on HQ"><i data-lucide="house"></i></button><button id="camera-fit" class="icon-button" title="Show whole map" aria-label="Show whole map"><i data-lucide="maximize-2"></i></button><button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button><button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button></div>
+      <div class="input-modes" role="group" aria-label="Pointer mode"><label title="Select units"><input type="radio" name="mode" value="select" checked /><i data-lucide="mouse-pointer-2"></i><span>Select</span></label><label title="Issue order"><input type="radio" name="mode" value="order" /><i data-lucide="crosshair"></i><span>Order</span></label><label title="Pan camera"><input type="radio" name="mode" value="pan" /><i data-lucide="move"></i><span>Pan</span></label></div>
+    </section>
+    <footer class="command-deck">
+      <div class="minimap-section"><canvas id="minimap" width="200" height="200" aria-label="Minimap"></canvas></div>
+      <section class="selection-section"><p class="eyebrow">SELECTION</p><h2 id="selection-title">No selection</h2><p id="selection-details" class="mono muted"></p><div class="tool-row"><button id="stop" class="icon-button" title="Stop selected units" aria-label="Stop selected units"><i data-lucide="square"></i></button><button id="return" class="icon-button" title="Return cargo" aria-label="Return cargo"><i data-lucide="corner-down-left"></i></button><button id="select-army" class="icon-button" title="Select army" aria-label="Select army"><i data-lucide="swords"></i></button></div></section>
+      <section class="production-section"><p class="eyebrow">HQ PRODUCTION</p><div class="production-buttons"><button id="train-worker"><i data-lucide="hammer"></i><span>Worker<small>50 ore / 3s</small></span></button><button id="train-soldier"><i data-lucide="swords"></i><span>Soldier<small>100 ore / 5s</small></span></button></div><div id="production-queue" class="production-queue mono"></div></section>
+      <section class="orders-section"><div class="section-heading"><p class="eyebrow">COMMANDS</p><span id="pending-count" class="mono">0</span></div><div id="command-list" class="command-list mono"></div><div id="telemetry" class="telemetry mono"></div></section>
+    </footer>
+  </main>
+  <div id="notice" class="notice" role="alert" hidden></div>
+  <dialog id="leave-dialog"><form method="dialog"><h2>Surrender this operation?</h2><p>Your remaining forces will be removed.</p><div class="room-actions"><button value="cancel">Cancel</button><button value="leave" class="danger">Surrender</button></div></form></dialog>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

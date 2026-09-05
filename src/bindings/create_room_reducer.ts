@@ -11,7 +11,6 @@ import {
 } from "spacetimedb";
 
 export default {
-  unitType: __t.string(),
-  x: __t.f32(),
-  y: __t.f32(),
+  name: __t.string(),
+  capacity: __t.u8(),
 };

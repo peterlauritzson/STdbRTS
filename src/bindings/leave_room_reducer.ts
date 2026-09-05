@@ -10,6 +10,4 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export default {
-  args: __t.unit(),
-};
+export default {};

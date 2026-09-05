@@ -9,12 +9,15 @@ import {
   type AlgebraicTypeType as __AlgebraicTypeType,
   type Infer as __Infer,
 } from "spacetimedb";
+import {
+  Node,
+} from "./types";
+
 
 export default __t.row({
   id: __t.u64().primaryKey(),
   matchId: __t.u64().name("match_id"),
-  x: __t.f32(),
-  y: __t.f32(),
-  amount: __t.u32(),
-  maxAmount: __t.u32().name("max_amount"),
+  get data() {
+    return Node;
+  },
 });

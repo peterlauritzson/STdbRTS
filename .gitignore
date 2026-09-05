@@ -1,5 +1,11 @@
 # Ignore all target files under server
 server/target/
+server/core/target/
+dist/
+test-results/
+.spacetime-dev/
+playwright-report/
+.env.local
 
 # Ignore all node modules
 node_modules/

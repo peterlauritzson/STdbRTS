@@ -10,9 +10,6 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export default __t.row({
-  version: __t.u32().primaryKey(),
-  worldWidth: __t.u32().name("world_width"),
-  worldHeight: __t.u32().name("world_height"),
-  lastTick: __t.u64().name("last_tick"),
-});
+export default {
+  ready: __t.bool(),
+};

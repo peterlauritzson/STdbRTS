@@ -10,10 +10,12 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export default __t.row({
-  id: __t.u64().primaryKey(),
-  unitId: __t.u64().name("unit_id"),
+export default {
+  requestId: __t.string(),
+  units: __t.array(__t.u32()),
+  kind: __t.string(),
   x: __t.f32(),
   y: __t.f32(),
-  order: __t.u32(),
-});
+  target: __t.u32(),
+  queued: __t.bool(),
+};

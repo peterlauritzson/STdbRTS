@@ -9,20 +9,15 @@ import {
   type AlgebraicTypeType as __AlgebraicTypeType,
   type Infer as __Infer,
 } from "spacetimedb";
+import {
+  Entity,
+} from "./types";
+
 
 export default __t.row({
   id: __t.u64().primaryKey(),
   matchId: __t.u64().name("match_id"),
-  owner: __t.identity(),
-  unitType: __t.string().name("unit_type"),
-  x: __t.f32(),
-  y: __t.f32(),
-  targetX: __t.f32().name("target_x"),
-  targetY: __t.f32().name("target_y"),
-  speed: __t.f32(),
-  moving: __t.bool(),
-  hp: __t.i32(),
-  pendingTargetX: __t.f32().name("pending_target_x"),
-  pendingTargetY: __t.f32().name("pending_target_y"),
-  pendingStartTick: __t.u64().name("pending_start_tick"),
+  get data() {
+    return Entity;
+  },
 });

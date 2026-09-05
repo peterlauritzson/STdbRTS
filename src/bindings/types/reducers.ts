@@ -6,19 +6,19 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
-import BuildBuildingReducer from "../build_building_reducer";
-import JoinMatchReducer from "../join_match_reducer";
-import MoveUnitReducer from "../move_unit_reducer";
-import ResetGameReducer from "../reset_game_reducer";
+import CreateRoomReducer from "../create_room_reducer";
+import IssueOrderReducer from "../issue_order_reducer";
+import JoinRoomReducer from "../join_room_reducer";
+import LeaveRoomReducer from "../leave_room_reducer";
 import SetNameReducer from "../set_name_reducer";
+import SetReadyReducer from "../set_ready_reducer";
 import StartMatchReducer from "../start_match_reducer";
-import TrainUnitReducer from "../train_unit_reducer";
 
-export type BuildBuildingParams = __Infer<typeof BuildBuildingReducer>;
-export type JoinMatchParams = __Infer<typeof JoinMatchReducer>;
-export type MoveUnitParams = __Infer<typeof MoveUnitReducer>;
-export type ResetGameParams = __Infer<typeof ResetGameReducer>;
+export type CreateRoomParams = __Infer<typeof CreateRoomReducer>;
+export type IssueOrderParams = __Infer<typeof IssueOrderReducer>;
+export type JoinRoomParams = __Infer<typeof JoinRoomReducer>;
+export type LeaveRoomParams = __Infer<typeof LeaveRoomReducer>;
 export type SetNameParams = __Infer<typeof SetNameReducer>;
+export type SetReadyParams = __Infer<typeof SetReadyReducer>;
 export type StartMatchParams = __Infer<typeof StartMatchReducer>;
-export type TrainUnitParams = __Infer<typeof TrainUnitReducer>;
 
