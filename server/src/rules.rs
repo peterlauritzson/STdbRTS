@@ -1,3 +1,4 @@
+pub mod navigation;
 pub mod simulation;
 
 pub const TICKS_PER_SECOND: u64 = 20;
@@ -5,6 +6,40 @@ pub const COMMAND_DELAY: u64 = 20;
 pub const WORLD_SIZE: f32 = 1600.0;
 pub const MAX_UNITS: usize = 60;
 pub const MAX_QUEUE: usize = 8;
+pub const MAX_BUILDINGS: usize = 16;
+
+pub fn is_building(kind: &str) -> bool {
+    matches!(
+        kind,
+        "hq" | "barracks" | "factory" | "turret" | "outpost" | "lab"
+    )
+}
+
+pub fn is_army(kind: &str) -> bool {
+    matches!(kind, "soldier" | "scout" | "siege")
+}
+
+pub fn producer(kind: &str, building: &str) -> bool {
+    matches!(
+        (kind, building),
+        ("worker", "hq")
+            | ("soldier", "hq" | "barracks")
+            | ("scout", "barracks")
+            | ("siege", "factory")
+    )
+}
+
+pub fn attack_damage(kind: &str, target: &str, damage: i32) -> i32 {
+    if kind == "siege" && is_building(target) {
+        damage * 3
+    } else if kind == "siege" && target == "scout" {
+        damage / 2
+    } else if kind == "soldier" && target == "scout" {
+        damage * 2
+    } else {
+        damage
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stats {
@@ -19,6 +54,51 @@ pub struct Stats {
 
 pub fn stats(kind: &str) -> Option<Stats> {
     match kind {
+        "research_weapons" | "research_armor" | "research_logistics" => Some(Stats {
+            hp: 0,
+            speed: 0.0,
+            range: 0.0,
+            damage: 0,
+            cooldown: 0,
+            cost: 150,
+            training_ticks: 300,
+        }),
+        "barracks" | "factory" | "turret" | "outpost" | "lab" => {
+            let (hp, cost, training_ticks) = match kind {
+                "barracks" => (700, 150, 160),
+                "factory" => (900, 250, 240),
+                "turret" => (500, 125, 140),
+                "outpost" => (650, 100, 120),
+                _ => (650, 200, 200),
+            };
+            Some(Stats {
+                hp,
+                speed: 0.0,
+                range: if kind == "turret" { 210.0 } else { 0.0 },
+                damage: if kind == "turret" { 16 } else { 0 },
+                cooldown: 18,
+                cost,
+                training_ticks,
+            })
+        }
+        "scout" => Some(Stats {
+            hp: 80,
+            speed: 180.0,
+            range: 85.0,
+            damage: 10,
+            cooldown: 10,
+            cost: 80,
+            training_ticks: 70,
+        }),
+        "siege" => Some(Stats {
+            hp: 220,
+            speed: 65.0,
+            range: 260.0,
+            damage: 32,
+            cooldown: 50,
+            cost: 200,
+            training_ticks: 160,
+        }),
         "hq" => Some(Stats {
             hp: 1200,
             speed: 0.0,
@@ -111,6 +191,20 @@ mod tests {
         assert!(stats("catapult").is_none());
         assert!(stats("anything").is_none());
         assert_eq!(stats("worker").unwrap().cost, 50);
+    }
+
+    #[test]
+    fn roster_has_distinct_roles_and_production_requirements() {
+        assert!(stats("scout").unwrap().speed > stats("soldier").unwrap().speed);
+        assert!(stats("siege").unwrap().range > stats("turret").unwrap().range);
+        assert_eq!(attack_damage("siege", "hq", 32), 96);
+        assert_eq!(attack_damage("soldier", "scout", 18), 36);
+        assert!(producer("siege", "factory"));
+        assert!(!producer("siege", "hq"));
+        for kind in ["barracks", "factory", "turret", "outpost", "lab"] {
+            assert!(is_building(kind));
+            assert!(stats(kind).unwrap().cost > 0);
+        }
     }
 
     #[test]

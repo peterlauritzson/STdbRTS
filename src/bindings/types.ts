@@ -56,6 +56,8 @@ export const Entity = __t.object("Entity", {
   get production() {
     return __t.array(Production);
   },
+  constructionRemaining: __t.u64(),
+  research: __t.array(__t.string()),
 });
 export type Entity = __Infer<typeof Entity>;
 

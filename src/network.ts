@@ -19,6 +19,7 @@ export interface PendingOrder {
 }
 
 export class Session {
+  constructor(private identityScope = "identity") {}
   connection: DbConnection | undefined;
   status = "Disconnected";
   ready = false;
@@ -50,7 +51,7 @@ export class Session {
     this.snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [] };
     this.status = "Connecting";
     this.onChange();
-    const key = `stdbrts:v2:identity:${host}:${database}`;
+    const key = `stdbrts:v2:${this.identityScope}:${host}:${database}`;
     const lost = (message: string) => {
       if (epoch !== this.epoch) return;
       this.ready = false;
@@ -159,6 +160,16 @@ export class Session {
       commands: [...connection.db.command.iter()].filter(row => row.matchId === nextMatch),
     };
     this.onChange();
+  }
+
+  disconnect(): void {
+    this.epoch++;
+    clearTimeout(this.retry);
+    this.ready = false;
+    this.matchReady = false;
+    const connection = this.connection;
+    this.connection = undefined;
+    connection?.disconnect();
   }
 
   async act(action: (connection: DbConnection) => Promise<void>): Promise<boolean> {

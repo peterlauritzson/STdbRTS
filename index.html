@@ -14,7 +14,7 @@
       <summary>Connection</summary>
       <form id="connection-form" class="connection-form">
         <label>Server<input id="host" type="url" required value="ws://127.0.0.1:3000" /></label>
-        <label>Database<input id="database" required value="stdbrts-v2-dev" pattern="[a-z0-9-]+" /></label>
+        <label>Database<input id="database" required value="stdbrts-playtest" pattern="[a-z0-9-]+" /></label>
         <button type="submit"><i data-lucide="radio"></i>Reconnect</button>
       </form>
     </details>
@@ -31,6 +31,7 @@
           <label>Player Limit<select id="capacity"><option value="2">2 players</option><option value="3">3 players</option><option value="4">4 players</option></select></label>
           <button id="create-room" type="submit" class="primary"><i data-lucide="plus"></i>Create Room</button>
         </form>
+        <button id="practice" class="primary"><i data-lucide="bot"></i>Practice vs AI</button>
         <dl class="map-facts"><div><dt>Battlefield</dt><dd>1600 x 1600</dd></div><div><dt>Command Delay</dt><dd>1.0 seconds</dd></div><div><dt>Unit Capacity</dt><dd>60 / player</dd></div></dl>
       </aside>
       <section class="operations">
@@ -50,15 +51,33 @@
     <div class="match-bar"><div class="operation-name"><span class="live-tag">OPERATION</span><strong id="match-name"></strong></div><div class="match-metrics"><span>ORE <b id="resources">250</b></span><span>UNITS <b id="unit-count">0 / 60</b></span><span id="match-clock" class="mono">00:00</span></div><button id="leave-match" class="icon-button danger" title="Surrender and leave" aria-label="Surrender and leave"><i data-lucide="log-out"></i></button></div>
     <section class="battlefield-wrap">
       <canvas id="battlefield" tabindex="0" aria-label="Battlefield"></canvas>
-      <div id="result" class="result" hidden><span id="result-title"></span></div>
+      <div id="targeting-state" class="targeting-state mono" role="status" hidden></div>
+      <div id="result" class="result" hidden><span id="result-title"></span><button id="return-lobby"><i data-lucide="log-out"></i>Return to lobby</button></div>
       <div id="battle-players" class="battle-players"></div>
-      <div class="camera-tools"><button id="camera-home" class="icon-button" title="Center on HQ" aria-label="Center on HQ"><i data-lucide="house"></i></button><button id="camera-fit" class="icon-button" title="Show whole map" aria-label="Show whole map"><i data-lucide="maximize-2"></i></button><button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button><button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button></div>
+      <div class="camera-tools"><button id="sound" class="icon-button" title="Sound on" aria-label="Sound" aria-pressed="true"><i data-lucide="volume-2"></i></button><button id="camera-home" class="icon-button" title="Center on HQ" aria-label="Center on HQ"><i data-lucide="house"></i></button><button id="camera-fit" class="icon-button" title="Show whole map" aria-label="Show whole map"><i data-lucide="maximize-2"></i></button><button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button><button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button></div>
       <div class="input-modes" role="group" aria-label="Pointer mode"><label title="Select units"><input type="radio" name="mode" value="select" checked /><i data-lucide="mouse-pointer-2"></i><span>Select</span></label><label title="Issue order"><input type="radio" name="mode" value="order" /><i data-lucide="crosshair"></i><span>Order</span></label><label title="Pan camera"><input type="radio" name="mode" value="pan" /><i data-lucide="move"></i><span>Pan</span></label></div>
     </section>
     <footer class="command-deck">
       <div class="minimap-section"><canvas id="minimap" width="200" height="200" aria-label="Minimap"></canvas></div>
-      <section class="selection-section"><p class="eyebrow">SELECTION</p><h2 id="selection-title">No selection</h2><p id="selection-details" class="mono muted"></p><div class="tool-row"><button id="stop" class="icon-button" title="Stop selected units" aria-label="Stop selected units"><i data-lucide="square"></i></button><button id="return" class="icon-button" title="Return cargo" aria-label="Return cargo"><i data-lucide="corner-down-left"></i></button><button id="select-army" class="icon-button" title="Select army" aria-label="Select army"><i data-lucide="swords"></i></button></div></section>
-      <section class="production-section"><p class="eyebrow">HQ PRODUCTION</p><div class="production-buttons"><button id="train-worker"><i data-lucide="hammer"></i><span>Worker<small>50 ore / 3s</small></span></button><button id="train-soldier"><i data-lucide="swords"></i><span>Soldier<small>100 ore / 5s</small></span></button></div><div id="production-queue" class="production-queue mono"></div></section>
+      <section class="selection-section"><p class="eyebrow">SELECTION</p><h2 id="selection-title">No selection</h2><p id="selection-details" class="mono muted"></p><p id="selection-order" class="mono muted"></p><div class="tool-row">
+        <button id="stop" class="icon-button" title="Stop selected units" aria-label="Stop selected units"><i data-lucide="square"></i></button>
+        <button id="attack-move" class="icon-button" title="Attack-move" aria-label="Attack-move" aria-pressed="false"><i data-lucide="crosshair"></i></button>
+        <button id="hold" class="icon-button" title="Hold position" aria-label="Hold position"><i data-lucide="shield"></i></button>
+        <button id="repair" class="icon-button" title="Repair / 1 ore per 5 HP" aria-label="Repair" aria-pressed="false"><i data-lucide="wrench"></i></button>
+        <button id="return" class="icon-button" title="Return cargo" aria-label="Return cargo"><i data-lucide="corner-down-left"></i></button>
+        <button id="select-army" class="icon-button" title="Select army" aria-label="Select army"><i data-lucide="swords"></i></button>
+        <button id="idle-worker" class="icon-button" title="Select idle worker" aria-label="Select idle worker"><i data-lucide="hard-hat"></i></button>
+        <button id="cancel-construction" class="icon-button danger" title="Cancel construction / 75% refund" aria-label="Cancel construction"><i data-lucide="trash-2"></i></button>
+      </div></section>
+      <section class="production-section">
+        <div class="industry-tabs" role="tablist" aria-label="Base controls"><button role="tab" id="tab-production" aria-controls="production-pane" aria-selected="true">Production</button><button role="tab" id="tab-build" aria-controls="build-pane" aria-selected="false">Build</button><button role="tab" id="tab-research" aria-controls="research-pane" aria-selected="false">Research</button></div>
+        <div id="production-pane" role="tabpanel" aria-labelledby="tab-production"><select id="producer-select" aria-label="Production building"></select>
+        <div id="training-buttons" class="production-buttons"></div>
+        <div class="production-controls"><button id="set-rally" class="icon-button" title="Set rally destination" aria-label="Set rally destination" aria-pressed="false"><i data-lucide="flag"></i></button><button id="clear-rally" class="icon-button" title="Clear rally" aria-label="Clear rally"><i data-lucide="flag-off"></i></button><button id="cancel-production" class="icon-button danger" title="Cancel all unfinished production" aria-label="Cancel all unfinished production"><i data-lucide="x"></i></button><span id="rally-status" class="mono muted">Rally unset</span></div>
+        <div id="production-queue" class="production-queue mono"></div></div>
+        <div id="build-pane" role="tabpanel" aria-labelledby="tab-build" hidden><div id="building-buttons" class="production-buttons"></div><p id="building-count" class="mono muted"></p></div>
+        <div id="research-pane" role="tabpanel" aria-labelledby="tab-research" hidden><div id="research-buttons" class="production-buttons"></div><p id="research-status" class="mono muted"></p></div>
+      </section>
       <section class="orders-section"><div class="section-heading"><p class="eyebrow">COMMANDS</p><span id="pending-count" class="mono">0</span></div><div id="command-list" class="command-list mono"></div><div id="telemetry" class="telemetry mono"></div></section>
     </footer>
   </main>

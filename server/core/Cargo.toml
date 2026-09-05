@@ -10,4 +10,6 @@ path = "../src/rules.rs"
 stdb = ["dep:spacetimedb"]
 
 [dependencies]
+pathfinding = "4.15.0"
+serde_json = "1.0.151"
 spacetimedb = { version = "2.0", optional = true }

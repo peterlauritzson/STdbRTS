@@ -1,7 +1,7 @@
 import { DbConnection, tables } from "../src/bindings";
 
 export const HOST = process.env.STDB_HOST ?? "ws://127.0.0.1:3000";
-export const DATABASE = process.env.STDB_DATABASE ?? "stdbrts-v2-dev";
+export const DATABASE = process.env.STDB_DATABASE ?? "stdbrts-playtest";
 
 export async function until(predicate: () => boolean, message: string, timeout = 10000): Promise<void> {
   const started = Date.now();

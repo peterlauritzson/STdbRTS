@@ -1,11 +1,7 @@
 export const WORLD_SIZE = 1600;
 export const TICK_MS = 50;
 export const COLORS = ["#66dfba", "#ed7c8b", "#edce6d", "#86bafa"];
-export const VISUALS: Record<string, { hp: number; radius: number; label: string }> = {
-  hq: { hp: 1200, radius: 34, label: "Headquarters" },
-  worker: { hp: 60, radius: 10, label: "Worker" },
-  soldier: { hp: 140, radius: 12, label: "Soldier" },
-};
+export { CATALOG as VISUALS } from "./catalog";
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));

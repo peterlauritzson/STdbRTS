@@ -13,6 +13,70 @@ async function canvasColors(page: Page): Promise<number> {
   });
 }
 
+async function worldClick(page: Page, x: number, y: number): Promise<void> {
+  await page.getByRole("button", { name: "Show whole map", exact: true }).click();
+  const bounds = await page.locator("#battlefield").boundingBox();
+  const scale = Math.min(bounds!.width, bounds!.height) / 1600 * 0.97;
+  await page.locator("#battlefield").click({ position: { x: bounds!.width / 2 + (x - 800) * scale, y: bounds!.height / 2 + (y - 800) * scale } });
+}
+
+test("one-click practice, construction, scouts and persistent base management", async ({ page }, testInfo) => {
+  test.setTimeout(120000);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto(`/?database=${process.env.STDB_DATABASE ?? "stdbrts-playtest"}`);
+  await expect(page.locator("#status")).toHaveText("Connected");
+  await page.getByRole("button", { name: "Practice vs AI", exact: true }).click();
+  await expect(page.locator("#match")).toBeVisible({ timeout: 20000 });
+  await expect(page.locator("#battle-players")).toContainText("Automaton");
+  await page.getByRole("tab", { name: "Build", exact: true }).click();
+  await page.getByRole("button", { name: "Barracks 150 ore / 8s", exact: true }).click();
+  await expect(page.locator("#targeting-state")).toHaveText("Place Barracks");
+  await worldClick(page, 1160, 1380);
+  await expect(page.locator("#command-list")).toContainText("build barracks");
+  await expect(page.locator("#producer-select option").filter({ hasText: "Barracks" })).toHaveCount(1, { timeout: 25000 });
+  await page.getByRole("tab", { name: "Production", exact: true }).click();
+  const barracks = await page.locator("#producer-select option").filter({ hasText: "Barracks" }).getAttribute("value");
+  await page.getByLabel("Production building", { exact: true }).selectOption(barracks!);
+  await expect(page.locator("#selection-title")).toHaveText("Barracks");
+  await page.getByRole("button", { name: "Scout 80 ore / 3.5s", exact: true }).click();
+  await expect(page.locator("#unit-count")).toHaveText("4 / 60", { timeout: 15000 });
+  await page.getByRole("button", { name: "Set rally destination", exact: true }).click();
+  await worldClick(page, 1240, 1240);
+  await expect(page.locator("#rally-status")).toContainText("Ore rally");
+  await page.getByRole("tab", { name: "Build", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Outpost 100 ore / 6s", exact: true })).toBeEnabled({ timeout: 30000 });
+  await page.getByRole("button", { name: "Outpost 100 ore / 6s", exact: true }).click();
+  await worldClick(page, 1380, 1160);
+  await expect(page.locator("#building-count")).toHaveText("3 / 16 structures");
+  await worldClick(page, 1380, 1160);
+  await expect(page.locator("#selection-title")).toHaveText("Outpost");
+  await page.getByRole("button", { name: "Cancel construction", exact: true }).click();
+  await expect(page.locator("#building-count")).toHaveText("2 / 16 structures");
+  await page.getByRole("button", { name: "Center on HQ", exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath("desktop-base.png"), fullPage: true });
+  await page.reload();
+  await expect(page.locator("#match")).toBeVisible();
+  await expect(page.locator("#producer-select option").filter({ hasText: "Barracks" })).toHaveCount(1);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Center on HQ", exact: true }).click();
+  await page.getByRole("tab", { name: "Build", exact: true }).click();
+  await noOverflow(page);
+  await expect.poll(() => canvasColors(page)).toBeGreaterThan(20);
+  await page.screenshot({ path: testInfo.outputPath("mobile-base.png"), fullPage: true });
+  await page.setViewportSize({ width: 320, height: 740 });
+  await noOverflow(page);
+  await page.getByRole("tab", { name: "Research", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Weapons 150 ore / 15s", exact: true })).toBeDisabled();
+  await noOverflow(page);
+  await page.getByRole("button", { name: "Surrender and leave", exact: true }).click();
+  await page.getByRole("button", { name: "Surrender", exact: true }).click();
+  await expect(page.locator("#lobby")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("stdbrts:practice:")).length)).toBe(0);
+  expect(errors).toEqual([]);
+});
+
 test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
   const desktop = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -21,7 +85,7 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
   const errors: string[] = [];
   host.on("pageerror", error => errors.push(error.message));
   peer.on("pageerror", error => errors.push(error.message));
-  const database = process.env.STDB_DATABASE ?? "stdbrts-v2-dev";
+  const database = process.env.STDB_DATABASE ?? "stdbrts-playtest";
   const roomName = `Browser ${Date.now()}`;
   try {
     await host.goto(`/?database=${database}`);
@@ -56,13 +120,38 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     await peer.setViewportSize({ width: 320, height: 740 });
     await noOverflow(peer);
     await peer.setViewportSize({ width: 390, height: 844 });
+    await host.getByRole("button", { name: "Set rally destination", exact: true }).click();
+    await expect(host.locator("#targeting-state")).toHaveText("Rally target");
+    await host.locator("#battlefield").click({ position: { x: 450, y: 350 } });
+    await expect(host.locator("#rally-status")).toContainText("Rally ");
+    await expect(host.getByRole("button", { name: "Clear rally", exact: true })).toBeEnabled();
     await host.getByRole("button", { name: "Worker 50 ore / 3s" }).click();
     await expect(host.locator("#command-list")).toContainText("train worker");
     await expect(host.locator("#resources")).toHaveText("200");
     await expect(host.locator("#unit-count")).toHaveText("4 / 60");
+    await host.getByRole("button", { name: "Soldier 100 ore / 5s" }).click();
+    await expect(host.locator("#resources")).toHaveText("100");
+    await host.getByRole("button", { name: "Cancel all unfinished production", exact: true }).click();
+    await expect(host.locator("#resources")).toHaveText("200");
+    await expect(host.locator("#production-queue")).toBeEmpty();
+    await expect(host.getByRole("button", { name: "Clear rally", exact: true })).toBeEnabled();
+    await host.getByRole("button", { name: "Clear rally", exact: true }).click();
+    await expect(host.locator("#rally-status")).toHaveText("Rally unset");
     await host.getByRole("button", { name: "Select army", exact: true }).click();
     await expect(host.locator("#selection-title")).toHaveText("Soldier");
+    await expect(host.getByRole("button", { name: "Repair", exact: true })).toBeDisabled();
     const canvas = host.locator("#battlefield");
+    await host.getByRole("button", { name: "Attack-move", exact: true }).click();
+    await expect(host.locator("#targeting-state")).toHaveText("Attack-move target");
+    await canvas.click({ position: { x: 650, y: 350 } });
+    await expect(host.locator("#selection-order")).toHaveText("attack move");
+    await host.getByRole("button", { name: "Hold position", exact: true }).click();
+    await expect(host.locator("#selection-order")).toHaveText("hold");
+    await host.keyboard.press("a");
+    await expect(host.locator("#targeting-state")).toBeVisible();
+    await host.keyboard.press("Escape");
+    await expect(host.locator("#targeting-state")).toBeHidden();
+    await expect(host.locator("#selection-title")).toHaveText("Soldier");
     const before = await canvas.screenshot();
     await canvas.click({ position: { x: 520, y: 280 }, button: "right" });
     await expect(host.locator("#command-list")).toContainText("move / 1");
@@ -76,6 +165,13 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     await expect(host.locator("#resources")).toHaveText("200");
     await expect(host.locator("#unit-count")).toHaveText("4 / 60");
     await peer.getByRole("button", { name: "Select army", exact: true }).click();
+    await peer.getByRole("button", { name: "Attack-move", exact: true }).tap();
+    await peer.locator("#battlefield").scrollIntoViewIfNeeded();
+    const attackBounds = await peer.locator("#battlefield").boundingBox();
+    await peer.touchscreen.tap(attackBounds!.x + attackBounds!.width / 2, attackBounds!.y + attackBounds!.height / 2);
+    await expect(peer.locator("#selection-order")).toHaveText("attack move");
+    await peer.getByRole("button", { name: "Hold position", exact: true }).tap();
+    await expect(peer.locator("#selection-order")).toHaveText("hold");
     await peer.getByRole("radio", { name: "Order", exact: true }).check();
     await peer.locator("#battlefield").scrollIntoViewIfNeeded();
     const bounds = await peer.locator("#battlefield").boundingBox();

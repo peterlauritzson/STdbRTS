@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "generate": "spacetime generate --lang typescript --out-dir src/bindings --module-path server --yes",
     "server:start": "spacetime start --listen-addr 127.0.0.1:3000 --data-dir .spacetime-dev --non-interactive",
-    "server:publish": "spacetime publish --server http://127.0.0.1:3000 --module-path server --delete-data=never --yes stdbrts-v2-dev",
+    "server:publish": "spacetime publish --server http://127.0.0.1:3000 --module-path server --delete-data=never --yes stdbrts-playtest",
     "test": "npm run test:core && npm run test:client",
     "test:core": "cargo test --manifest-path server/core/Cargo.toml",
     "test:client": "node --import tsx --test tests/presentation.test.ts",

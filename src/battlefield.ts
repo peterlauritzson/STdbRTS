@@ -1,14 +1,18 @@
 import type { Entity, Order } from "./bindings/types";
 import { Session } from "./network";
 import { clamp, COLORS, countdown, VISUALS, WORLD_SIZE } from "./presentation";
+import { isArmy, isBuilding, placementError, terrain } from "./catalog";
 
 interface Point { x: number; y: number }
 interface Motion { from: Point; to: Point; at: number }
 type InputMode = "select" | "order" | "pan";
+type TargetMode = "attack_move" | "repair" | "rally" | `build_${string}`;
 
 export class Battlefield {
   selected = new Set<number>();
   mode: InputMode = "select";
+  targeting: TargetMode | undefined;
+  private pointer: Point | undefined;
   onSelection: () => void = () => {};
   private context: CanvasRenderingContext2D;
   private miniContext: CanvasRenderingContext2D;
@@ -33,6 +37,11 @@ export class Battlefield {
     canvas.addEventListener("pointermove", event => this.pointerMove(event));
     canvas.addEventListener("pointerup", event => this.pointerUp(event));
     canvas.addEventListener("pointercancel", () => { this.drag = undefined; });
+    canvas.addEventListener("dblclick", event => {
+      const point = this.world(this.local(event));
+      const hit = this.session.snapshot.units.find(unit => unit.owner === this.session.snapshot.me?.slot && Math.hypot(unit.x - point.x, unit.y - point.y) < VISUALS[unit.kind].radius + 8);
+      if (hit) { this.selected = new Set(this.session.snapshot.units.filter(unit => unit.owner === hit.owner && unit.kind === hit.kind).map(unit => unit.id)); this.onSelection(); }
+    });
     canvas.addEventListener("wheel", event => {
       event.preventDefault();
       const point = this.local(event);
@@ -56,7 +65,15 @@ export class Battlefield {
       if (event.repeat) return;
       if (event.key.toLowerCase() === "h") this.home();
       if (event.key.toLowerCase() === "s") this.issue("stop");
-      if (event.key === "Escape") { this.selected.clear(); this.onSelection(); }
+      if (event.key.toLowerCase() === "a") this.arm("attack_move");
+      if (event.key.toLowerCase() === "r") this.arm("repair");
+      if (event.key.toLowerCase() === "d") this.issue("hold");
+      if (event.key === ".") this.selectIdleWorker();
+      if (event.key === "Escape") {
+        if (this.targeting) this.targeting = undefined;
+        else this.selected.clear();
+        this.onSelection();
+      }
       if (/^[1-5]$/.test(event.key)) {
         event.preventDefault();
         if (event.ctrlKey) this.groups.set(event.key, new Set(this.selected));
@@ -73,6 +90,7 @@ export class Battlefield {
     if ((room?.id ?? 0n) !== this.roomId) {
       this.roomId = room?.id ?? 0n;
       this.selected.clear();
+      this.targeting = undefined;
       this.groups.clear();
       this.motions.clear();
     }
@@ -94,13 +112,19 @@ export class Battlefield {
   }
 
   selectArmy(): void {
-    this.selected = new Set(this.session.snapshot.units.filter(unit => unit.owner === this.session.snapshot.me?.slot && unit.kind === "soldier").map(unit => unit.id));
+    this.selected = new Set(this.session.snapshot.units.filter(unit => unit.owner === this.session.snapshot.me?.slot && isArmy(unit.kind)).map(unit => unit.id));
     this.onSelection();
+  }
+
+  selectIdleWorker(): void {
+    const workers = this.session.snapshot.units.filter(unit => unit.owner === this.session.snapshot.me?.slot && unit.kind === "worker" && unit.order.kind === "stop");
+    const worker = workers.find(unit => !this.selected.has(unit.id)) ?? workers[0];
+    if (worker) { this.selected = new Set([worker.id]); this.camera.x = worker.x; this.camera.y = worker.y; this.boundCamera(); this.onSelection(); }
   }
 
   home(): void {
     const hq = this.session.snapshot.units.find(unit => unit.owner === this.session.snapshot.me?.slot && unit.kind === "hq");
-    if (hq) { this.camera.x = hq.x; this.camera.y = hq.y; this.boundCamera(); }
+    if (hq) { this.camera.zoom = Math.max(this.camera.zoom, 0.8); this.camera.x = hq.x; this.camera.y = hq.y; this.boundCamera(); }
   }
 
   fit(): void {
@@ -109,9 +133,21 @@ export class Battlefield {
 
   zoom(amount: number): void { this.camera.zoom = clamp(this.camera.zoom * amount, 0.18, 2.2); this.boundCamera(); }
 
-  issue(kind: "stop" | "return"): void {
-    const units = this.ownedSelection().filter(unit => kind === "return" ? unit.kind === "worker" : unit.kind !== "hq");
+  arm(kind: TargetMode): void {
+    const allowed = kind === "rally"
+      ? this.session.snapshot.units.some(unit => unit.kind === "hq" && unit.owner === this.session.snapshot.me?.slot)
+      : kind.startsWith("build_") ? this.session.snapshot.units.some(unit => unit.owner === this.session.snapshot.me?.slot && unit.kind === "worker")
+      : this.ownedSelection().some(unit => kind === "repair" ? unit.kind === "worker" : isArmy(unit.kind));
+    if (!allowed) return;
+    this.targeting = this.targeting === kind ? undefined : kind;
+    this.onSelection();
+  }
+
+  issue(kind: "stop" | "return" | "hold"): void {
+    this.targeting = undefined;
+    const units = this.ownedSelection().filter(unit => kind === "return" ? unit.kind === "worker" : kind === "hold" ? isArmy(unit.kind) : !isBuilding(unit.kind));
     if (units.length) void this.session.order(units.map(unit => unit.id), { kind, x: 0, y: 0, target: 0 });
+    this.onSelection();
   }
 
   private pruneSelection(): void {
@@ -154,12 +190,13 @@ export class Battlefield {
     if (!this.session.matchReady) return;
     this.canvas.focus();
     const point = this.local(event);
-    if (event.button === 2 || (event.button === 0 && this.mode === "order")) { this.contextOrder(this.world(point), event.shiftKey); return; }
+    if (event.button === 2 || (event.button === 0 && (this.mode === "order" || this.targeting))) { this.contextOrder(this.world(point), event.shiftKey); return; }
     this.canvas.setPointerCapture(event.pointerId);
     this.drag = { start: point, end: point, pan: event.button === 1 || this.keys.has(" ") || this.mode === "pan", pointer: event.pointerId };
   }
 
   private pointerMove(event: PointerEvent): void {
+    this.pointer = this.world(this.local(event));
     if (!this.drag || this.drag.pointer !== event.pointerId) return;
     const point = this.local(event);
     if (this.drag.pan) {
@@ -187,7 +224,7 @@ export class Battlefield {
       }
     } else {
       for (const unit of units) {
-        if (unit.owner === this.session.snapshot.me?.slot && unit.kind !== "hq" && unit.x >= Math.min(start.x, end.x) && unit.x <= Math.max(start.x, end.x) && unit.y >= Math.min(start.y, end.y) && unit.y <= Math.max(start.y, end.y)) this.selected.add(unit.id);
+        if (unit.owner === this.session.snapshot.me?.slot && !isBuilding(unit.kind) && unit.x >= Math.min(start.x, end.x) && unit.x <= Math.max(start.x, end.x) && unit.y >= Math.min(start.y, end.y) && unit.y <= Math.max(start.y, end.y)) this.selected.add(unit.id);
       }
     }
     this.onSelection();
@@ -195,17 +232,48 @@ export class Battlefield {
 
   private contextOrder(point: Point, queued: boolean): void {
     const { units, nodes, me } = this.session.snapshot;
-    let selected = this.ownedSelection().filter(unit => unit.kind !== "hq");
+    const node = nodes.find(node => node.amount > 0 && Math.hypot(point.x - node.x, point.y - node.y) < 35);
+    const owned = this.ownedSelection();
+    if (this.targeting?.startsWith("build_") && me) {
+      const kind = this.targeting.slice(6);
+      const error = placementError(kind, point.x, point.y, me.slot, units, nodes);
+      if (error) { this.session.onNotice(error); return; }
+      const worker = owned.find(unit => unit.kind === "worker") ?? units.filter(unit => unit.owner === me.slot && unit.kind === "worker").sort((left, right) => Number(left.order.kind === "construct") - Number(right.order.kind === "construct") || Math.hypot(left.x - point.x, left.y - point.y) - Math.hypot(right.x - point.x, right.y - point.y))[0];
+      if (worker) {
+        void this.session.order([worker.id], { kind: this.targeting, x: point.x, y: point.y, target: 0 });
+        this.targeting = undefined; this.selected = new Set([worker.id]); this.onSelection();
+      }
+      return;
+    }
+    const headquarters = owned.find(unit => ["hq", "barracks", "factory", "lab"].includes(unit.kind)) ?? units.find(unit => unit.kind === "hq" && unit.owner === me?.slot);
+    if (headquarters && (this.targeting === "rally" || (!this.targeting && owned.length === 1 && ["hq", "barracks", "factory"].includes(owned[0].kind)))) {
+      void this.session.order([headquarters.id], { kind: node ? "rally_gather" : "rally_move", x: clamp(point.x, 16, 1584), y: clamp(point.y, 16, 1584), target: node?.id ?? 0 });
+      this.targeting = undefined;
+      this.onSelection();
+      return;
+    }
+    let selected = this.ownedSelection().filter(unit => !isBuilding(unit.kind));
     if (!selected.length) return;
     const enemy = units.find(unit => unit.owner !== me?.slot && Math.hypot(point.x - unit.x, point.y - unit.y) < (VISUALS[unit.kind]?.radius ?? 12) + 8);
-    const node = nodes.find(node => node.amount > 0 && Math.hypot(point.x - node.x, point.y - node.y) < 35);
-    const hq = units.find(unit => unit.owner === me?.slot && unit.kind === "hq" && Math.hypot(point.x - unit.x, point.y - unit.y) < 40);
+    const friendly = units.find(unit => unit.owner === me?.slot && Math.hypot(point.x - unit.x, point.y - unit.y) < (VISUALS[unit.kind]?.radius ?? 12) + 8);
+    const hq = units.find(unit => unit.owner === me?.slot && ["hq", "outpost"].includes(unit.kind) && unit.constructionRemaining === 0n && Math.hypot(point.x - unit.x, point.y - unit.y) < 40);
     const order: Order = { kind: "move", x: clamp(point.x, 16, 1584), y: clamp(point.y, 16, 1584), target: 0 };
-    if (enemy) { order.kind = "attack"; order.target = enemy.id; selected = selected.filter(unit => unit.kind === "soldier"); }
+    if (this.targeting === "attack_move") { order.kind = "attack_move"; selected = selected.filter(unit => isArmy(unit.kind)); }
+    else if (this.targeting === "repair") {
+      if (!friendly || friendly.hp >= VISUALS[friendly.kind].hp) { this.session.onNotice("Choose a damaged friendly unit or HQ"); return; }
+      order.kind = friendly.constructionRemaining > 0n ? "construct" : "repair"; order.target = friendly.id; selected = selected.filter(unit => unit.kind === "worker" && unit.id !== friendly.id);
+    }
+    else if (enemy) { order.kind = "attack"; order.target = enemy.id; selected = selected.filter(unit => isArmy(unit.kind)); }
+    else if (friendly && friendly.constructionRemaining > 0n) { order.kind = "construct"; order.target = friendly.id; selected = selected.filter(unit => unit.kind === "worker"); }
     else if (node) { order.kind = "gather"; order.target = node.id; selected = selected.filter(unit => unit.kind === "worker"); }
     else if (hq) { order.kind = "return"; selected = selected.filter(unit => unit.kind === "worker"); }
-    if (selected.length) void this.session.order(selected.map(unit => unit.id), order, queued);
-    else this.session.onNotice(enemy ? "Select soldiers to attack" : "Select workers to gather or return cargo");
+    else if (friendly && friendly.hp < VISUALS[friendly.kind].hp) { order.kind = "repair"; order.target = friendly.id; selected = selected.filter(unit => unit.kind === "worker" && unit.id !== friendly.id); }
+    if (selected.length) {
+      void this.session.order(selected.map(unit => unit.id), order, queued);
+      this.targeting = undefined;
+      this.onSelection();
+    }
+    else this.session.onNotice(enemy ? "Select army units to attack" : "Select workers for this order");
   }
 
   private paintTerrain(): void {
@@ -239,6 +307,15 @@ export class Battlefield {
     context.beginPath(); context.moveTo(800, 700); context.lineTo(900, 800); context.lineTo(800, 900); context.lineTo(700, 800); context.closePath(); context.stroke();
     context.font = "18px 'IBM Plex Mono'"; context.textAlign = "center"; context.fillStyle = "#a8b8a877";
     context.fillText("BASIN / 07", 800, 807);
+    for (const [x, y, width, height] of terrain) {
+      context.fillStyle = "#122b2c"; context.fillRect(x + 8, y + 10, width, height);
+      context.fillStyle = "#748480"; context.fillRect(x, y, width, height);
+      context.fillStyle = "#98aaa1"; context.fillRect(x + 3, y + 3, width - 6, 7);
+      context.strokeStyle = "#485a59"; context.lineWidth = 3;
+      for (let offset = 20; offset < width; offset += 32) { context.beginPath(); context.moveTo(x + offset, y + 8); context.lineTo(x + offset - 7, y + height - 5); context.stroke(); }
+      context.fillStyle = "#c1c9ab";
+      for (let offset = 12; offset < width; offset += 24) context.fillRect(x + offset, y - 2, 7, 3);
+    }
   }
 
   private frame(now: number): void {
@@ -281,13 +358,14 @@ export class Battlefield {
       context.font = "11px 'IBM Plex Mono'"; context.textAlign = "center"; context.fillStyle = "#f3e8bd"; context.fillText(String(node.amount), 0, 42); context.restore();
     }
     for (const unit of units) {
-      if (this.selected.has(unit.id)) {
+      if (this.selected.has(unit.id) || (unit.kind === "hq" && unit.owner === this.session.snapshot.me?.slot)) {
         let point: Point = this.position(unit, now);
         for (const order of [unit.order, ...unit.queue]) {
           const target = this.orderTarget(order);
           if (!target) continue;
           context.strokeStyle = "#c4ddd17f"; context.lineWidth = 1.5 / this.camera.zoom; context.setLineDash([5, 5]);
           context.beginPath(); context.moveTo(point.x, point.y); context.lineTo(target.x, target.y); context.stroke(); context.setLineDash([]);
+          if (order.kind.startsWith("rally_")) this.marker(target, COLORS[unit.owner], "RALLY");
           point = target;
         }
       }
@@ -301,6 +379,16 @@ export class Battlefield {
       if (target) this.marker(target, "#ffffff", "...");
     }
     for (const unit of [...units].sort((left, right) => left.y - right.y)) this.drawUnit(unit, now);
+    if (this.targeting?.startsWith("build_") && this.pointer && this.session.snapshot.me) {
+      const kind = this.targeting.slice(6);
+      const error = placementError(kind, this.pointer.x, this.pointer.y, this.session.snapshot.me.slot, units, nodes);
+      context.fillStyle = error ? "#ed7c8b55" : "#66dfba55";
+      context.strokeStyle = error ? "#ed7c8b" : "#66dfba"; context.lineWidth = 2;
+      context.fillRect(this.pointer.x - 35, this.pointer.y - 35, 70, 70); context.strokeRect(this.pointer.x - 35, this.pointer.y - 35, 70, 70);
+      if (kind === "turret") { context.beginPath(); context.arc(this.pointer.x, this.pointer.y, 210, 0, Math.PI * 2); context.stroke(); }
+      context.fillStyle = "#efffea"; context.textAlign = "center"; context.font = "13px 'IBM Plex Mono'";
+      context.fillText(error ?? VISUALS[kind].label, this.pointer.x, this.pointer.y - 48);
+    }
     context.restore();
     if (this.drag && !this.drag.pan) {
       context.strokeStyle = "#b3f7dc"; context.fillStyle = "#9cedd321"; context.lineWidth = 1;
@@ -310,9 +398,10 @@ export class Battlefield {
   }
 
   private orderTarget(order: Order): Point | undefined {
-    if (order.kind === "move") return order;
-    if (order.kind === "gather") return this.session.snapshot.nodes.find(node => node.id === order.target);
-    if (order.kind === "attack") return this.session.snapshot.units.find(unit => unit.id === order.target);
+    if (order.kind.startsWith("build_")) return order;
+    if (["move", "attack_move", "rally_move"].includes(order.kind)) return order;
+    if (["gather", "rally_gather"].includes(order.kind)) return this.session.snapshot.nodes.find(node => node.id === order.target);
+    if (["attack", "repair", "construct"].includes(order.kind)) return this.session.snapshot.units.find(unit => unit.id === order.target);
     return undefined;
   }
 
@@ -330,6 +419,7 @@ export class Battlefield {
     const radius = VISUALS[unit.kind]?.radius ?? 12;
     const color = COLORS[unit.owner];
     context.save(); context.translate(point.x, point.y);
+    if (unit.constructionRemaining > 0n) context.globalAlpha = 0.6;
     context.fillStyle = "#101c1980"; context.beginPath(); context.ellipse(3, radius * 0.6, radius * 1.2, radius * 0.55, 0, 0, Math.PI * 2); context.fill();
     if (this.selected.has(unit.id)) {
       context.strokeStyle = "#efffea"; context.lineWidth = 2 / this.camera.zoom;
@@ -343,10 +433,41 @@ export class Battlefield {
       context.fillStyle = "#b9cec1"; context.beginPath(); context.moveTo(0, -32); context.lineTo(26, -12); context.lineTo(26, 11); context.lineTo(0, 23); context.lineTo(-26, 11); context.lineTo(-26, -12); context.closePath(); context.fill(); context.stroke();
       context.fillStyle = color; context.fillRect(-10, -9, 20, 20);
       context.strokeStyle = "#d7eee1"; context.beginPath(); context.moveTo(0, -32); context.lineTo(0, -49); context.stroke();
+    } else if (isBuilding(unit.kind)) {
+      context.fillStyle = "#243832"; context.fillRect(-34, -29, 68, 58);
+      context.fillStyle = "#91a49b"; context.fillRect(-29, -24, 58, 43);
+      context.fillStyle = color; context.fillRect(-29, 20, 58, 7);
+      context.strokeStyle = "#243832"; context.lineWidth = 4;
+      if (unit.kind === "turret") {
+        context.fillStyle = color; context.beginPath(); context.arc(0, 0, 19, 0, Math.PI * 2); context.fill(); context.stroke();
+        context.rotate(Math.atan2(unit.shotY - unit.y, unit.shotX - unit.x));
+        context.fillStyle = "#d7e2d4"; context.fillRect(0, -6, 38, 12); context.strokeRect(0, -6, 38, 12);
+        context.rotate(-Math.atan2(unit.shotY - unit.y, unit.shotX - unit.x));
+      } else if (unit.kind === "lab") {
+        context.fillStyle = "#b5e4e5"; context.beginPath(); context.arc(0, -2, 21, Math.PI, 0); context.fill(); context.stroke();
+        context.fillStyle = "#294547"; context.fillRect(-21, -2, 42, 13);
+      } else if (unit.kind === "factory") {
+        context.fillStyle = "#364747"; context.fillRect(-20, -18, 38, 30);
+        context.fillStyle = "#d4b967"; context.fillRect(-15, 0, 28, 6);
+        context.fillStyle = "#e0e6d5"; context.fillRect(18, -40, 10, 31);
+      } else if (unit.kind === "outpost") {
+        context.fillStyle = "#dac16b"; context.fillRect(-18, -13, 15, 22); context.fillRect(3, -13, 15, 22);
+        context.strokeRect(-18, -13, 36, 22);
+      } else {
+        context.fillStyle = "#334941"; context.fillRect(-20, -14, 14, 25); context.fillRect(6, -14, 14, 25);
+        context.fillStyle = color; context.fillRect(-17, -10, 8, 8); context.fillRect(9, -10, 8, 8);
+      }
     } else if (unit.kind === "worker") {
       context.beginPath(); context.moveTo(0, -12); context.lineTo(11, 5); context.lineTo(5, 11); context.lineTo(-9, 8); context.lineTo(-11, -3); context.closePath(); context.fill(); context.stroke();
       context.fillStyle = "#e7eddf"; context.fillRect(-4, -4, 8, 6);
-      if (unit.cargo) { context.fillStyle = "#f3d570"; context.fillRect(-7, 11, 14 * unit.cargo / 25, 4); }
+      if (unit.cargo) { context.fillStyle = "#f3d570"; context.fillRect(-7, 11, 14 * Math.min(unit.cargo / 25, 1), 4); }
+    } else if (unit.kind === "scout") {
+      context.beginPath(); context.moveTo(0, -18); context.lineTo(10, 12); context.lineTo(0, 6); context.lineTo(-10, 12); context.closePath(); context.fill(); context.stroke();
+      context.fillStyle = "#e9eee0"; context.fillRect(-3, -6, 6, 9);
+    } else if (unit.kind === "siege") {
+      context.fillStyle = "#132622"; context.fillRect(-20, -16, 10, 32); context.fillRect(10, -16, 10, 32);
+      context.fillStyle = color; context.fillRect(-13, -13, 26, 27); context.strokeRect(-13, -13, 26, 27);
+      context.fillStyle = "#e9e2bf"; context.fillRect(-5, -24, 10, 28); context.strokeRect(-5, -24, 10, 28);
     } else {
       context.beginPath(); context.moveTo(0, -14); context.lineTo(12, -5); context.lineTo(9, 11); context.lineTo(-9, 11); context.lineTo(-12, -5); context.closePath(); context.fill(); context.stroke();
       context.fillStyle = "#e8ece1"; context.fillRect(-5, -6, 10, 5); context.fillStyle = "#172a26"; context.fillRect(7, -13, 5, 15);
@@ -354,8 +475,22 @@ export class Battlefield {
     context.fillStyle = "#12201f"; context.fillRect(-radius, -radius - 15, radius * 2, 4);
     context.fillStyle = unit.hp / (VISUALS[unit.kind]?.hp ?? 1) > 0.3 ? color : "#ff8178";
     context.fillRect(-radius, -radius - 15, radius * 2 * clamp(unit.hp / (VISUALS[unit.kind]?.hp ?? 1), 0, 1), 4);
+    if (isBuilding(unit.kind)) {
+      context.globalAlpha = 1; context.fillStyle = "#edf3dc"; context.font = "10px 'IBM Plex Mono'"; context.textAlign = "center";
+      context.fillText(VISUALS[unit.kind].label, 0, radius + 17);
+      if (unit.constructionRemaining > 0n) {
+        context.fillStyle = "#ebce70"; context.fillRect(-32, radius + 22, 64 * (1 - Number(unit.constructionRemaining) / (VISUALS[unit.kind].seconds * 20)), 4);
+      }
+    }
     context.restore();
     const tick = this.session.snapshot.room?.tick ?? 0n;
+    if (["repair", "construct"].includes(unit.order.kind)) {
+      const target = this.orderTarget(unit.order);
+      if (target && Math.hypot(target.x - unit.x, target.y - unit.y) <= 61) {
+        context.strokeStyle = "#b9f29a"; context.lineWidth = 1.5;
+        context.setLineDash([3, 4]); context.beginPath(); context.moveTo(point.x, point.y); context.lineTo(target.x, target.y); context.stroke(); context.setLineDash([]);
+      }
+    }
     if (unit.shotTick > 0n && tick - unit.shotTick < 3n && now - this.session.tickReceivedAt < 200) {
       context.strokeStyle = "#fff6b1"; context.lineWidth = 2;
       context.beginPath(); context.moveTo(point.x, point.y); context.lineTo(unit.shotX, unit.shotY); context.stroke();
@@ -373,7 +508,7 @@ export class Battlefield {
     }
     for (const unit of this.session.snapshot.units) {
       context.fillStyle = COLORS[unit.owner];
-      const radius = unit.kind === "hq" ? 4 : 2;
+      const radius = isBuilding(unit.kind) ? 4 : 2;
       context.fillRect(unit.x * scale - radius, unit.y * scale - radius, radius * 2, radius * 2);
     }
     context.strokeStyle = "#eff8ec"; context.lineWidth = 1;
