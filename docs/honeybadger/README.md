@@ -2,6 +2,8 @@
 
 Status: planning only, 2026-09-19. No gameplay code, dependencies, bindings, or live databases changed by this planning task.
 
+Reference repository: [Thalagor/honeybadger on Bitbucket](https://bitbucket.org/Thalagor/honeybadger/src/master/) (may require login). The mod's website rules are in [mod_information.html](https://bitbucket.org/Thalagor/honeybadger/src/master/information_sites/templates/mod_information.html); executable mod files are separate.
+
 ## Direction
 
 Build an original browser RTS about contested territory, asymmetric economies, recoverable losses, and prepared unit behavior. Preserve the mod's strategic interactions, not its exact roster or the SC2 audiovisual identity. Orders deliberately take time to become active; skilled play should come primarily from planning, scouting, positioning, economy, and configuring behavior rather than rapid manual micro.
