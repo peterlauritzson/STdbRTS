@@ -162,7 +162,7 @@ new database name, not an automatic destructive reset.
 
 - `server/src/rules.rs`, `simulation.rs`: pure gameplay, compiled by
   `server/core/Cargo.toml` for native tests.
-- `server/src/navigation.rs`, `shared/terrain.json`: authoritative navigation and
+- `server/src/navigation.rs`, `shared/maps/skirmish.json`: authoritative navigation and
   shared visible terrain. `src/catalog.ts` supplies UI balance metadata/previews.
 - `server/src/schema.rs`: normalized match-scoped tables.
 - `server/src/lobby.rs`: identity, membership, ready/start/leave reducers.

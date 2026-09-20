@@ -1,7 +1,8 @@
-import terrain from "../shared/terrain.json";
+import mapDefinition from "../shared/maps/skirmish.json";
 import type { Entity, Node } from "./bindings/types";
 
-export { terrain };
+export const terrain = mapDefinition.terrain;
+export const mapIdentity = { id: mapDefinition.id, version: mapDefinition.version } as const;
 export interface Definition { label: string; hp: number; radius: number; cost: number; seconds: number; building: boolean; icon: string; role: string }
 export const CATALOG: Record<string, Definition> = {
   hq: { label: "Headquarters", hp: 1200, radius: 34, cost: 0, seconds: 0, building: true, icon: "house", role: "Primary base / worker and infantry production" },

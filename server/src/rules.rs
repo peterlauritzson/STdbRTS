@@ -1,3 +1,4 @@
+pub mod maps;
 pub mod navigation;
 pub mod simulation;
 

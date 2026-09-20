@@ -13,6 +13,7 @@
     "server:publish": "spacetime publish --server http://127.0.0.1:3000 --module-path server --delete-data=never --yes stdbrts-playtest",
     "test": "npm run test:core && npm run test:client",
     "test:core": "cargo test --manifest-path server/core/Cargo.toml",
+    "validate:maps": "cargo run --manifest-path server/core/Cargo.toml --example validate_map -- shared/maps/skirmish.json",
     "test:client": "node --import tsx --test tests/presentation.test.ts",
     "test:integration": "node --import tsx --test tests/integration.test.ts",
     "test:browser": "playwright test",

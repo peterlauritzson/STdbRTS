@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { clamp, countdown, formation } from "../src/presentation";
 import { chooseOrders } from "../scripts/bot-policy";
-import { placementError, canProduce } from "../src/catalog";
+import { placementError, canProduce, mapIdentity, terrain } from "../src/catalog";
 import type { Entity } from "../src/bindings/types";
+
+test("client uses the versioned skirmish terrain without changing its layout", () => {
+  assert.deepEqual(mapIdentity, { id: "skirmish", version: 1 });
+  assert.deepEqual(terrain, [[560, 640, 160, 80], [880, 880, 160, 80], [640, 880, 80, 160], [880, 560, 80, 160]]);
+});
 
 test("countdown uses server ticks and freezes extrapolation during a stall", () => {
   assert.equal(countdown(120n, 100n, 0), 1);

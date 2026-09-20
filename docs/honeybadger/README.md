@@ -1,6 +1,6 @@
 # Honeybadger-Inspired RTS Plan
 
-Status: planning only, 2026-09-19. No gameplay code, dependencies, bindings, or live databases changed by this planning task.
+Status: implementation started, 2026-09-19. The documents below remain the design plan; [implementation handoff](HANDOFF.md) records completed increments, validation, limitations, and the exact next action.
 
 Reference repository: [Thalagor/honeybadger on Bitbucket](https://bitbucket.org/Thalagor/honeybadger/src/master/) (may require login). The mod's website rules are in [mod_information.html](https://bitbucket.org/Thalagor/honeybadger/src/master/information_sites/templates/mod_information.html); executable mod files are separate.
 
@@ -41,4 +41,4 @@ The plan proposes experiments and architecture decisions; it does not claim comp
 
 ## Next step
 
-Begin roadmap milestone M0 when implementation is authorized: turn this design into a versioned ruleset contract, record device/server targets and baseline timings, then run the narrow visibility, movement, behavior, and renderer experiments in M1. Do not attempt a wholesale engine rewrite or a full SC2 roster port.
+Continue from the [implementation handoff](HANDOFF.md). The first increment establishes validated shared map data while preserving the existing skirmish. M0 contracts and baseline measurements and M1 experiments remain incomplete; do not attempt a wholesale engine rewrite or a full SC2 roster port.

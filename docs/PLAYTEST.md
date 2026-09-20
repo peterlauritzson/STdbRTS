@@ -3,6 +3,8 @@
 Open http://127.0.0.1:5173 and choose **Practice vs AI**, or create a 2-4 player room.
 Full rules and controls are in [../README.md](../README.md).
 
+Recorded interactive sessions: [2026-09-19 practice playtest](honeybadger/PLAYTEST-2026-09-19.md), including observed behavior, UX findings, and unverified areas.
+
 ## First Session
 
 1. Mine with workers, build a barracks, and train soldiers/scouts.

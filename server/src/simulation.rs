@@ -97,39 +97,22 @@ impl World {
             balances: slots.iter().map(|slot| (*slot, 250)).collect(),
             outcome: None,
         };
-        let spawns = [
-            (220.0, 220.0),
-            (1380.0, 1380.0),
-            (1380.0, 220.0),
-            (220.0, 1380.0),
-        ];
+        let map = crate::maps::default_map();
         let mut ordered_slots = slots.to_vec();
         ordered_slots.sort_unstable();
         for slot in &ordered_slots {
-            let (x, y) = spawns[*slot as usize];
+            let [x, y] = map.starts[*slot as usize];
             world.spawn(*slot, "hq", x, y);
             world.spawn(*slot, "worker", x + 55.0, y);
             world.spawn(*slot, "worker", x, y + 55.0);
             world.spawn(*slot, "soldier", x + 55.0, y + 55.0);
         }
-        for (index, (x, y)) in [
-            (360.0, 360.0),
-            (1240.0, 1240.0),
-            (1240.0, 360.0),
-            (360.0, 1240.0),
-            (800.0, 600.0),
-            (800.0, 1000.0),
-            (600.0, 800.0),
-            (1000.0, 800.0),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        for deposit in &map.deposits {
             world.nodes.push(Node {
-                id: index as u32 + 1,
-                x,
-                y,
-                amount: 4000,
+                id: deposit.id,
+                x: deposit.x,
+                y: deposit.y,
+                amount: deposit.amount,
             });
         }
         world

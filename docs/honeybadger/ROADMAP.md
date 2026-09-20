@@ -1,6 +1,6 @@
 # Implementation Roadmap
 
-Status: planning complete enough to begin bounded experiments; implementation not started. This is ordered by dependency and learning value, not a calendar estimate. Estimates should follow M1 evidence and the selected asset scope.
+Status: implementation started; see [handoff](HANDOFF.md) for current evidence and the next action. This is ordered by dependency and learning value, not a calendar estimate. Estimates should follow M1 evidence and the selected asset scope.
 
 ## Delivery rules
 
@@ -158,6 +158,7 @@ Use replay comparison and conservation assertions for correctness. Use player ob
 - [x] Author priorities clarified: economies/zones/resources over exact units; desktop 1v1; tunable delay and reduced micro.
 - [x] Design, technical boundaries, UX, experiments, and dependency-ordered roadmap recorded.
 - [ ] M0 contracts and baseline measurements.
+- [x] First M0 foundation increment: shared versioned map data, validation CLI, static connectivity checks, unchanged-skirmish regression tests. Full map/rules match identity and M0 measurements remain outstanding.
 - [ ] M1 risk experiments.
 - [ ] M2 shared strategic foundation.
 - [ ] M3 three-faction economic slice.

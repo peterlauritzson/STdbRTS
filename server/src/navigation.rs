@@ -1,25 +1,15 @@
 use crate::{advance, distance, is_building, simulation::Entity};
 use pathfinding::prelude::astar;
-use std::sync::OnceLock;
 
 const CELL: f32 = 40.0;
 const SIDE: i32 = 40;
 
 pub fn terrain() -> &'static Vec<[f32; 4]> {
-    static TERRAIN: OnceLock<Vec<[f32; 4]>> = OnceLock::new();
-    TERRAIN.get_or_init(|| {
-        serde_json::from_str(include_str!("../../shared/terrain.json"))
-            .expect("valid shared terrain")
-    })
+    &crate::maps::default_map().terrain
 }
 
 pub fn terrain_free(x: f32, y: f32, margin: f32) -> bool {
-    !terrain().iter().any(|rect| {
-        x > rect[0] - margin
-            && x < rect[0] + rect[2] + margin
-            && y > rect[1] - margin
-            && y < rect[1] + rect[3] + margin
-    })
+    crate::maps::default_map().terrain_free(x, y, margin)
 }
 
 pub fn line_of_sight(x: f32, y: f32, target_x: f32, target_y: f32) -> bool {
