@@ -1,5 +1,8 @@
 use crate::{game, schema::*};
-use rts_core::{simulation::World, COMMAND_DELAY};
+use rts_core::{
+    maps::default_map, simulation::World, validate_command_delay, DEFAULT_COMMAND_DELAY,
+    RULESET_VERSION,
+};
 use spacetimedb::{ReducerContext, Table};
 
 pub fn current_player(ctx: &ReducerContext) -> Result<Player, String> {
@@ -84,6 +87,13 @@ pub fn create_room(ctx: &ReducerContext, name: String, capacity: u8) -> Result<(
     if ctx.db.room().count() >= 128 {
         return Err("Server room limit reached".into());
     }
+    // The delay the match will run under is validated before it is frozen, not
+    // clamped: a ruleset whose default sits outside its own bounds fails room
+    // creation loudly instead of quietly shipping a delay nobody chose. The
+    // requested value is the ruleset default until the lobby gains a control
+    // for it (M4); the bounds check is on the live path either way.
+    let command_delay = validate_command_delay(DEFAULT_COMMAND_DELAY)?;
+    let map = default_map().identity();
     let room = ctx.db.room().insert(Room {
         id: 0,
         name: clean_name(name)?,
@@ -91,7 +101,11 @@ pub fn create_room(ctx: &ReducerContext, name: String, capacity: u8) -> Result<(
         capacity,
         state: "lobby".into(),
         tick: 0,
-        command_delay: COMMAND_DELAY,
+        command_delay,
+        ruleset_version: RULESET_VERSION,
+        map_id: map.id,
+        map_version: map.version,
+        map_hash: map.hash,
         next_entity_id: 1,
         winner: -2,
         last_activity_micros: ctx.timestamp.to_micros_since_unix_epoch(),
@@ -106,6 +120,7 @@ pub fn create_room(ctx: &ReducerContext, name: String, capacity: u8) -> Result<(
     player.last_order_tick = 0;
     player.orders_this_tick = 0;
     ctx.db.player().identity().update(player);
+    game::sync_tick_schedule(ctx);
     Ok(())
 }
 
@@ -180,6 +195,7 @@ pub fn start_match(ctx: &ReducerContext) -> Result<(), String> {
     room.state = "playing".into();
     game::save_world(ctx, &mut room, &world);
     ctx.db.room().id().update(room);
+    game::sync_tick_schedule(ctx);
     Ok(())
 }
 
@@ -208,6 +224,7 @@ pub fn leave_room(ctx: &ReducerContext) -> Result<(), String> {
             }
             ctx.db.room().id().update(room);
         }
+        game::sync_tick_schedule(ctx);
     }
     Ok(())
 }

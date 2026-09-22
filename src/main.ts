@@ -276,13 +276,15 @@ function renderTimers(): void {
   const ours = commands.filter(command => command.owner === me.slot).sort((left, right) => left.id > right.id ? -1 : 1);
   element("pending-count").textContent = String(ours.filter(command => command.status === "scheduled").length + session.pending.size);
   const rows = [...session.pending.values()].map(pending => {
-    const row = text("div", "", "command-row"); row.append(text("span", pending.order.kind), text("span", "Sending")); return row;
+    const row = text("div", "", "command-row"); row.append(text("span", pending.order.kind, "command-label"), text("span", "Sending", "command-status")); return row;
   });
   for (const command of ours.slice(0, 8)) {
     const row = text("div", "", `command-row ${command.status}`);
     const label = command.order.kind.split("_").join(" ");
-    row.append(text("span", `${label} / ${command.units.length}`), text("span", command.status === "scheduled" ? `${countdown(command.executeTick, room.tick, performance.now() - session.tickReceivedAt).toFixed(1)}s` : command.status));
-    row.title = command.reason; rows.push(row);
+    row.append(text("span", `${label} / ${command.units.length}`, "command-label"), text("span", command.status === "scheduled" ? `${countdown(command.executeTick, room.tick, performance.now() - session.tickReceivedAt).toFixed(1)}s` : command.status, "command-status"));
+    row.title = command.reason;
+    if (command.status === "rejected" && command.reason) row.append(text("span", command.reason, "command-reason"));
+    rows.push(row);
   }
   element("command-list").replaceChildren(...rows);
   const age = Math.round(performance.now() - session.tickReceivedAt);

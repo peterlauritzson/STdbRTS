@@ -24,7 +24,103 @@ pub struct MapDefinition {
     pub terrain: Vec<[f32; 4]>,
 }
 
+/// Frozen identity of the map a match is played on: the authored ID, the
+/// authored version, and a content hash over the parsed geometry. The hash is
+/// what catches an edited map republished under an unchanged version.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MapIdentity {
+    pub id: String,
+    pub version: u32,
+    pub hash: u64,
+}
+
+/// FNV-1a over an explicit canonical encoding. Deliberately not
+/// `std::hash::Hasher`/`DefaultHasher`: those carry no cross-process or
+/// cross-version stability guarantee, and this value is written into match
+/// records and compared between server and client.
+struct ContentHasher(u64);
+
+impl ContentHasher {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    fn new() -> Self {
+        Self(Self::OFFSET_BASIS)
+    }
+
+    fn bytes(&mut self, bytes: &[u8]) -> &mut Self {
+        for byte in bytes {
+            self.0 ^= *byte as u64;
+            self.0 = self.0.wrapping_mul(Self::PRIME);
+        }
+        self
+    }
+
+    fn u32(&mut self, value: u32) -> &mut Self {
+        self.bytes(&value.to_le_bytes())
+    }
+
+    fn u64(&mut self, value: u64) -> &mut Self {
+        self.bytes(&value.to_le_bytes())
+    }
+
+    /// Hashes the exact IEEE-754 bit pattern, so the result is independent of
+    /// formatting, rounding and platform float printing.
+    fn f32(&mut self, value: f32) -> &mut Self {
+        self.bytes(&value.to_bits().to_le_bytes())
+    }
+
+    /// Length-prefixed, so neither concatenation nor reordering of adjacent
+    /// fields can produce the same byte stream.
+    fn text(&mut self, value: &str) -> &mut Self {
+        self.u64(value.len() as u64).bytes(value.as_bytes())
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
 impl MapDefinition {
+    /// Deterministic content hash over the parsed definition. Stable across
+    /// processes, runs, builds and platforms: same geometry in, same number out.
+    pub fn content_hash(&self) -> u64 {
+        let mut hasher = ContentHasher::new();
+        // Domain tag: bump the suffix if the encoding below ever changes.
+        hasher.text("rts-map-v1");
+        hasher.text(&self.id);
+        hasher.u32(self.version);
+        hasher.f32(self.size);
+        hasher.u64(self.starts.len() as u64);
+        for start in &self.starts {
+            hasher.f32(start[0]).f32(start[1]);
+        }
+        hasher.u64(self.deposits.len() as u64);
+        for deposit in &self.deposits {
+            hasher
+                .u32(deposit.id)
+                .f32(deposit.x)
+                .f32(deposit.y)
+                .u32(deposit.amount);
+        }
+        hasher.u64(self.terrain.len() as u64);
+        for rect in &self.terrain {
+            for value in rect {
+                hasher.f32(*value);
+            }
+        }
+        hasher.finish()
+    }
+
+    /// ID, version and content hash together — what a match freezes at creation.
+    pub fn identity(&self) -> MapIdentity {
+        MapIdentity {
+            id: self.id.clone(),
+            version: self.version,
+            hash: self.content_hash(),
+        }
+    }
+
     pub fn parse(source: &str) -> Result<Self, String> {
         let map: Self = serde_json::from_str(source).map_err(|error| error.to_string())?;
         map.validate()?;
@@ -238,6 +334,90 @@ mod tests {
                 (8, 1000.0, 800.0),
             ]
         );
+    }
+
+    /// Pinned so that any edit to the built-in skirmish geometry fails loudly
+    /// here instead of silently changing what running matches were created
+    /// against. If this fires because the change was intended, bump
+    /// `MapDefinition.version` in shared/maps/skirmish.json and re-pin.
+    const SKIRMISH_CONTENT_HASH: u64 = 0x4a80_e445_bc3b_ff70;
+
+    #[test]
+    fn built_in_map_hash_is_pinned() {
+        let map = default_map();
+        assert_eq!(
+            map.content_hash(),
+            SKIRMISH_CONTENT_HASH,
+            "built-in skirmish geometry changed; actual hash {:#018x}",
+            map.content_hash()
+        );
+        assert_eq!(
+            map.identity(),
+            MapIdentity {
+                id: "skirmish".into(),
+                version: 1,
+                hash: SKIRMISH_CONTENT_HASH,
+            }
+        );
+    }
+
+    #[test]
+    fn content_hash_is_deterministic_across_parses() {
+        let source = include_str!("../../shared/maps/skirmish.json");
+        let first = MapDefinition::parse(source).unwrap();
+        let second = MapDefinition::parse(source).unwrap();
+        assert_eq!(first.content_hash(), second.content_hash());
+        assert_eq!(first.content_hash(), default_map().content_hash());
+        // Whitespace and integer/float spelling are not part of the identity.
+        let reformatted = source.replace("\n", " ").replace("1600", "1600.0");
+        assert_eq!(
+            MapDefinition::parse(&reformatted).unwrap().content_hash(),
+            first.content_hash()
+        );
+    }
+
+    #[test]
+    fn content_hash_is_value_sensitive() {
+        let base = default_map().clone();
+        let mut changed = base.clone();
+        changed.deposits[3].amount += 1;
+        assert_ne!(changed.content_hash(), base.content_hash());
+
+        changed = base.clone();
+        changed.deposits[0].x += 0.001;
+        assert_ne!(changed.content_hash(), base.content_hash());
+
+        changed = base.clone();
+        changed.terrain[2][3] = 161.0;
+        assert_ne!(changed.content_hash(), base.content_hash());
+
+        changed = base.clone();
+        changed.terrain.push([100.0, 100.0, 10.0, 10.0]);
+        assert_ne!(changed.content_hash(), base.content_hash());
+
+        changed = base.clone();
+        changed.version += 1;
+        assert_ne!(changed.content_hash(), base.content_hash());
+
+        changed = base.clone();
+        changed.id = "skirmish-2".into();
+        assert_ne!(changed.content_hash(), base.content_hash());
+    }
+
+    #[test]
+    fn content_hash_is_order_sensitive() {
+        let base = default_map().clone();
+        let mut swapped = base.clone();
+        swapped.deposits.swap(0, 1);
+        assert_ne!(swapped.content_hash(), base.content_hash());
+
+        swapped = base.clone();
+        swapped.starts.swap(1, 2);
+        assert_ne!(swapped.content_hash(), base.content_hash());
+
+        swapped = base.clone();
+        swapped.terrain.swap(0, 3);
+        assert_ne!(swapped.content_hash(), base.content_hash());
     }
 
     #[test]

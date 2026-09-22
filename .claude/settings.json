@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls ~/.cargo/registry/src/*/ 2>/dev/null | grep -i '^spacetimedb' | head -20)",
+      "Read(//c/Users/peter/.cargo/registry/src/**)",
+      "Bash(cd ~/.cargo/registry/src/*/spacetimedb-2.0.2 && grep -rn \"client_visibility_filter\" --include=*.rs | head -20; echo \"=== Filter ===\"; grep -rn \"pub enum Filter\" -A12 --include=*.rs . | head -40)",
+      "Bash(sed -n '60,101p' ~/.cargo/registry/src/*/spacetimedb-2.0.2/src/lib.rs)",
+      "Bash(cargo search *)",
+      "Bash(spacetime --version)",
+      "Bash(grep -rn \"pub enum ScheduleAt\" -A12 ~/.cargo/registry/src/*/spacetimedb-lib-2.0.2/src/ 2>/dev/null | head -25; echo \"=== TimeDuration ===\"; grep -rn \"pub fn to_micros\\\\|pub fn from_micros\\\\|pub struct TimeDuration\" ~/.cargo/registry/src/*/spacetimedb-lib-2.0.2/src/*.rs 2>/dev/null | head)",
+      "Bash(grep -rn \"pub fn to_micros\\\\|pub fn from_micros\\\\|pub struct TimeDuration\\\\|derive\" ~/.cargo/registry/src/*/spacetimedb-lib-2.0.2/src/timestamp.rs ~/.cargo/registry/src/*/spacetimedb-lib-2.0.2/src/time_duration*.rs 2>/dev/null | head -20; echo \"===scheduler derives===\"; sed -n '10,22p' ~/.cargo/registry/src/*/spacetimedb-lib-2.0.2/src/scheduler.rs)",
+      "Bash(grep -rn \"pub fn from_micros\\\\|pub fn to_micros\" ~/.cargo/registry/src/*/spacetimedb-sats-2.0.2/src/time_duration.rs 2>/dev/null | head; echo \"=== fallback search ===\"; grep -rln \"struct TimeDuration\" ~/.cargo/registry/src/*/spacetimedb-sats-2.0.2/src/ 2>/dev/null)",
+      "Bash(cargo check *)",
+      "Bash(spacetime publish *)",
+      "Bash(spacetime sql *)",
+      "Bash(spacetime call *)",
+      "Bash(STDB_HOST=ws://127.0.0.1:3000 STDB_DATABASE=stdbrts-tickcheck npm run test:integration)",
+      "Bash(npm run *)",
+      "Bash(spacetime delete *)",
+      "Bash(spacetime list *)",
+      "Bash(cargo test *)",
+      "Bash(git --no-pager diff -- src/main.ts styles.css index.html tests/presentation.test.ts)",
+      "Bash(git --no-pager status --porcelain)",
+      "Bash(cargo run *)",
+      "Bash(cargo fmt *)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\peter\\.cargo\\registry\\src\\*\\spacetimedb-2.0.2\\src",
+      "C:\\Users\\peter\\.cargo\\registry\\src\\*\\spacetimedb-lib-2.0.2\\src"
+    ]
+  }
+}

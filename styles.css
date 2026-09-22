@@ -120,7 +120,10 @@ button[aria-pressed="true"] { border-color: var(--accent); background: #4a603d; 
 .orders-section .eyebrow { margin: 0; }
 .command-list { height: 99px; overflow: auto; font-size: 10px; color: #b8caaa; }
 .command-row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid #344337; }
-.command-row.rejected { color: #f29ca2; }
+.command-row.rejected { color: #f29ca2; flex-wrap: wrap; align-items: start; row-gap: 3px; }
+.command-row.rejected .command-label { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.command-row.rejected .command-status { flex: 0 0 auto; }
+.command-reason { flex: 0 0 100%; color: #f6c3c6; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
 .telemetry { font-size: 9px; color: #a1afa2; padding-top: 9px; }
 .notice { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(560px, calc(100% - 32px)); background: #33292b; color: #ffd3cd; border: 1px solid #b6807f; border-radius: 4px; padding: 13px 20px; z-index: 50; font-size: 13px; overflow-wrap: anywhere; }
 dialog { background: #202e29; color: #e2eae4; border: 1px solid #a4b48d; border-radius: 6px; padding: 28px; max-width: calc(100% - 32px); }
@@ -131,6 +134,29 @@ dialog p { margin-top: 14px; color: var(--muted); font-size: 14px; }
   .command-deck section { padding: 0 12px; }
   .production-buttons button { gap: 5px; }
   .production-buttons svg { width: 14px; }
+}
+/* Short-height desktop: compact the command deck so the battlefield keeps a usable height.
+   Placed after the 1000px rule and before the 760px rule, and restricted to vertical/height
+   properties, so it composes with either width breakpoint instead of fighting it. */
+@media (max-height: 800px) {
+  .match { grid-template-rows: 44px minmax(200px, 1fr) 240px; }
+  .command-deck { padding-block: 10px; }
+  #minimap { width: 128px; }
+  .selection-section h2 { font-size: 15px; margin-bottom: 5px; }
+  #selection-details { min-height: 24px; }
+  .tool-row { grid-template-columns: repeat(4, 34px); gap: 4px; margin-top: 6px; }
+  .tool-row .icon-button { width: 34px; height: 34px; min-height: 34px; padding: 7px; }
+  .industry-tabs { margin-bottom: 5px; }
+  .industry-tabs button { min-height: 26px; padding-block: 4px; }
+  #producer-select { min-height: 26px; margin-bottom: 5px; }
+  .production-buttons { gap: 5px; }
+  .production-buttons button { min-height: 34px; padding-block: 6px; }
+  .production-buttons small { margin-top: 2px; }
+  .production-controls { margin-top: 5px; }
+  .production-queue { margin-top: 6px; max-height: 26px; }
+  #building-count, #research-status { margin-top: 5px; }
+  .command-list { height: 64px; }
+  .telemetry { padding-top: 5px; }
 }
 @media (max-width: 760px) {
   .masthead { height: 58px; padding: 0 14px; gap: 12px; }

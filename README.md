@@ -124,7 +124,11 @@ Completed upgrades persist if the lab is destroyed and apply to existing/new uni
 
 ## Rules and Authority
 
-All gameplay runs in Rust on scheduled 20 TPS simulation ticks. Commands publish
+All gameplay runs in Rust on scheduled 20 TPS simulation ticks. The tick is
+armed on demand: it is not scheduled at all while no rooms exist, drops to
+every 5 seconds for the idle-room sweep while rooms sit in the lobby, and runs
+at 20 TPS while any room is playing, so an idle deployment costs no energy.
+Commands publish
 one shared execution tick; the client displays pending markers and interpolates
 received positions, never predicts gameplay. Scheduling under load may run
 slower than wall time; the server tick remains authoritative.
@@ -211,7 +215,11 @@ This is a playable one-faction, one-map skirmish build for playtesting, not a
 production-ready online service. No fog of war, teams, ranked matchmaking, replay
 storage, campaign, or additional factions. Unit-to-unit separation is lightweight;
 large-army congestion and dynamic blocked routes need playtesting. Tables are public;
-match-scoped subscriptions reduce traffic but do not hide enemy data.
+match-scoped subscriptions reduce traffic but do not hide enemy data. A custom
+client can read every match in the database, including matches it has not
+joined. SpacetimeDB row-level security is unimplemented and unenforced as of
+2.10.1, so this cannot be fixed server-side today; see
+[docs/DEPLOY.md](docs/DEPLOY.md) for what that means when hosting publicly.
 
 Per-player command, queue, unit, and global room caps exist; account-level abuse
 protection and production operations are not complete. The bot uses a fixed build
@@ -222,6 +230,12 @@ packet loss, load, and balance testing. `wasm-opt` is optional and was not
 installed during verification.
 
 See [docs/PLAYTEST.md](docs/PLAYTEST.md) for a focused playtest checklist.
+
+## Deploy
+
+See [docs/DEPLOY.md](docs/DEPLOY.md): publish the module to SpacetimeDB
+Maincloud, then serve the built `dist/` from any static host. PythonAnywhere
+config lives in [deploy/pythonanywhere/wsgi.py](deploy/pythonanywhere/wsgi.py).
 
 ## Canonical SpacetimeDB References
 

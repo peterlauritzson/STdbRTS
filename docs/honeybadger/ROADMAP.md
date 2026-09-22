@@ -159,6 +159,7 @@ Use replay comparison and conservation assertions for correctness. Use player ob
 - [x] Design, technical boundaries, UX, experiments, and dependency-ordered roadmap recorded.
 - [ ] M0 contracts and baseline measurements.
 - [x] First M0 foundation increment: shared versioned map data, validation CLI, static connectivity checks, unchanged-skirmish regression tests. Full map/rules match identity and M0 measurements remain outstanding.
+- [x] Second M0 increment: match identity frozen at creation (ruleset version, map id/version/content hash) and a bounded ruleset command delay, verified against a real server. M0 stays open: the ruleset specification itself — dual currencies, supply subdivisions, refund eligibility, primary-hub victory, terrain semantics, roster roles — and the baseline measurements are still outstanding. See [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md).
 - [ ] M1 risk experiments.
 - [ ] M2 shared strategic foundation.
 - [ ] M3 three-faction economic slice.

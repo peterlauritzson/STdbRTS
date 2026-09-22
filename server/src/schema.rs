@@ -12,7 +12,15 @@ pub struct Room {
     pub capacity: u8,
     pub state: String,
     pub tick: u64,
+    // Frozen at creation in `lobby::create_room` and never mutated afterwards:
+    // the delay and the identity of the rules and map this match is played
+    // under. Resolving any of these at read time would let an edited ruleset or
+    // map change the rules underneath a running match.
     pub command_delay: u64,
+    pub ruleset_version: u32,
+    pub map_id: String,
+    pub map_version: u32,
+    pub map_hash: u64,
     pub next_entity_id: u32,
     pub winner: i16,
     pub last_activity_micros: i64,

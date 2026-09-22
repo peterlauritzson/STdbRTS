@@ -2,13 +2,11 @@ mod game;
 mod lobby;
 mod schema;
 
-use schema::*;
-use spacetimedb::{ReducerContext, Table, TimeDuration};
+use spacetimedb::ReducerContext;
 
 #[spacetimedb::reducer(init)]
 pub fn init(ctx: &ReducerContext) {
-    ctx.db.tick_schedule().insert(TickSchedule {
-        scheduled_id: 0,
-        scheduled_at: TimeDuration::from_micros(50_000).into(),
-    });
+    // No rooms exist yet, so this arms nothing. The first created room starts
+    // the tick; the last removed room stops it.
+    game::sync_tick_schedule(ctx);
 }

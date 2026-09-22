@@ -1,16 +1,19 @@
 # Implementation Handoff
 
-Updated: 2026-09-19. User authorized implementation and requested a handoff at every step.
+Updated: 2026-09-22. User authorized implementation and requested a handoff at every step.
 
 ## Resume Here
 
-Completed increment: shared, versioned map definition and validation, preserving existing gameplay. No deployment or breaking database schema was performed.
+Completed increments: the shared versioned map definition and validation (steps 1-4); the two user-visible playtest fixes (step 6); and the M0 match identity and delay contract (step 7). Ordering and scope now live in [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md); settled choices in [DECISIONS.md](DECISIONS.md).
 
-Next action: address the small UX findings from [interactive playtest](PLAYTEST-2026-09-19.md), starting with inline rejected-command reasons in `src/main.ts` and short-height battlefield usability. Replay the affected interaction manually in the browser; automated tests alone are insufficient for user-visible work.
+Next action: run the private-state experiment, **Increment C**, whose protocol and pass/fail rule are already written in [EXPERIMENT-C-PRIVATE-STATE.md](EXPERIMENT-C-PRIVATE-STATE.md). It needs a real server and its own development database, three identities against one match, and all nine leak surfaces checked. Record the outcome there and add a dated entry to DECISIONS.md. Do not implement fog, smoke or hidden scouting before that result exists, and do not fall back to client-side filtering if it fails.
 
-Then complete the remaining M0 ruleset contract before widening the schema. Read `server/src/schema.rs`, `server/src/game.rs`, and `server/src/lobby.rs` around room creation, command scheduling, and world persistence. Define frozen ruleset/map identity and configurable command delay without exposing per-client authority. Prove that accepted commands use a match-frozen delay and preserve the existing 20-tick default; include boundary/reconnect compatibility tests. Plan a new development database before any breaking match schema change, and keep generated bindings generated.
+Two small follow-ups are known and deliberately deferred, neither blocking C:
 
-After that: the real-server private-state/caller-view security experiment in M1 is a prerequisite for smoke, fog, and fair policies. Do not implement cosmetic fog atop public tables.
+- The client cannot yet compare `map_hash`. Bindings are regenerated and carry the column, but no client-side hash implementation or negotiation exists, so server/client hash agreement is still unproven.
+- `validate_map` does not print the content hash, so authors cannot read it without running a test.
+
+Nothing is committed and nothing is published beyond the local `stdbrts-m0` development database.
 
 ## Constraints
 
@@ -54,7 +57,7 @@ After that: the real-server private-state/caller-view security experiment in M1 
 - Typecheck and production build passed after runtime integration; later changes only affect Rust validation, package script and documentation.
 - Both Cargo lockfiles have the expected direct serde dependency entry. New files must be included with tracked edits if the user later commits; no commit was made.
 
-## Not Implemented Yet
+## Validated Sessions and Increments
 
 ### Step 5: Interactive playtest (2026-09-19)
 
@@ -62,12 +65,32 @@ After that: the real-server private-state/caller-view security experiment in M1 
 - Played two practice sessions using normal UI input, including construction, production, rallies, control groups, delayed orders, combat losses, reload, defeat/restart and surrender. See [full observations and limitations](PLAYTEST-2026-09-19.md).
 - Findings: rejection reason hidden in tooltip; only 240px battlefield height at 990x650; early AI pressure merits a proper difficulty session, not a balance conclusion from tool-paced play.
 - Session ended in the lobby, no playtest match intentionally left running. Servers left available at http://127.0.0.1:5173/ and loopback port 3000.
-- Backend terminal: `1e149260-4ee5-4c8b-b9ea-cdb786d7e36f`; Vite terminal: `97ede30f-bd75-46e2-9d68-94df015d1f66`. Browser game page: `ac4d05e2-9882-4cf3-86e6-ccdacad2df8a`. Verify these are still running before reuse.
+- Terminal and browser handles recorded here on 2026-09-19 are stale; the 2026-09-22 session started and stopped its own backend and Vite. Nothing is left running.
 - Prior user/formatter edits to `server/src/maps.rs` and `server/core/examples/validate_map.rs` were not touched.
+
+### Step 6: Playtest UX findings (validated 2026-09-22)
+
+- Closes findings 1 and 2 of [PLAYTEST-2026-09-19.md](PLAYTEST-2026-09-19.md). Touched only `src/main.ts` and `styles.css`.
+- Rejected command rows now append a `.command-reason` span; `.command-row.rejected` wraps so the reason takes its own full-width line. The `title` tooltip is unchanged, and rejection timing and cancellation semantics were not touched.
+- A `@media (max-height: 800px)` rule compacts the command deck from a 310px to a 240px track, reducing padding, minimap, history and button heights. It sets only vertical properties and sits between the 1000px and 760px width rules, so it composes with either instead of overriding horizontal padding.
+- Browser evidence at 990x650, measured not calculated: battlefield **240px to 302px**, and the previous 14px vertical overflow of `.match` is gone. The inline reason reads `Production queue is already empty`, on its own line, over 90% of the row width, with the history area still bounded at 64px. At 1440x1000 the battlefield is still exactly 576px.
+- New [tests/browser/feedback.spec.ts](../../tests/browser/feedback.spec.ts) provokes a real rejection by issuing two production cancels inside the delay window. It reads all geometry in a single `evaluate`, because `renderTimers` rebuilds the list with `replaceChildren` on a timer and separate `boundingBox()` calls race that re-render. Ran clean three times consecutively.
+- Not verified: touch interaction, other viewport sizes, and whether the compacted deck overflows on platforms with different font fallbacks. No unit test covers the row builder; it is inline in `main.ts`, which has top-level side effects and cannot be imported by the node test. Extracting it into `src/presentation.ts` is the follow-up if coverage is wanted.
+
+### Step 7: M0 match identity and delay contract (validated 2026-09-22)
+
+- `rules.rs` gains `RULESET_VERSION`, `DEFAULT_COMMAND_DELAY` (still 20), `COMMAND_DELAY_MIN`/`MAX` of 10 and 30, and `validate_command_delay` returning a `CommandDelayError`. The old `COMMAND_DELAY` constant is gone, not aliased. Out-of-range is rejected, never clamped.
+- `maps.rs` gains `MapIdentity` and `content_hash`, an explicit FNV-1a over a domain-tagged, length-prefixed encoding with floats hashed via `to_bits()`. Deliberately not `DefaultHasher`, which carries no cross-process stability guarantee.
+- `Room` gains `ruleset_version`, `map_id`, `map_version`, `map_hash`, frozen in `create_room` and never mutated after. `create_room`'s reducer signature is unchanged, so the client contract held.
+- 11 new Rust tests, 38 to 49 total. They cover delay bounds, that rejection is not clamping, that scheduling follows a room's frozen delay rather than the constant, and that the map hash is pinned, deterministic across reparses and reformatting, and order- and value-sensitive.
+- Real-server evidence: published to a **new** local database `stdbrts-m0`; `stdbrts-playtest` was not touched. All four browser tests pass against the new schema, and every live room row carries `command_delay 20`, `ruleset_version 1`, `skirmish` v1 and `map_hash 5368541743987556208`, matching the pinned `0x4a80_e445_bc3b_ff70`. This is the end-to-end link the module's own tests cannot prove.
+- Bindings regenerated with `npm run generate`; the diff is four added columns in `room_table.ts` and `types.ts`.
+- Adding these columns is a breaking schema change. It is published only to the local development database, never to production.
+- Not proven: reconnect to a room created *before* this change, since the new database has no such rows. The delay-reject branch never fires in production while the default is in range; it is exercised only by tests until a lobby control supplies a caller-chosen delay, which must arrive as a creation-time argument because the freeze-at-creation decision forbids a mutator.
 
 ## Remaining Implementation
 
-Map selection, variable map dimensions, map/rules hashes persisted in matches, dual currencies, factions, secure fog, policies, new graphics, or the M1 experiments. Do not mistake this first map increment for completed M0/M1.
+Map/rules identity is now persisted per match, so that item is done. Still outstanding: map selection, variable map dimensions, client-side hash negotiation, dual currencies, supply subdivisions, refund eligibility, primary-hub victory, factions, secure fog, policies, new graphics, and every M1 experiment including the one in [EXPERIMENT-C-PRIVATE-STATE.md](EXPERIMENT-C-PRIVATE-STATE.md). M0's specification work — the rules that need deciding rather than coding — belongs in [DECISIONS.md](DECISIONS.md) before implementation. Do not mistake these increments for completed M0/M1.
 
 ## Commands
 
@@ -75,4 +98,6 @@ Map selection, variable map dimensions, map/rules hashes persisted in matches, d
 - Regression: `npm test`
 - Types/build: `npm run typecheck`, `npm run build`
 - Adapter: `cargo check --manifest-path server/Cargo.toml --target wasm32-unknown-unknown`
-- Real server/browser checks are necessary when database/visible behavior changes; no server was running at this increment's start.
+- Bindings: `npm run generate` after any schema change; never hand-edit `src/bindings/`.
+- Real server: `npm run server:start`, then `spacetime publish --server http://127.0.0.1:3000 --module-path server --yes <database>`. Use a new database name for breaking schema changes; `stdbrts-m0` currently holds the step 7 schema.
+- Browser: `npm run dev`, then `STDB_DATABASE=<database> npx playwright test`. Required whenever database or visible behavior changes; test passes alone do not close user-visible work.

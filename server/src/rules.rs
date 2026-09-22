@@ -2,8 +2,26 @@ pub mod maps;
 pub mod navigation;
 pub mod simulation;
 
+/// Identity of the frozen rules surface. Bump this whenever anything a running
+/// match depends on changes: unit stats, costs, damage rules, production
+/// requirements, movement, world size, or the command-delay bounds. A match
+/// records the value current at its creation and never re-reads it, so two
+/// matches carrying different ruleset versions were played under different
+/// rules and their replays are not comparable.
+pub const RULESET_VERSION: u32 = 1;
+
 pub const TICKS_PER_SECOND: u64 = 20;
-pub const COMMAND_DELAY: u64 = 20;
+
+/// The command delay a newly created match freezes, in ticks. 20 ticks is
+/// exactly one second at `TICKS_PER_SECOND`.
+pub const DEFAULT_COMMAND_DELAY: u64 = 20;
+
+/// Inclusive bounds on a frozen command delay, spanning the 0.5s / 1.0s / 1.5s
+/// trial points at `TICKS_PER_SECOND`. Out-of-range values are rejected at room
+/// creation, never clamped.
+pub const COMMAND_DELAY_MIN: u64 = 10;
+pub const COMMAND_DELAY_MAX: u64 = 30;
+
 pub const WORLD_SIZE: f32 = 1600.0;
 pub const MAX_UNITS: usize = 60;
 pub const MAX_QUEUE: usize = 8;
@@ -170,6 +188,44 @@ pub fn execution_tick(current_tick: u64, delay: u64) -> Result<u64, String> {
         .ok_or_else(|| "Match tick limit reached".into())
 }
 
+/// A command delay outside `COMMAND_DELAY_MIN..=COMMAND_DELAY_MAX`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommandDelayError {
+    pub requested: u64,
+}
+
+impl std::fmt::Display for CommandDelayError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Command delay must be {}-{} ticks ({:.1}-{:.1}s at {} ticks per second); {} was requested",
+            COMMAND_DELAY_MIN,
+            COMMAND_DELAY_MAX,
+            COMMAND_DELAY_MIN as f32 / TICKS_PER_SECOND as f32,
+            COMMAND_DELAY_MAX as f32 / TICKS_PER_SECOND as f32,
+            TICKS_PER_SECOND,
+            self.requested
+        )
+    }
+}
+
+impl From<CommandDelayError> for String {
+    fn from(error: CommandDelayError) -> Self {
+        error.to_string()
+    }
+}
+
+/// Accepts a command delay inside the ruleset bounds and returns it unchanged.
+/// Rejects anything else — the value is never clamped, so a misconfigured match
+/// fails to start rather than silently playing under rules nobody chose.
+pub fn validate_command_delay(delay: u64) -> Result<u64, CommandDelayError> {
+    if (COMMAND_DELAY_MIN..=COMMAND_DELAY_MAX).contains(&delay) {
+        Ok(delay)
+    } else {
+        Err(CommandDelayError { requested: delay })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,7 +275,82 @@ mod tests {
 
     #[test]
     fn commands_wait_one_full_second() {
-        assert_eq!(execution_tick(42, COMMAND_DELAY), Ok(62));
-        assert!(execution_tick(u64::MAX, COMMAND_DELAY).is_err());
+        assert_eq!(execution_tick(42, DEFAULT_COMMAND_DELAY), Ok(62));
+        assert!(execution_tick(u64::MAX, DEFAULT_COMMAND_DELAY).is_err());
+    }
+
+    #[test]
+    fn default_command_delay_is_still_exactly_one_second() {
+        assert_eq!(DEFAULT_COMMAND_DELAY, 20);
+        assert_eq!(DEFAULT_COMMAND_DELAY, TICKS_PER_SECOND);
+        assert!((COMMAND_DELAY_MIN..=COMMAND_DELAY_MAX).contains(&DEFAULT_COMMAND_DELAY));
+    }
+
+    #[test]
+    fn delay_bounds_span_the_half_second_to_second_and_a_half_trial_points() {
+        assert_eq!(COMMAND_DELAY_MIN, TICKS_PER_SECOND / 2);
+        assert_eq!(COMMAND_DELAY_MAX, TICKS_PER_SECOND * 3 / 2);
+    }
+
+    #[test]
+    fn delay_validation_accepts_the_bounds_and_rejects_outside_them() {
+        for accepted in [COMMAND_DELAY_MIN, DEFAULT_COMMAND_DELAY, COMMAND_DELAY_MAX] {
+            assert_eq!(validate_command_delay(accepted), Ok(accepted));
+        }
+        for rejected in [COMMAND_DELAY_MIN - 1, COMMAND_DELAY_MAX + 1, 0, u64::MAX] {
+            assert_eq!(
+                validate_command_delay(rejected),
+                Err(CommandDelayError {
+                    requested: rejected
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn rejected_delay_reports_the_bounds_and_the_requested_value() {
+        let message: String = validate_command_delay(31).unwrap_err().into();
+        assert!(message.contains("10-30 ticks"), "{message}");
+        assert!(message.contains("0.5-1.5s"), "{message}");
+        assert!(message.contains("31 was requested"), "{message}");
+    }
+
+    #[test]
+    fn out_of_range_delay_is_rejected_and_never_clamped() {
+        // A clamping implementation would answer Ok(COMMAND_DELAY_MAX) here.
+        assert!(validate_command_delay(COMMAND_DELAY_MAX + 1).is_err());
+        assert!(validate_command_delay(COMMAND_DELAY_MIN - 1).is_err());
+    }
+
+    #[test]
+    fn scheduling_follows_the_rooms_frozen_delay_not_the_constant() {
+        // Mirrors the two `Room` columns `issue_order` schedules against:
+        // `execution_tick(room.tick, room.command_delay)`.
+        struct FrozenRoom {
+            tick: u64,
+            command_delay: u64,
+        }
+        let room = FrozenRoom {
+            tick: 100,
+            command_delay: validate_command_delay(COMMAND_DELAY_MAX).unwrap(),
+        };
+        assert_ne!(room.command_delay, DEFAULT_COMMAND_DELAY);
+        assert_eq!(execution_tick(room.tick, room.command_delay), Ok(130));
+        assert_ne!(
+            execution_tick(room.tick, room.command_delay),
+            execution_tick(room.tick, DEFAULT_COMMAND_DELAY)
+        );
+
+        let slow = FrozenRoom {
+            tick: 100,
+            command_delay: validate_command_delay(COMMAND_DELAY_MIN).unwrap(),
+        };
+        assert_eq!(execution_tick(slow.tick, slow.command_delay), Ok(110));
+    }
+
+    #[test]
+    fn ruleset_version_is_recorded_and_positive() {
+        assert_eq!(RULESET_VERSION, 1);
+        assert!(RULESET_VERSION > 0);
     }
 }

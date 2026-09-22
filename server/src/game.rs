@@ -3,7 +3,51 @@ use rts_core::{
     execution_tick,
     simulation::{Command as CoreCommand, Order, World},
 };
-use spacetimedb::{ReducerContext, Table};
+use spacetimedb::{ReducerContext, ScheduleAt, Table, TimeDuration};
+
+/// Simulation cadence while at least one match is running.
+const PLAYING_TICK_MICROS: i64 = 50_000;
+/// Housekeeping cadence while rooms exist but none are running. Lobbies only
+/// need the idle-expiry sweep, not 20 TPS.
+const LOBBY_TICK_MICROS: i64 = 5_000_000;
+
+fn desired_schedule(ctx: &ReducerContext) -> Option<ScheduleAt> {
+    let mut micros = None;
+    for room in ctx.db.room().iter() {
+        if room.state == "playing" {
+            micros = Some(PLAYING_TICK_MICROS);
+            break;
+        }
+        micros = Some(LOBBY_TICK_MICROS);
+    }
+    micros.map(|value| TimeDuration::from_micros(value).into())
+}
+
+/// Arms, re-rates, or disarms the tick so an empty database costs nothing.
+/// Call after anything that creates, removes, or changes the state of a room.
+pub fn sync_tick_schedule(ctx: &ReducerContext) {
+    let desired = desired_schedule(ctx);
+    let mut rows = ctx.db.tick_schedule().iter().collect::<Vec<_>>();
+    let current = rows.pop();
+    for extra in rows {
+        ctx.db
+            .tick_schedule()
+            .scheduled_id()
+            .delete(extra.scheduled_id);
+    }
+    if current.as_ref().map(|row| row.scheduled_at) == desired {
+        return;
+    }
+    if let Some(row) = current {
+        ctx.db.tick_schedule().scheduled_id().delete(row.scheduled_id);
+    }
+    if let Some(scheduled_at) = desired {
+        ctx.db.tick_schedule().insert(TickSchedule {
+            scheduled_id: 0,
+            scheduled_at,
+        });
+    }
+}
 
 pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
     World {
@@ -265,5 +309,6 @@ pub fn game_tick(ctx: &ReducerContext, _timer: TickSchedule) -> Result<(), Strin
         }
         ctx.db.room().id().update(room);
     }
+    sync_tick_schedule(ctx);
     Ok(())
 }
