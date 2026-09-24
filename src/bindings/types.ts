@@ -83,6 +83,12 @@ export const Entity = __t.object("Entity", {
   research: __t.array(__t.string()),
   stock: __t.u32(),
   expiresTick: __t.u64(),
+  maxHp: __t.i32(),
+  shields: __t.i32(),
+  maxShields: __t.i32(),
+  damagedTick: __t.u64(),
+  warpTick: __t.u64(),
+  arriveTick: __t.u64(),
 });
 export type Entity = __Infer<typeof Entity>;
 

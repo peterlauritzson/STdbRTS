@@ -105,7 +105,8 @@ test("resource kinds map to the currency a deposit or a load actually holds", ()
 // --- Practice opponent ------------------------------------------------------
 
 function unit(id: number, owner: number, kind: string, stock = 0): Entity {
-  return { id, owner, kind, x: 220, y: 220, hp: kind === "hq" ? 1200 : 60, order: { kind: "stop", x: 0, y: 0, target: 0 }, queue: [], cargo: 0, cargoKind: ResourceKind.Material, returning: false, nextAttack: 0n, shotTick: 0n, shotX: 0, shotY: 0, production: [], constructionRemaining: 0n, research: [], stock, expiresTick: 0n };
+  const hp = kind === "hq" ? 1200 : 60;
+  return { id, owner, kind, x: 220, y: 220, hp, maxHp: hp, shields: 0, maxShields: 0, damagedTick: 0n, warpTick: 0n, arriveTick: 0n, order: { kind: "stop", x: 0, y: 0, target: 0 }, queue: [], cargo: 0, cargoKind: ResourceKind.Material, returning: false, nextAttack: 0n, shotTick: 0n, shotX: 0, shotY: 0, production: [], constructionRemaining: 0n, research: [], stock, expiresTick: 0n };
 }
 
 function deposit(id: number, x: number, y: number, amount: number, currency: Currency = "material"): Node {
@@ -755,4 +756,52 @@ test("the bot does not count brood toward its unit limit", () => {
   const units = [unit(1, 0, "hq"), { ...unit(2, 0, "barracks"), x: 400 }, ...army, ...brood];
   const decisions = chooseOrders(0, "organic", purse(5000, 5000), units, [], new Set(army.map(soldier => soldier.id)));
   assert.ok(decisions.some(decision => decision.order.kind === "train_soldier" || decision.order.kind === "train_scout"), JSON.stringify(decisions.map(decision => decision.order.kind)));
+});
+
+// --- Power and sensor fields, shields, teleport -------------------------------
+
+import { arriving, BUILDING_FACTION, canTeleport, canTrainAt, channelFraction, fieldsOf, powered, POWER_FIELD_RADIUS, projectsPower, SENSOR_FIELD_RADIUS, shieldsRegenerating } from "../src/zones";
+
+const factions: Record<number, FactionName> = { 0: "network", 1: "industrial" };
+const placed = (id: number, owner: number, kind: string, x: number, y: number, remaining = 0n): Entity => ({ ...unit(id, owner, kind), x, y, constructionRemaining: remaining });
+
+test("power fields come from Network relays and hubs only, and only once finished", () => {
+  assert.ok(projectsPower("relay", "network") && projectsPower("hq", "network") && projectsPower("outpost", "network"));
+  assert.ok(!projectsPower("hq", "industrial") && !projectsPower("hq", "organic") && !projectsPower("barracks", "network"));
+  const units = [placed(1, 0, "hq", 200, 200), placed(2, 0, "relay", 1000, 200, 40n), placed(3, 1, "hq", 2000, 2000), placed(4, 1, "sensor", 2400, 2000)];
+  const fields = fieldsOf(units, slot => factions[slot]);
+  assert.deepEqual(fields.map(field => [field.kind, field.owner, field.radius]), [["power", 0, POWER_FIELD_RADIUS], ["sensor", 1, SENSOR_FIELD_RADIUS]]);
+  assert.ok(powered(0, 200 + POWER_FIELD_RADIUS, 200, fields), "the edge counts, as `<=` on the server");
+  assert.ok(!powered(0, 200 + POWER_FIELD_RADIUS + 1, 200, fields));
+  assert.ok(!powered(1, 200, 200, fields), "owner only");
+  assert.ok(!powered(0, 1000, 200, fields), "an unfinished relay projects nothing");
+  assert.ok(!powered(1, 2400, 2000, fields), "a sensor field is not power");
+  assert.deepEqual(BUILDING_FACTION, { sensor: "industrial", relay: "network" });
+});
+
+test("a drifter trains at any finished structure in its owner's field; nothing else changes", () => {
+  const units = [placed(1, 0, "hq", 200, 200), placed(2, 0, "barracks", 400, 200), placed(3, 0, "barracks", 1200, 200), placed(4, 0, "lab", 450, 250, 10n)];
+  const fields = fieldsOf(units, slot => factions[slot]);
+  assert.ok(canTrainAt("drifter", units[0], "network", fields));
+  assert.ok(canTrainAt("drifter", units[1], "network", fields), "barracks inside the HQ's field");
+  assert.ok(!canTrainAt("drifter", units[2], "network", fields), "barracks outside every field");
+  assert.ok(!canTrainAt("drifter", units[3], "network", fields), "unfinished");
+  assert.ok(!canTrainAt("worker", units[1], "industrial", fields), "only the drifter trains in a field");
+  assert.ok(canTrainAt("soldier", units[1], "network", fields) && !canTrainAt("soldier", units[0], "network", fields), "the army table is untouched");
+});
+
+test("shield, channel and arrival state read off the unit row", () => {
+  const soldier = { ...unit(1, 0, "soldier"), maxHp: 70, shields: 30, maxShields: 70 };
+  assert.ok(shieldsRegenerating({ ...soldier, damagedTick: 0n }, 50n), "never hit");
+  assert.ok(!shieldsRegenerating({ ...soldier, damagedTick: 1000n }, 1199n), "inside the ten-second delay");
+  assert.ok(shieldsRegenerating({ ...soldier, damagedTick: 1000n }, 1200n));
+  assert.ok(!shieldsRegenerating({ ...soldier, shields: 70 }, 5000n), "full");
+  assert.ok(!shieldsRegenerating({ ...unit(2, 1, "soldier") }, 5000n), "no shields at all");
+  const channelling = { ...soldier, order: { kind: "teleport", x: 0, y: 0, target: 0 }, warpTick: 120n };
+  assert.equal(channelFraction(channelling, 100n), 0);
+  assert.equal(channelFraction(channelling, 110n), 0.5);
+  assert.equal(channelFraction(channelling, 130n), 1);
+  assert.equal(channelFraction(soldier, 110n), undefined);
+  assert.ok(arriving({ arriveTick: 140n }, 139n) && !arriving({ arriveTick: 140n }, 140n));
+  assert.ok(canTeleport("soldier") && canTeleport("drifter") && !canTeleport("relay") && !canTeleport("hq"));
 });

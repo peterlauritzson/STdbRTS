@@ -1,12 +1,13 @@
 import "../styles.css";
-import { createIcons, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout } from "lucide";
+import { createIcons, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles } from "lucide";
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
 import { COLORS, countdown, VISUALS } from "./presentation";
-import { addCost, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, canProduce, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, parseFaction, PRACTICE_SLOT, STOCK_REASON, type Cost, type FactionName } from "./catalog";
+import { addCost, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, parseFaction, PRACTICE_SLOT, STOCK_REASON, type Cost, type FactionName } from "./catalog";
 import { Practice } from "./practice";
 import { Feedback } from "./feedback";
 import { ScoreScreen, type ScorePlayer } from "./scorescreen";
+import { BUILDING_FACTION, canTrainAt, powered, type Field } from "./zones";
 
 function element<Type extends HTMLElement = HTMLElement>(id: string): Type {
   const value = document.getElementById(id);
@@ -74,12 +75,21 @@ for (const kind of TRAINABLE) {
   if (LABOUR_KINDS.includes(kind)) button.hidden = true;
   element("training-buttons").append(button);
 }
-for (const kind of ["barracks", "outpost", "turret", "factory", "lab"]) {
+/**
+ * Every building has a button. A faction building — the Industrial sensor, the
+ * Network relay — is hidden from the other factions outright, as another
+ * faction's labour is: the server refuses it by name, so a disabled button
+ * would only be noise.
+ */
+const BUILDABLE = ["barracks", "outpost", "turret", "factory", "lab", "sensor", "relay"];
+for (const kind of BUILDABLE) {
   const definition = CATALOG[kind];
-  element("building-buttons").append(catalogButton(`build-${kind}`, definition.label, definition.cost, definition.seconds, definition.icon, definition.role));
+  const button = catalogButton(`build-${kind}`, definition.label, definition.cost, definition.seconds, definition.icon, definition.role);
+  if (BUILDING_FACTION[kind]) button.hidden = true;
+  element("building-buttons").append(button);
 }
 for (const [kind, definition] of Object.entries(TECHNOLOGIES)) element("research-buttons").append(catalogButton(`research-${kind}`, definition.label, RESEARCH_COST, RESEARCH_SECONDS, definition.icon, definition.description));
-createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout } });
+createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles } });
 const session = new Session();
 const practice = new Practice(session);
 const feedback = new Feedback(message => session.onNotice(message));
@@ -170,9 +180,20 @@ function producerKinds(faction = myFaction()): string[] {
   return faction === "organic" ? ["hq", "barracks", "factory", "lab", "outpost"] : ["hq", "barracks", "factory", "lab"];
 }
 
+/**
+ * A building that can produce something for this faction right now. Network
+ * adds every finished structure standing in its own power field, because a
+ * drifter can be trained at any of them.
+ */
+function isProducer(unit: { kind: string; owner: number; x: number; y: number; constructionRemaining: bigint }, faction: FactionName, fields: readonly Field[]): boolean {
+  if (!isBuilding(unit.kind) || unit.constructionRemaining !== 0n) return false;
+  return producerKinds(faction).includes(unit.kind) || (faction === "network" && powered(unit.owner, unit.x, unit.y, fields));
+}
+
 function productionBuilding() {
-  const kinds = producerKinds();
-  const owned = battlefield.ownedSelection().find(unit => kinds.includes(unit.kind) && unit.constructionRemaining === 0n);
+  const faction = myFaction();
+  const fields = battlefield.fields();
+  const owned = battlefield.ownedSelection().find(unit => isProducer(unit, faction, fields));
   return owned ?? session.snapshot.units.find(unit => unit.owner === session.snapshot.me?.slot && unit.kind === "hq");
 }
 
@@ -232,6 +253,7 @@ element("return").addEventListener("click", () => battlefield.issue("return"));
 element("hold").addEventListener("click", () => battlefield.issue("hold"));
 element("attack-move").addEventListener("click", () => battlefield.arm("attack_move"));
 element("repair").addEventListener("click", () => battlefield.arm("repair"));
+element("teleport").addEventListener("click", () => battlefield.arm("teleport"));
 element("set-rally").addEventListener("click", () => battlefield.arm("rally"));
 for (const [id, kind] of [["clear-rally", "clear_rally"], ["cancel-production", "cancel_production"]]) element(id).addEventListener("click", () => {
   const hq = productionBuilding();
@@ -252,7 +274,7 @@ for (const name of ["production", "build", "research"]) element(`tab-${name}`).a
     element(`${other}-pane`).hidden = name !== other;
   }
 });
-for (const kind of ["barracks", "outpost", "turret", "factory", "lab"]) element(`build-${kind}`).addEventListener("click", () => battlefield.arm(`build_${kind}`));
+for (const kind of BUILDABLE) element(`build-${kind}`).addEventListener("click", () => battlefield.arm(`build_${kind}`));
 for (const kind of Object.keys(TECHNOLOGIES)) element(`research-${kind}`).addEventListener("click", () => {
   const lab = battlefield.ownedSelection().find(unit => unit.kind === "lab" && unit.constructionRemaining === 0n) ?? session.snapshot.units.find(unit => unit.owner === session.snapshot.me?.slot && unit.kind === "lab" && unit.constructionRemaining === 0n);
   if (lab) void session.order([lab.id], { kind: `research_${kind}`, x: 0, y: 0, target: 0 });
@@ -336,6 +358,7 @@ function renderMatch(): void {
   const balance: Cost = { material: me.material, catalyst: me.catalyst };
   const faction = myFaction();
   const labour = LABOUR[faction];
+  const fields = battlefield.fields();
   element("match-name").textContent = room.name;
   element("material").textContent = String(balance.material);
   element("catalyst").textContent = String(balance.catalyst);
@@ -365,18 +388,22 @@ function renderMatch(): void {
     // A harvester is bought with hub stock and no currency at all, so its only
     // possible refusal is the stock one — quoted exactly as the server gives it.
     const stockless = kind === "harvester" && stock === 0;
-    const blocked = stockless || !canOrder || !producer || !canProduce(kind, producer.kind, faction) || producer.production.length >= 8 || mobile.length + pending >= 60;
+    const blocked = stockless || !canOrder || !producer || !canTrainAt(kind, producer, faction, fields) || producer.production.length >= 8 || mobile.length + pending >= 60;
     affordability(button, definition.cost, balance, blocked, stockless ? `${definition.role} / ${STOCK_REASON}` : definition.role);
   }
-  const producers = buildings.filter(unit => producerKinds(faction).includes(unit.kind) && unit.constructionRemaining === 0n);
+  const producers = buildings.filter(unit => isProducer(unit, faction, fields));
   const nextSignature = producers.map(unit => `${unit.id}:${unit.kind}`).join(",");
   if (nextSignature !== producerSignature) {
     producerSignature = nextSignature;
     element("producer-select").replaceChildren(...producers.map(unit => { const option = text("option", `${CATALOG[unit.kind].label} #${unit.id}`) as HTMLOptionElement; option.value = String(unit.id); return option; }));
   }
   element<HTMLSelectElement>("producer-select").value = String(producer?.id ?? 0);
-  for (const kind of ["barracks", "outpost", "turret", "factory", "lab"]) {
+  for (const kind of BUILDABLE) {
     const definition = CATALOG[kind];
+    const owner = BUILDING_FACTION[kind];
+    const button = element<HTMLButtonElement>(`build-${kind}`);
+    if (owner) button.hidden = owner !== faction;
+    if (button.hidden) continue;
     // Construction is driven by any labour unit now, not only by a worker:
     // gating this on "worker" left Network and Organic unable to build at all.
     const blocked = !canOrder || !owned.some(unit => isLabour(unit.kind)) || buildings.length >= 16 || (kind === "factory" && !buildings.some(unit => unit.kind === "barracks" && unit.constructionRemaining === 0n));
@@ -409,6 +436,7 @@ function renderMatch(): void {
   const hubs = selection.filter(unit => isHub(unit.kind) && unit.owner === me.slot);
   element("selection-details").textContent = selection.length
     ? `${selection.reduce((sum, unit) => sum + unit.hp, 0)} HP`
+      + (selection.some(unit => unit.maxShields > 0) ? ` / ${selection.reduce((sum, unit) => sum + unit.shields, 0)} shields` : "")
       + (carriers.length ? ` / ${cargoLabel} cargo` : "")
       + (drifting ? " / credits in place" : "")
       + (faction === "organic" && hubs.length ? ` / ${hubs.reduce((sum, unit) => sum + unit.stock, 0)} / ${hubs.length * HUB_STOCK_CAP} stock` : "")
@@ -419,12 +447,15 @@ function renderMatch(): void {
   // A harvester gathers only: the server refuses it hold and attack-move by name.
   for (const id of ["hold", "attack-move"]) element<HTMLButtonElement>(id).disabled = !canOrder || !battlefield.ownedSelection().some(unit => fights(unit.kind));
   element<HTMLButtonElement>("repair").disabled = !canOrder || !battlefield.ownedSelection().some(unit => isLabour(unit.kind));
+  // Teleport is Network's alone, and only for units already inside the field.
+  element("teleport").hidden = faction !== "network";
+  element<HTMLButtonElement>("teleport").disabled = !canOrder || !battlefield.teleporters().length;
   element<HTMLButtonElement>("set-rally").disabled = !canOrder;
   element<HTMLButtonElement>("clear-rally").disabled = !canOrder || !producer?.order.kind.startsWith("rally_");
   // An Organic outpost queues harvesters but is not a production *control*:
   // the server takes rally and cancellation only at an HQ, barracks, factory or
   // lab, so the button is disabled there rather than sending a refused order.
-  const controllable = !!producer && ["hq", "barracks", "factory", "lab"].includes(producer.kind);
+  const controllable = !!producer && isBuilding(producer.kind);
   element<HTMLButtonElement>("cancel-production").disabled = !canOrder || !producer?.production.length || !controllable;
   element<HTMLButtonElement>("cancel-construction").disabled = !canOrder || !battlefield.ownedSelection().some(unit => unit.constructionRemaining > 0n);
   element<HTMLButtonElement>("idle-worker").disabled = !canOrder || !owned.some(unit => isLabour(unit.kind) && unit.order.kind === "stop");
@@ -437,15 +468,15 @@ function renderMatch(): void {
   const refundParts = [formatCost(refund) === "nothing" ? "" : formatCost(refund), stocked ? `${stocked} hub stock` : ""].filter(Boolean);
   element("cancel-production").title = controllable
     ? `Cancel all unfinished production / refund ${refundParts.join(" + ") || "nothing"}`
-    : "Production controls require an HQ, barracks, factory or laboratory";
+    : "Select a building with a production queue";
   const rallyNode = producer?.order.kind === "rally_gather" ? session.snapshot.nodes.find(node => node.id === producer.order.target) : undefined;
   element("rally-status").textContent = producer?.order.kind === "rally_move" ? `Rally ${Math.round(producer.order.x)}, ${Math.round(producer.order.y)}`
     : producer?.order.kind === "rally_gather" ? `${rallyNode ? CURRENCY_LABEL[currencyOf(rallyNode.kind)] : "Deposit"} rally #${producer.order.target}` : "Rally unset";
   element("selection-order").textContent = selection.length === 1 ? selection[0].constructionRemaining > 0n ? `Construction / ${(Number(selection[0].constructionRemaining) / 20).toFixed(1)}s work` : selection[0].order.kind.split("_").join(" ") : "";
-  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : "Rally target";
+  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : "Rally target";
   element("targeting-state").hidden = !battlefield.targeting;
   element("targeting-state").textContent = targetLabel;
-  for (const [id, kind] of [["attack-move", "attack_move"], ["repair", "repair"], ["set-rally", "rally"]]) element(id).setAttribute("aria-pressed", String(battlefield.targeting === kind));
+  for (const [id, kind] of [["attack-move", "attack_move"], ["repair", "repair"], ["set-rally", "rally"], ["teleport", "teleport"]]) element(id).setAttribute("aria-pressed", String(battlefield.targeting === kind));
   const result = room.state === "finished" ? room.winner === -1 ? "Draw" : room.winner === me.slot ? "Victory" : "Defeat" : session.matchReady && !hq ? "HQ destroyed" : "";
   element("result").hidden = !result;
   element("result-title").textContent = result;

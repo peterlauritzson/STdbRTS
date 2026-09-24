@@ -14,10 +14,13 @@ Completed since: **faction selection and the first zone (step 12)**, **auto-gath
 
 Since then: **the practice bot fields an army again (step 15)** and **Organic creep, including its client rendering (step 16)**. Creep's client rendering is done and validated 2026-09-24.
 
-Next action, continuing the zone layer in the order [ZONES.md](ZONES.md) sets out:
+Latest: **shields and the Network power field (step 17)**, including the relay, drifter training at any powered structure, death restoration, teleport, and the Industrial sensor tower becoming buildable and visible on the client. All three factions' zones now exist in play. The playable build is on `stdbrts-shield`.
 
-1. **Shields** as a second health pool, with regeneration. The Network power field cannot exist until this does.
-2. **The Network power field** — worker creation at any structure inside it, faster shield regeneration, a dying unit restoring shields to nearby friendlies scaling with its total health, and teleport from anywhere in the field to anywhere else in it.
+Next action. The zone layer is complete, so this is ordered by what most changes how a faction plays:
+
+1. **Faction-specific army units.** Apart from labour and the two zone buildings, the rosters are still shared.
+2. **Network survival.** In every live run the practice bot's first push, led by a siege unit out-ranging the defenders, killed a Network HQ at 80-115s. That is balance and bot behaviour, not a shield bug, but Network needs a playtest by a person before any values move.
+3. The three open questions in [DECISIONS.md](DECISIONS.md) under shields: whether hubs should project power, whether teleport needs a cooldown or a cost, and whether the shield split should vary by kind.
 
 **Increment F, the autonomous extractor, is explicitly deprioritised** — the author called it one of the least important mechanics. Do not pick it up because it looks cheap.
 
@@ -34,9 +37,10 @@ Smaller open items:
 - Unit costs, stats and resource amounts are all still first-pass experimental values, including the sensor tower's 450 radius and 30% speed bonus.
 - The zone field is rebuilt every tick and cost +25% on p95 for one zone type with few sources. Creep's added tick cost could not be separated from noise on a busy machine; rerun `bench_load` on an idle one before quoting it. The `creep_patch` read (an index scan per tick) is unmeasured.
 - Practice-bot observations not acted on: Network was eliminated before 120s in both live three-way runs (balance or combat, not the bot); Industrial floats ~3.4k material at 180s, which a second barracks would fix; every player opens with its labour **plus one soldier** — confirm that is intended.
-- The rosters are still shared apart from the Industrial sensor tower. Faction-specific units beyond labour are not started.
+- The rosters are still shared apart from the sensor tower and the relay. Faction-specific units beyond labour are not started.
+- After placing a building, the builder stays selected, so placing a second building at once pulls the same labourer off the first site. Existing behaviour, found while playing step 17; press Escape between placements.
 
-Nothing is committed.
+Work up to step 16 is committed (`c43ed34`). Step 17 is not committed.
 
 ## Constraints
 
@@ -204,6 +208,20 @@ The zone tests failed four times before passing, and every failure was the test,
 - Verified live: a patch lost its source at tick 1192 with radius 300 was removed at tick 1592, exactly as `advance_patch` predicts, and the countdown read 12.4s at tick 1343.
 - Still unverified: no brute has been seen on screen; a brood has not been given orders through the UI; no browser test covers creep; the creep tint is faint at default zoom (the author's judgement, not measured); and the bench still needs an idle-machine rerun.
 - Bench: indistinguishable from noise on a busy machine — p95 ~12.5–14ms against 12.6–13ms at 60 per player, ~26–28ms both ways at 120. Rerun on an idle machine before comparing to the 9.1/18.4ms zone baseline.
+
+### Step 17: Shields and the Network power field (validated 2026-09-24)
+
+- **Shields**, Network only: half of every listed health total becomes shields (soldier 70 + 70, HQ 600 + 600, drifter 20 + 20), so total durability is unchanged. They absorb damage before hit points, wait 200 ticks after a hit, then regenerate 2/s, or 6/s inside the owner's power field. Construction raises them alongside hit points. `Entity` gains `max_hp`, `shields`, `max_shields`, `damaged_tick`, `warp_tick` and `arrive_tick`; repair and construction read `max_hp` instead of the kind's listed health.
+- **The power field** (`rules::power_field`, radius 320) is projected by the new Network-only **`relay`** (75 material, 150 + 150, 5s) and by a Network player's HQ and outposts. It participates in connectivity and combat/death only. `zones_of` now takes the factions, because an HQ projects power only for Network.
+- **Drifters train at any finished structure in the field**, and a drifter with no rally goes straight to the nearest material deposit. `cancel_production` is accepted on any building, so a relay's queue can be cancelled.
+- **A death in the field** restores 20% of the dead entity's total health as shields to each of the owner's entities within 180.
+- **Teleport**: a new `teleport` order. A 1s channel with no movement or fire, cancelled by any damage. Both ends are rechecked on completion, and the unit is then inactive for 2s. It can't be queued and has no cooldown. The client has a Teleport button and the **T** hotkey, a destination preview reading "TELEPORT HERE" or "OUTSIDE YOUR FIELD", a closing ring while channelling, and a pulsing ring on arrival.
+- **Client**: power fields drawn as owner-tinted discs with a drifting dotted edge (also on the minimap), sensor fields as long-dashed rings, a pale-blue shield bar above health that brightens while regenerating, and relay and sensor visuals. Faction build buttons are hidden from other factions. **The sensor tower was server-only until now**: it had no build button, no visual and no drawn field, so the Industrial zone had never been visible in play. The pure readings live in `src/zones.ts`.
+- Other fixes this forced: the bot's HQ repair trigger was `hp < 900`, which fires forever for a 600-hp Network HQ, and is now three quarters of `maxHp`. The building-under-attack alert now counts shields. One integration test used `teleport` as its example of an unknown order; it now uses `summon`, and separately asserts that an Industrial unit is refused teleport.
+- `RULESET_VERSION` 7. Breaking schema change, published to a new database `stdbrts-shield`; earlier databases untouched.
+- Evidence: **144 Rust tests** (9 new, covering the split, absorption and spill-over, regeneration timing inside and outside a field, restoration reach, field-gated training including an unfinished relay, power ownership and concept participation, the teleport channel and arrival, refusals, damage cancelling a channel, and shields rising with construction); **client 45/45** (3 new); **integration 12/12** and **browser 4/4** against `stdbrts-shield`; typecheck, build and the WASM check pass.
+- **Played through the browser** in four Network practice matches, using the Build and Production tabs, map clicks, box select and the T hotkey. Observed: the HQ field drawn at match start; relay placed, built and selected, reading "150 HP / 150 shields"; the producer list offering the relay and Train Drifter enabled there; a drifter trained there and mining at once; the soldier channelling, then standing beside the relay. In a defended match, rows read straight from the database showed the HQ's shields falling 600 → 420 → 186 with hit points at 600/600; a rise from 186 to 251 in 107 ticks, which regeneration alone cannot give and which matches two nearby soldier deaths restoring 28 each; and hit points falling only once shields reached 0.
+- **Not verified**: a teleport with the enemy firing on the channel (covered by a unit test only); a relay killed mid-channel stranding a unit; the minimap field ring by eye; touch input for teleport; Network surviving past two minutes against the practice bot, which it never did. The bench was not rerun.
 
 ## Remaining Implementation
 

@@ -311,3 +311,67 @@ the owner's own production.
 **Would overturn it.** Playtest evidence that death spawns dominate fights on
 creep, or that a shape other than a disc per hub is needed for creep to read as
 territory. Either would change values or representation, not ownership.
+
+---
+
+## 2026-09-24 — Shields and the Network power field
+
+**Decision.**
+
+- **Only Network carries shields, as half its listed health.** A Network
+  entity of any kind gets `hp - hp * 50%` hit points and the rest as shields:
+  a soldier is 70 + 70, an HQ 600 + 600, a drifter 20 + 20. The total is
+  unchanged, so the faction gains regeneration, not durability. Temporary
+  units never carry shields. Both maxima are stored on the entity at spawn
+  (`max_hp`, `max_shields`) so repair, construction and the client all read
+  the figure the simulation chose.
+- **Shields take damage first.** Armour and weapon upgrades apply to the hit
+  before the split, exactly as before. Hit points never regenerate; repair
+  still restores them only.
+- **Regeneration waits 200 ticks (10s) after the last hit**, then restores 1
+  shield every 10 ticks (2/s). Inside the owner's power field it is 3x (6/s).
+  Construction raises shields from 0 to full alongside hit points, so a
+  finished building is at full health.
+- **The power field is projected by the new Network `relay` and by a Network
+  player's hubs** (HQ, outpost), radius 320. Barracks, factories, labs and
+  turrets project nothing. The relay is Network-only, 75 material, 300 listed
+  health (150 + 150), 5s build.
+- **Drifters train at any finished structure standing in the owner's field**,
+  on top of the HQ, and a drifter with no rally goes straight to the nearest
+  material deposit.
+- **A death in the field restores shields**: each of the owner's entities
+  within 180 of the death point gains 20% of the dead entity's total health
+  (hit points plus shields, at maximum), capped at its own maximum. Same
+  snapshot rule as creep's death spawns.
+- **Teleport**: any mobile unit standing in its owner's field can be sent to
+  any point in that field. It channels for 20 ticks (1s) without moving or
+  firing; any damage cancels it. When the channel completes, both ends are
+  checked again, and a destroyed relay strands the unit where it is. On arrival
+  it is inactive for 40 ticks (2s): it can be shot but does nothing. No
+  cooldown and no cost beyond that. Cannot be queued.
+- The power field participates in **connectivity** (power) and
+  **combat/death** (regeneration, restoration), and nothing else. It blocks
+  nothing and changes no one's speed.
+
+`RULESET_VERSION` 7. Every number is experimental.
+
+**Why.** The 50/50 split follows the reference game's shielded faction and
+keeps the change honest: Network is not simply given more health. Hubs project
+power so a Network base opens powered and every expansion powers itself; if
+every structure projected, "train at any structure in the field" would mean "at
+any structure" and the relay would have no job. Damage cancelling the channel
+follows the reference game's recall, and without it a teleport would be a free
+exit from every fight inside a field. The arrival window replaces a cooldown as
+the price of the move.
+
+**Open for the author.**
+
+- Whether all Network hubs should project, or only relays (the pylon reading).
+- Whether teleport needs a cooldown or a cost, such as the reference game's
+  shield-funded recall.
+- Whether the split should vary by kind (the reference game's worker was
+  5 / 25, mostly shield).
+
+**Would overturn it.** Playtest evidence that teleport without a cooldown lets
+an army dodge every fight in its own base, or that 6/s regeneration makes
+Network bases untakeable. Either changes values, not the model.

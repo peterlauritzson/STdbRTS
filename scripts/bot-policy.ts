@@ -73,7 +73,9 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost,
   const assigned = new Set(busy);
   let available: Cost = { material: balance.material, catalyst: balance.catalyst };
   const repairing = workers.some(unit => unit.order.kind === "repair");
-  const repairer = hq.hp < 900 && available.material > 0 && !repairing
+  // Three quarters of full hit points: 900 of 1200 for most HQs, 450 of the
+  // 600 a Network HQ carries beside its shields.
+  const repairer = hq.hp < hq.maxHp * 3 / 4 && available.material > 0 && !repairing
     ? workers.find(unit => !busy.has(unit.id)) : undefined;
   if (repairer) decisions.push({ units: [repairer.id], order: { kind: "repair", x: 0, y: 0, target: hq.id } });
   if (repairer) assigned.add(repairer.id);

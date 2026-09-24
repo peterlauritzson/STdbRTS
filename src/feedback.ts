@@ -31,7 +31,7 @@ export class Feedback {
       if (old && old.constructionRemaining > 0n && unit.constructionRemaining === 0n) {
         this.notice(`${CATALOG[unit.kind].label} complete`); this.play([660, 880]);
       }
-      if (old && unit.hp < old.hp && isBuilding(unit.kind) && performance.now() - this.lastAlert > 8000) {
+      if (old && unit.hp + unit.shields < old.hp + old.shields && isBuilding(unit.kind) && performance.now() - this.lastAlert > 8000) {
         this.lastAlert = performance.now(); this.notice(`${CATALOG[unit.kind].label} under attack`); this.play([180, 110]);
       }
     }

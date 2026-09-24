@@ -1,13 +1,14 @@
 import type { CreepPatch, Entity, Order } from "./bindings/types";
 import { Session } from "./network";
 import { clamp, clampToMap, COLORS, countdown, VISUALS, WORLD_SIZE } from "./presentation";
-import { cargoCapacity, carriesCargo, currencyOf, fights, isArmy, isBuilding, isLabour, isTemporary, placementError, terrain } from "./catalog";
+import { cargoCapacity, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isLabour, isTemporary, placementError, terrain } from "./catalog";
 import { creepGoneTick, lifetimeFraction, offCreep } from "./creep";
+import { arriving, canTeleport, channelFraction, fieldsOf, powered, POWER_FIELD_RADIUS, SENSOR_FIELD_RADIUS, shieldsRegenerating, type Field } from "./zones";
 
 interface Point { x: number; y: number }
 interface Motion { from: Point; to: Point; at: number }
 type InputMode = "select" | "order" | "pan";
-type TargetMode = "attack_move" | "repair" | "rally" | `build_${string}`;
+type TargetMode = "attack_move" | "repair" | "rally" | "teleport" | `build_${string}`;
 
 export class Battlefield {
   selected = new Set<number>();
@@ -69,6 +70,7 @@ export class Battlefield {
       if (event.key.toLowerCase() === "a") this.arm("attack_move");
       if (event.key.toLowerCase() === "r") this.arm("repair");
       if (event.key.toLowerCase() === "d") this.issue("hold");
+      if (event.key.toLowerCase() === "t") this.arm("teleport");
       if (event.key === ".") this.selectIdleWorker();
       if (event.key === "Escape") {
         if (this.targeting) this.targeting = undefined;
@@ -108,6 +110,26 @@ export class Battlefield {
     if (initial) this.home();
   }
 
+  /**
+   * Every power and sensor field on the map, derived from the unit rows exactly
+   * as the server derives them each tick. A slot's faction comes from its
+   * player row; a slot with no row projects no power field.
+   */
+  fields(): Field[] {
+    const { units, players, room } = this.session.snapshot;
+    return fieldsOf(units, slot => {
+      const player = players.find(player => player.matchId === room?.id && player.slot === slot);
+      return player ? factionOf(player.faction) : undefined;
+    });
+  }
+
+  /** Selected units that could start a teleport right now: mobile, powered, not still arriving. */
+  teleporters(): Entity[] {
+    const fields = this.fields();
+    const tick = this.session.snapshot.room?.tick ?? 0n;
+    return this.ownedSelection().filter(unit => canTeleport(unit.kind) && !arriving(unit, tick) && powered(unit.owner, unit.x, unit.y, fields));
+  }
+
   ownedSelection(): Entity[] {
     return this.session.snapshot.units.filter(unit => this.selected.has(unit.id) && unit.owner === this.session.snapshot.me?.slot);
   }
@@ -139,6 +161,7 @@ export class Battlefield {
     const allowed = kind === "rally"
       ? this.session.snapshot.units.some(unit => unit.kind === "hq" && unit.owner === this.session.snapshot.me?.slot)
       : kind.startsWith("build_") ? this.session.snapshot.units.some(unit => unit.owner === this.session.snapshot.me?.slot && isLabour(unit.kind))
+      : kind === "teleport" ? this.teleporters().length > 0
       : this.ownedSelection().some(unit => kind === "repair" ? isLabour(unit.kind) : fights(unit.kind));
     if (!allowed) return;
     this.targeting = this.targeting === kind ? undefined : kind;
@@ -248,6 +271,17 @@ export class Battlefield {
       }
       return;
     }
+    if (this.targeting === "teleport" && me) {
+      // Both ends must be in your own field; the server checks both again when
+      // the order executes and again when the channel completes.
+      if (!powered(me.slot, point.x, point.y, this.fields())) { this.session.onNotice("Teleport destination must be inside your power field"); return; }
+      const movers = this.teleporters();
+      if (!movers.length) { this.session.onNotice("Select units standing inside your power field"); return; }
+      void this.session.order(movers.map(unit => unit.id), { kind: "teleport", x: clampToMap(point.x), y: clampToMap(point.y), target: 0 });
+      this.targeting = undefined;
+      this.onSelection();
+      return;
+    }
     const headquarters = owned.find(unit => ["hq", "barracks", "factory", "lab"].includes(unit.kind)) ?? units.find(unit => unit.kind === "hq" && unit.owner === me?.slot);
     if (headquarters && (this.targeting === "rally" || (!this.targeting && owned.length === 1 && ["hq", "barracks", "factory"].includes(owned[0].kind)))) {
       void this.session.order([headquarters.id], { kind: node ? "rally_gather" : "rally_move", x: clampToMap(point.x), y: clampToMap(point.y), target: node?.id ?? 0 });
@@ -263,7 +297,7 @@ export class Battlefield {
     const order: Order = { kind: "move", x: clampToMap(point.x), y: clampToMap(point.y), target: 0 };
     if (this.targeting === "attack_move") { order.kind = "attack_move"; selected = selected.filter(unit => fights(unit.kind)); }
     else if (this.targeting === "repair") {
-      if (!friendly || friendly.hp >= VISUALS[friendly.kind].hp) { this.session.onNotice("Choose a damaged friendly unit or HQ"); return; }
+      if (!friendly || friendly.hp >= friendly.maxHp) { this.session.onNotice("Choose a damaged friendly unit or HQ"); return; }
       order.kind = friendly.constructionRemaining > 0n ? "construct" : "repair"; order.target = friendly.id; selected = selected.filter(unit => isLabour(unit.kind) && unit.id !== friendly.id);
     }
     else if (enemy) { order.kind = "attack"; order.target = enemy.id; selected = selected.filter(unit => fights(unit.kind)); }
@@ -272,7 +306,7 @@ export class Battlefield {
     // Dropping a load at a hub is a carrier's order. A drifter told to return is
     // refused by name on the server, so it is never included here.
     else if (hq) { order.kind = "return"; selected = selected.filter(unit => carriesCargo(unit.kind)); }
-    else if (friendly && friendly.hp < VISUALS[friendly.kind].hp) { order.kind = "repair"; order.target = friendly.id; selected = selected.filter(unit => isLabour(unit.kind) && unit.id !== friendly.id); }
+    else if (friendly && friendly.hp < friendly.maxHp) { order.kind = "repair"; order.target = friendly.id; selected = selected.filter(unit => isLabour(unit.kind) && unit.id !== friendly.id); }
     if (selected.length) {
       void this.session.order(selected.map(unit => unit.id), order, queued);
       this.targeting = undefined;
@@ -351,6 +385,8 @@ export class Battlefield {
     context.translate(-this.camera.x, -this.camera.y);
     context.drawImage(this.terrain, 0, 0);
     const { units, nodes, commands, room } = this.session.snapshot;
+    const fields = this.fields();
+    this.drawFields(fields, now);
     this.drawCreep(now);
     for (const node of nodes) {
       if (node.amount === 0) continue;
@@ -413,14 +449,52 @@ export class Battlefield {
       context.strokeStyle = error ? "#ed7c8b" : "#66dfba"; context.lineWidth = 2;
       context.fillRect(this.pointer.x - 35, this.pointer.y - 35, 70, 70); context.strokeRect(this.pointer.x - 35, this.pointer.y - 35, 70, 70);
       if (kind === "turret") { context.beginPath(); context.arc(this.pointer.x, this.pointer.y, 210, 0, Math.PI * 2); context.stroke(); }
+      // A zone projector previews the ground it will cover.
+      const reach = kind === "relay" ? POWER_FIELD_RADIUS : kind === "sensor" ? SENSOR_FIELD_RADIUS : 0;
+      if (reach) { context.setLineDash([8, 8]); context.beginPath(); context.arc(this.pointer.x, this.pointer.y, reach, 0, Math.PI * 2); context.stroke(); context.setLineDash([]); }
       context.fillStyle = "#efffea"; context.textAlign = "center"; context.font = "13px 'IBM Plex Mono'";
       context.fillText(error ?? VISUALS[kind].label, this.pointer.x, this.pointer.y - 48);
+    }
+    if (this.targeting === "teleport" && this.pointer && this.session.snapshot.me) {
+      const ok = powered(this.session.snapshot.me.slot, this.pointer.x, this.pointer.y, fields);
+      context.strokeStyle = ok ? "#8fd8ff" : "#ed7c8b"; context.lineWidth = 2 / this.camera.zoom;
+      context.setLineDash([4 / this.camera.zoom, 4 / this.camera.zoom]);
+      context.beginPath(); context.arc(this.pointer.x, this.pointer.y, 22, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
+      context.fillStyle = ok ? "#cfefff" : "#ed7c8b"; context.textAlign = "center"; context.font = `${12 / this.camera.zoom}px 'IBM Plex Mono'`;
+      context.fillText(ok ? "TELEPORT HERE" : "OUTSIDE YOUR FIELD", this.pointer.x, this.pointer.y - 30);
     }
     context.restore();
     if (this.drag && !this.drag.pan) {
       context.strokeStyle = "#b3f7dc"; context.fillStyle = "#9cedd321"; context.lineWidth = 1;
       const { start, end } = this.drag;
       context.fillRect(start.x, start.y, end.x - start.x, end.y - start.y); context.strokeRect(start.x, start.y, end.x - start.x, end.y - start.y);
+    }
+  }
+
+  /**
+   * Network power fields and Industrial sensor fields, under creep and units.
+   * The two are told apart by pattern as well as colour: a power field is a
+   * filled owner-tinted disc with a dotted edge that drifts slowly, a sensor
+   * field is an unfilled ring with long dashes. Overlapping discs of one owner
+   * are drawn once each; the fill is faint enough that overlaps stay legible.
+   */
+  private drawFields(fields: readonly Field[], now: number): void {
+    const context = this.context;
+    for (const field of fields) {
+      const color = COLORS[field.owner] ?? "#9fb39f";
+      context.lineWidth = 1.5 / this.camera.zoom;
+      if (field.kind === "power") {
+        context.fillStyle = `${color}14`;
+        context.beginPath(); context.arc(field.x, field.y, field.radius, 0, Math.PI * 2); context.fill();
+        context.strokeStyle = `${color}90`;
+        context.setLineDash([2 / this.camera.zoom, 7 / this.camera.zoom]);
+        context.lineDashOffset = -now / 120 / this.camera.zoom;
+      } else {
+        context.strokeStyle = `${color}70`;
+        context.setLineDash([14 / this.camera.zoom, 10 / this.camera.zoom]);
+      }
+      context.beginPath(); context.arc(field.x, field.y, field.radius, 0, Math.PI * 2); context.stroke();
+      context.setLineDash([]); context.lineDashOffset = 0;
     }
   }
 
@@ -486,7 +560,7 @@ export class Battlefield {
 
   private orderTarget(order: Order): Point | undefined {
     if (order.kind.startsWith("build_")) return order;
-    if (["move", "attack_move", "rally_move"].includes(order.kind)) return order;
+    if (["move", "attack_move", "rally_move", "teleport"].includes(order.kind)) return order;
     if (["gather", "rally_gather"].includes(order.kind)) return this.session.snapshot.nodes.find(node => node.id === order.target);
     if (["attack", "repair", "construct"].includes(order.kind)) return this.session.snapshot.units.find(unit => unit.id === order.target);
     return undefined;
@@ -561,6 +635,19 @@ export class Battlefield {
         context.fillStyle = "#364747"; context.fillRect(-20, -18, 38, 30);
         context.fillStyle = "#d4b967"; context.fillRect(-15, 0, 28, 6);
         context.fillStyle = "#e0e6d5"; context.fillRect(18, -40, 10, 31);
+      } else if (unit.kind === "relay") {
+        // Network: a crystal pylon over a ring, the shape that says "power".
+        context.fillStyle = "#1d3035"; context.beginPath(); context.arc(0, 4, 20, 0, Math.PI * 2); context.fill();
+        context.strokeStyle = color; context.lineWidth = 2; context.stroke();
+        context.fillStyle = "#bfe9ff"; context.strokeStyle = "#243832"; context.lineWidth = 2;
+        context.beginPath(); context.moveTo(0, -30); context.lineTo(10, -2); context.lineTo(0, 14); context.lineTo(-10, -2); context.closePath(); context.fill(); context.stroke();
+        context.fillStyle = color; context.fillRect(-3, -12, 6, 12);
+      } else if (unit.kind === "sensor") {
+        // Industrial: a dish on a lattice mast.
+        context.strokeStyle = "#d7e2d4"; context.lineWidth = 3;
+        context.beginPath(); context.moveTo(-10, 16); context.lineTo(0, -8); context.lineTo(10, 16); context.stroke();
+        context.fillStyle = color; context.strokeStyle = "#243832"; context.lineWidth = 2;
+        context.beginPath(); context.ellipse(0, -14, 16, 8, -0.4, 0, Math.PI * 2); context.fill(); context.stroke();
       } else if (unit.kind === "outpost") {
         context.fillStyle = "#dac16b"; context.fillRect(-18, -13, 15, 22); context.fillRect(3, -13, 15, 22);
         context.strokeRect(-18, -13, 36, 22);
@@ -637,9 +724,29 @@ export class Battlefield {
       context.beginPath(); context.moveTo(0, -14); context.lineTo(12, -5); context.lineTo(9, 11); context.lineTo(-9, 11); context.lineTo(-12, -5); context.closePath(); context.fill(); context.stroke();
       context.fillStyle = "#e8ece1"; context.fillRect(-5, -6, 10, 5); context.fillStyle = "#172a26"; context.fillRect(7, -13, 5, 15);
     }
+    const tick = this.session.snapshot.room?.tick ?? 0n;
+    const health = unit.hp / Math.max(1, unit.maxHp);
     context.fillStyle = "#12201f"; context.fillRect(-radius, -radius - 15, radius * 2, 4);
-    context.fillStyle = unit.hp / (VISUALS[unit.kind]?.hp ?? 1) > 0.3 ? color : "#ff8178";
-    context.fillRect(-radius, -radius - 15, radius * 2 * clamp(unit.hp / (VISUALS[unit.kind]?.hp ?? 1), 0, 1), 4);
+    context.fillStyle = health > 0.3 ? color : "#ff8178";
+    context.fillRect(-radius, -radius - 15, radius * 2 * clamp(health, 0, 1), 4);
+    // Shields: a second, pale-blue bar directly above health, for Network only.
+    // It brightens while regenerating so "coming back" reads without numbers.
+    if (unit.maxShields > 0) {
+      const regenerating = shieldsRegenerating(unit, tick);
+      context.fillStyle = "#12201f"; context.fillRect(-radius, -radius - 20, radius * 2, 4);
+      context.fillStyle = regenerating ? "#c8f0ff" : "#6fc3ef";
+      context.fillRect(-radius, -radius - 20, radius * 2 * clamp(unit.shields / unit.maxShields, 0, 1), 4);
+    }
+    // Teleport: a ring closing in while channelling, a faded ring while arriving.
+    const channel = channelFraction(unit, tick);
+    if (channel !== undefined) {
+      context.strokeStyle = "#8fd8ff"; context.lineWidth = 2;
+      context.beginPath(); context.arc(0, 0, radius + 14 - channel * 10, 0, Math.PI * 2 * Math.max(0.05, channel)); context.stroke();
+    } else if (arriving(unit, tick)) {
+      context.strokeStyle = "#8fd8ff"; context.lineWidth = 1.5; context.globalAlpha = 0.4 + 0.3 * Math.sin(now / 90);
+      context.setLineDash([3, 3]); context.beginPath(); context.arc(0, 0, radius + 6, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
+      context.globalAlpha = 1;
+    }
     // A temporary unit also shows how long it has left, in its own colour,
     // directly under its health: it expires whether or not it is hurt.
     const life = isTemporary(unit.kind) ? lifetimeFraction(unit, this.session.snapshot.room?.tick ?? 0n) : undefined;
@@ -662,7 +769,6 @@ export class Battlefield {
       }
     }
     context.restore();
-    const tick = this.session.snapshot.room?.tick ?? 0n;
     if (["repair", "construct"].includes(unit.order.kind)) {
       const target = this.orderTarget(unit.order);
       if (target && Math.hypot(target.x - unit.x, target.y - unit.y) <= 61) {
@@ -695,6 +801,12 @@ export class Battlefield {
     const size = this.minimap.width;
     context.clearRect(0, 0, size, size); context.drawImage(this.terrain, 0, 0, size, size);
     const scale = size / WORLD_SIZE;
+    for (const field of this.fields()) {
+      if (field.kind !== "power") continue;
+      context.strokeStyle = `${COLORS[field.owner] ?? "#9fb39f"}a0`; context.lineWidth = 1; context.setLineDash([1, 2]);
+      context.beginPath(); context.arc(field.x * scale, field.y * scale, field.radius * scale, 0, Math.PI * 2); context.stroke();
+      context.setLineDash([]);
+    }
     this.drawMiniCreep(this.session.snapshot.creep, scale);
     for (const node of this.session.snapshot.nodes) {
       if (!node.amount) continue;

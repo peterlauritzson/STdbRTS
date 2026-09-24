@@ -36,7 +36,7 @@
 
 use rts_core::maps::MapDefinition;
 use rts_core::simulation::{Order, World};
-use rts_core::{is_building, stats, Faction, TICKS_PER_SECOND};
+use rts_core::{is_building, Faction, TICKS_PER_SECOND};
 use std::time::Instant;
 
 /// Measured ticks per configuration. 600 is 30 s of match time at 20 TPS —
@@ -224,7 +224,7 @@ fn hold_the_tier(map: &MapDefinition, rng: &mut Rng, world: &mut World, mobiles:
     }
     for unit in &mut world.units {
         if is_building(&unit.kind) {
-            unit.hp = stats(&unit.kind).expect("known building").hp;
+            unit.hp = unit.max_hp;
         }
     }
     world.outcome = None;

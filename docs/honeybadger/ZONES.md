@@ -81,7 +81,8 @@ experimental.
 
 Pairs with mining that needs no return trip.
 
-- Projected by Network structures.
+- Projected by the Network `relay` and by a Network player's hubs (HQ,
+  outpost), radius 320. Other Network buildings project nothing.
 - **Workers can be created at any structure inside the field and start mining
   immediately**, so the economy expands by projecting infrastructure rather than
   by walking labour across the map.
@@ -136,6 +137,9 @@ Implemented in the simulation, persisted, and rendered on the client, all
 validated 2026-09-24.
 
 **Power field last**, because it needs shields first, and teleport after that.
+Shields, the power field, field-gated drifter production, death restoration and
+teleport are implemented, persisted and rendered on the client, validated
+2026-09-24. Values and open questions are in [DECISIONS.md](DECISIONS.md).
 
 ## What would make this wrong
 

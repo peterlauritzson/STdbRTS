@@ -8,7 +8,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 6;
+pub const RULESET_VERSION: u32 = 7;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -379,7 +379,7 @@ pub const MAX_BUILDINGS: usize = 16;
 pub fn is_building(kind: &str) -> bool {
     matches!(
         kind,
-        "hq" | "barracks" | "factory" | "turret" | "outpost" | "lab" | "sensor"
+        "hq" | "barracks" | "factory" | "turret" | "outpost" | "lab" | "sensor" | "relay"
     )
 }
 
@@ -392,6 +392,7 @@ pub fn is_building(kind: &str) -> bool {
 pub fn building_faction(kind: &str) -> Option<Faction> {
     match kind {
         "sensor" => Some(Faction::Industrial),
+        "relay" => Some(Faction::Network),
         _ => None,
     }
 }
@@ -653,7 +654,7 @@ pub fn stats(kind: &str) -> Option<Stats> {
             cost: Cost::new(100, 50),
             training_ticks: 300,
         }),
-        "barracks" | "factory" | "turret" | "outpost" | "lab" | "sensor" => {
+        "barracks" | "factory" | "turret" | "outpost" | "lab" | "sensor" | "relay" => {
             let (hp, cost, training_ticks) = match kind {
                 "barracks" => (700, Cost::material(150), 160),
                 "factory" => (900, Cost::new(200, 50), 240),
@@ -665,6 +666,11 @@ pub fn stats(kind: &str) -> Option<Stats> {
                 // is stand somewhere useful. Catalyst-gated at the same 50 as
                 // the lab and the factory, because territory is technology.
                 "sensor" => (450, Cost::new(125, 50), 140),
+                // Network's territory projector, and the pylon of this game:
+                // cheap, quick, fragile, and the thing the whole faction's
+                // mobility hangs off. Material only, unlike the sensor,
+                // because a Network player needs one before anything else.
+                "relay" => (300, Cost::material(75), 100),
                 _ => (650, Cost::new(150, 50), 200),
             };
             Some(Stats {
@@ -771,6 +777,80 @@ pub fn stats(kind: &str) -> Option<Stats> {
 }
 
 // ---------------------------------------------------------------------------
+// Shields: Network's second health pool
+// ---------------------------------------------------------------------------
+//
+// Every value below is **experimental**; none of it is playtested.
+
+/// The share of a kind's listed health a Network entity carries as shields
+/// instead of hit points. The total is unchanged — a Network soldier has 70
+/// hit points and 70 shields where anyone else's has 140 hit points — so what
+/// the faction gains is regeneration, not durability. The reference game split
+/// its shielded faction the same way, half and half for most units.
+pub const NETWORK_SHIELD_PERCENT: i32 = 50;
+
+/// Ticks an entity must go without taking damage before its shields start to
+/// come back. Ten seconds, the reference game's figure.
+pub const SHIELD_REGEN_DELAY_TICKS: u64 = 200;
+/// Shields regenerate in whole points on ticks that are a multiple of this.
+pub const SHIELD_REGEN_INTERVAL_TICKS: u64 = 10;
+/// Points restored per interval outside a power field: 2 per second.
+pub const SHIELD_REGEN_PER_INTERVAL: i32 = 1;
+
+/// `(hit points, shields)` at full health for an entity of `kind` owned by a
+/// player of `faction`. Only Network carries shields; every other faction, and
+/// every temporary unit, gets the listed health as hit points and no shields.
+/// Unknown kinds are `(0, 0)`.
+///
+/// Stored on the entity when it is spawned (`max_hp`, `max_shields`), so a
+/// client, a repair and a construction step all read the one figure the
+/// simulation decided rather than re-deriving it from the faction.
+pub fn vitals(kind: &str, faction: Faction) -> (i32, i32) {
+    let Some(definition) = stats(kind) else {
+        return (0, 0);
+    };
+    if faction != Faction::Network || is_temporary(kind) || kind.starts_with("research_") {
+        return (definition.hp, 0);
+    }
+    let shields = definition.hp * NETWORK_SHIELD_PERCENT / 100;
+    (definition.hp - shields, shields)
+}
+
+/// Shields gained on one regeneration interval at `percent` of the base rate,
+/// where 100 is outside any field. Integer arithmetic, so every machine agrees.
+pub const fn shield_regen(percent: i32) -> i32 {
+    SHIELD_REGEN_PER_INTERVAL * percent / 100
+}
+
+// ---------------------------------------------------------------------------
+// Teleport: moving within a power field
+// ---------------------------------------------------------------------------
+
+/// Ticks a unit stands still channelling before it moves. Any damage taken
+/// during the channel cancels it: the reference game's recall was interrupted
+/// by incoming damage, and a teleport that could not be interrupted would be a
+/// free escape from every fight fought inside a field.
+pub const TELEPORT_CHANNEL_TICKS: u64 = 20;
+/// Ticks a unit is inactive after arriving: it cannot move, shoot or gather,
+/// but it can be shot. The arrival window is the price of the move, and it is
+/// what makes an opponent's defence of the landing point worth something.
+pub const TELEPORT_ARRIVAL_TICKS: u64 = 40;
+
+/// Can `kind` teleport at all? Anything mobile. Buildings never move, and a
+/// temporary unit belongs to Organic, which projects no power field.
+pub fn can_teleport(kind: &str) -> bool {
+    !is_building(kind) && stats(kind).is_some_and(|definition| definition.speed > 0.0)
+}
+
+/// Can `kind` be trained at *any* finished structure standing in its owner's
+/// power field, rather than only at the buildings [`producer`] names? The
+/// drifter, and only the drifter: a Network economy expands by projecting
+/// infrastructure, not by walking labour across the map.
+pub fn trains_in_field(kind: &str) -> bool {
+    kind == "drifter"
+}
+
+// ---------------------------------------------------------------------------
 // Zones: the territory layer
 // ---------------------------------------------------------------------------
 //
@@ -867,12 +947,25 @@ pub enum ZoneEffect {
     /// free temporary units, chosen by [`death_spawn`] from the dead unit's
     /// cost.
     DeathSpawn,
+    /// Shields of the owner's entities inside regenerate at `percent` of the
+    /// base rate. Combat, not movement: it changes how long a unit survives a
+    /// fight, never where it can go. Overlap takes the strongest.
+    ShieldRegen { percent: i32 },
+    /// One of the owner's entities dying inside restores shields to the
+    /// owner's other entities within `POWER_RESTORE_RADIUS` of where it fell:
+    /// each gets `percent` of the dead entity's total health, hit points plus
+    /// shields, capped at its own maximum.
+    ShieldRestore { percent: i32 },
+    /// Power: connectivity and eligibility. Standing in it is what lets a
+    /// structure train a drifter and a unit teleport, and both ends of a
+    /// teleport must be in it. Blocks and speeds nothing.
+    Powered,
 }
 
 impl ZoneEffect {
     /// How many variants there are; the length of `ZoneField`'s per-effect
     /// index.
-    pub const SLOTS: usize = 3;
+    pub const SLOTS: usize = 6;
 
     /// Which of the six this effect is an instance of.
     pub const fn concept(self) -> ZoneConcept {
@@ -880,6 +973,9 @@ impl ZoneEffect {
             Self::MovementSpeed { .. } => ZoneConcept::Movement,
             Self::OffCreepSlow { .. } => ZoneConcept::Movement,
             Self::DeathSpawn => ZoneConcept::Death,
+            Self::ShieldRegen { .. } => ZoneConcept::Death,
+            Self::ShieldRestore { .. } => ZoneConcept::Death,
+            Self::Powered => ZoneConcept::Connectivity,
         }
     }
 
@@ -891,6 +987,9 @@ impl ZoneEffect {
             Self::MovementSpeed { .. } => 0,
             Self::OffCreepSlow { .. } => 1,
             Self::DeathSpawn => 2,
+            Self::ShieldRegen { .. } => 3,
+            Self::ShieldRestore { .. } => 4,
+            Self::Powered => 5,
         }
     }
 }
@@ -1234,6 +1333,58 @@ pub fn advance_patch(mut patch: CreepPatch, source_alive: bool, tick: u64) -> Op
     (patch.radius > 0).then_some(patch)
 }
 
+// --- Network: the power field ----------------------------------------------
+//
+// Every value below is **experimental**. None of it is playtested.
+
+/// Radius of a power field around its source, in world units. Covers a hub and
+/// its mineral line (about 215 out on the melee maps) with room to spare, and
+/// sits well inside the 500-unit build radius so a chain of relays overlaps.
+pub const POWER_FIELD_RADIUS: f32 = 320.0;
+/// Shield regeneration inside a field, in percent of the base rate: 3x.
+pub const POWER_FIELD_REGEN_PERCENT: i32 = 300;
+/// Share of a dying entity's total health restored to each nearby friendly.
+pub const POWER_RESTORE_PERCENT: i32 = 20;
+/// How far from the death point the restoration reaches.
+pub const POWER_RESTORE_RADIUS: f32 = 180.0;
+
+static POWER_FIELD: ZoneTemplate = ZoneTemplate {
+    name: "power field",
+    radius: POWER_FIELD_RADIUS,
+    // Owner only, like the other two: an enemy standing in your field gets no
+    // regeneration, no restoration and no teleport.
+    applies_to: ZoneAudience::Owner,
+    // Connectivity (power, for production and teleport) and combat/death
+    // (regeneration, restoration), per ZONES.md. It blocks no movement, sight
+    // or weapons and changes no one's speed.
+    effects: &[
+        ZoneEffect::ShieldRegen {
+            percent: POWER_FIELD_REGEN_PERCENT,
+        },
+        ZoneEffect::ShieldRestore {
+            percent: POWER_RESTORE_PERCENT,
+        },
+        ZoneEffect::Powered,
+    ],
+    onset: ZoneOnset::Immediate,
+    lifetime: ZoneLifetime::WhileSourceLives,
+};
+
+/// The power field template. Like creep it is keyed on the owner's faction as
+/// well as the building, so it is not returned by [`zone_template`].
+pub fn power_field() -> &'static ZoneTemplate {
+    &POWER_FIELD
+}
+
+/// Does a finished `kind` owned by a `faction` player project a power field?
+/// The relay, and a Network player's hubs — so a Network base opens powered and
+/// an expansion powers itself. Barracks, factories, labs and turrets do not:
+/// if every structure projected, "train a drifter at any structure in the
+/// field" would mean "at any structure", and the relay would have no job.
+pub fn projects_power(kind: &str, faction: Faction) -> bool {
+    faction == Faction::Network && matches!(kind, "relay" | "hq" | "outpost")
+}
+
 /// One live zone, derived from one source on one tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Zone {
@@ -1391,7 +1542,11 @@ impl ZoneField {
                     ZoneEffect::MovementSpeed { percent } => Some(*percent),
                     // Not this effect. Named rather than `_`, so a new
                     // movement effect cannot fall in here unnoticed.
-                    ZoneEffect::OffCreepSlow { .. } | ZoneEffect::DeathSpawn => None,
+                    ZoneEffect::OffCreepSlow { .. }
+                    | ZoneEffect::DeathSpawn
+                    | ZoneEffect::ShieldRegen { .. }
+                    | ZoneEffect::ShieldRestore { .. }
+                    | ZoneEffect::Powered => None,
                 })
                 .max()
                 .unwrap_or(0);
@@ -1409,6 +1564,43 @@ impl ZoneField {
     pub fn spawns_on_death(&self, owner: u8, x: f32, y: f32) -> bool {
         const DEATH: usize = ZoneEffect::DeathSpawn.slot();
         self.active(DEATH, owner, x, y).next().is_some()
+    }
+
+    /// The shield regeneration rate, in percent of the base rate, for one of
+    /// `subject`'s entities at `(x, y)`: 100 outside every field, the strongest
+    /// field's figure inside. Strongest, never stacked, for the same reason
+    /// movement is: a carpet of relays must buy area, not unbounded regen.
+    pub fn shield_regen_percent(&self, subject: u8, x: f32, y: f32) -> i32 {
+        const REGEN: usize = ZoneEffect::ShieldRegen { percent: 0 }.slot();
+        self.active(REGEN, subject, x, y)
+            .flat_map(|zone| zone.template.effects.iter())
+            .filter_map(|effect| match effect {
+                ZoneEffect::ShieldRegen { percent } => Some(*percent),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(100)
+            .max(100)
+    }
+
+    /// The share of its total health, in percent, that one of `owner`'s
+    /// entities dying at `(x, y)` restores to each nearby friendly, or `None`
+    /// outside every power field. Strongest wins.
+    pub fn restores_on_death(&self, owner: u8, x: f32, y: f32) -> Option<i32> {
+        const RESTORE: usize = ZoneEffect::ShieldRestore { percent: 0 }.slot();
+        self.active(RESTORE, owner, x, y)
+            .flat_map(|zone| zone.template.effects.iter())
+            .filter_map(|effect| match effect {
+                ZoneEffect::ShieldRestore { percent } => Some(*percent),
+                _ => None,
+            })
+            .max()
+    }
+
+    /// Is `(x, y)` inside one of `owner`'s power fields?
+    pub fn powered(&self, owner: u8, x: f32, y: f32) -> bool {
+        const POWERED: usize = ZoneEffect::Powered.slot();
+        self.active(POWERED, owner, x, y).next().is_some()
     }
 }
 
@@ -1876,8 +2068,10 @@ mod tests {
         // that is no longer a pure function of the unit's kind. Bumped to 5 by
         // Organic creep: a zone whose radius is carried from tick to tick.
         // Bumped to 6 by creep's effects: harvesters slowed off creep, and
-        // temporary units spawned by deaths on it.
-        assert_eq!(RULESET_VERSION, 6);
+        // temporary units spawned by deaths on it. Bumped to 7 by Network
+        // shields and the power field: health split into two pools, and
+        // teleport and field-gated production.
+        assert_eq!(RULESET_VERSION, 7);
         assert!(RULESET_VERSION > 0);
     }
 

@@ -5,10 +5,11 @@ use crate::{
     drifter_pulse, gathers_in_place, is_army, is_building, is_hub, is_labour, labour_faction,
     advance_patch, creep_max_radius, creep_zone, death_spawn, fights, is_temporary, mining_yield,
     producer, stats, stipend_payment, temporary_lifetime, validate_position, zone_template,
-    Balance,
+    can_teleport, power_field, projects_power, shield_regen, trains_in_field, vitals, Balance,
     Cost, CreepPatch, Faction, ResourceKind, Zone, ZoneField, CONSTRUCTION_CANCEL_REFUND_PERCENT,
     HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, MAX_BUILDINGS, MAX_QUEUE, MAX_UNITS,
-    MINING_PULSE_TICKS, REPAIR_COST, STARTING_BALANCE,
+    MINING_PULSE_TICKS, POWER_RESTORE_RADIUS, REPAIR_COST, SHIELD_REGEN_DELAY_TICKS,
+    SHIELD_REGEN_INTERVAL_TICKS, STARTING_BALANCE, TELEPORT_ARRIVAL_TICKS, TELEPORT_CHANNEL_TICKS,
 };
 use std::collections::BTreeMap;
 
@@ -25,9 +26,31 @@ use std::collections::BTreeMap;
 /// left to derive it from. What the patch carries is only the radius; the zone
 /// itself is rebuilt here like every other.
 ///
+/// The power field is keyed on the owner's faction as well as the building —
+/// a Network HQ projects one and an Industrial HQ does not — which is why the
+/// factions are passed in. A slot missing from `factions` is Industrial.
+///
 /// The order of neither slice matters: `ZoneField::from_sources` sorts by
 /// source entity id, so membership never depends on iteration order.
-pub fn zones_of(units: &[Entity], creep: &[CreepPatch]) -> ZoneField {
+pub fn zones_of(
+    units: &[Entity],
+    creep: &[CreepPatch],
+    factions: &BTreeMap<u8, Faction>,
+) -> ZoneField {
+    let powered = units.iter().filter_map(|unit| {
+        let faction = factions.get(&unit.owner).copied().unwrap_or_default();
+        if unit.construction_remaining > 0 || !projects_power(&unit.kind, faction) {
+            return None;
+        }
+        Some(Zone {
+            source: unit.id,
+            owner: unit.owner,
+            x: unit.x,
+            y: unit.y,
+            radius: power_field().radius,
+            template: power_field(),
+        })
+    });
     let projected = units.iter().filter_map(|unit| {
         // An unfinished building projects nothing. Same rule cargo delivery and
         // the build-radius check already follow: a site is not a building yet.
@@ -54,7 +77,7 @@ pub fn zones_of(units: &[Entity], creep: &[CreepPatch]) -> ZoneField {
         radius: patch.radius as f32,
         template: creep_zone(),
     });
-    ZoneField::from_sources(projected.chain(spread))
+    ZoneField::from_sources(projected.chain(spread).chain(powered))
 }
 
 /// The speed `unit` moves at on this tick, zone modifiers applied.
@@ -138,6 +161,23 @@ pub struct Entity {
     /// not a death: an expired unit never reaches the death pipeline, so it
     /// pays no refund, moves neither `lost` nor `killed`, and spawns nothing.
     pub expires_tick: u64,
+    /// Hit points at full health, fixed at spawn by `vitals` from the kind and
+    /// the owner's faction. A Network entity carries half its listed health
+    /// here and half as shields; everyone else carries all of it here.
+    pub max_hp: i32,
+    /// Current shields: a second health pool that absorbs damage before hit
+    /// points and regenerates on its own. Always 0 when `max_shields` is.
+    pub shields: i32,
+    pub max_shields: i32,
+    /// The last tick this entity took damage, or 0 if it never has. Shields
+    /// wait `SHIELD_REGEN_DELAY_TICKS` after it before regenerating.
+    pub damaged_tick: u64,
+    /// While the order is `teleport`: the tick the channel completes on. Read
+    /// only while that order stands, so a stale value is harmless.
+    pub warp_tick: u64,
+    /// The tick a teleported unit becomes active again, or 0. Until then it
+    /// neither moves, shoots nor gathers, but it can be shot.
+    pub arrive_tick: u64,
 }
 
 #[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
@@ -313,13 +353,14 @@ impl World {
     }
 
     pub fn spawn(&mut self, owner: u8, kind: &str, x: f32, y: f32) {
+        let (max_hp, max_shields) = vitals(kind, self.faction(owner));
         self.units.push(Entity {
             id: self.next_id,
             owner,
             kind: kind.into(),
             x,
             y,
-            hp: stats(kind).unwrap().hp,
+            hp: max_hp,
             order: Order::idle(),
             queue: vec![],
             cargo: 0,
@@ -334,6 +375,12 @@ impl World {
             research: vec![],
             stock: 0,
             expires_tick: 0,
+            max_hp,
+            shields: max_shields,
+            max_shields,
+            damaged_tick: 0,
+            warp_tick: 0,
+            arrive_tick: 0,
         });
         self.next_id += 1;
     }
@@ -421,6 +468,13 @@ impl World {
     }
 
     /// Validates a command against the built-in map.
+    /// The zone field as the world stands, for validation. The tick builds its
+    /// own from the start-of-tick snapshot; this one answers "is that point
+    /// powered right now" for a command being checked between ticks.
+    pub fn zone_field(&self) -> ZoneField {
+        zones_of(&self.units, &self.creep, &self.factions)
+    }
+
     pub fn validate(&self, command: &Command) -> Result<(), String> {
         self.validate_on(command, crate::maps::default_map())
     }
@@ -535,6 +589,9 @@ impl World {
         if training.is_some() && command.units.len() != 1 {
             return Err("Select one HQ for production".into());
         }
+        // Built once per command, and only for the two orders that ask where
+        // a power field is.
+        let field = (training.is_some() || order.kind == "teleport").then(|| self.zone_field());
         for id in &command.units {
             let unit = self
                 .units
@@ -558,7 +615,7 @@ impl World {
             if command.queued
                 && (unit.queue.len() >= MAX_QUEUE
                     || training.is_some()
-                    || matches!(order.kind.as_str(), "stop" | "hold"))
+                    || matches!(order.kind.as_str(), "stop" | "hold" | "teleport"))
             {
                 return Err("Order queue is full or action cannot be queued".into());
             }
@@ -606,7 +663,13 @@ impl World {
                     self.afford(unit.owner, stats(&order.kind).unwrap().cost)?;
                 }
                 "rally_move" | "rally_gather" | "clear_rally" | "cancel_production" => {
-                    if !matches!(unit.kind.as_str(), "hq" | "barracks" | "factory" | "lab") {
+                    // Any building that can hold a queue can have it cancelled
+                    // — a relay training drifters, an Organic outpost training
+                    // harvesters. Rallies stay with the four that produce.
+                    let cancellable = order.kind == "cancel_production" && is_building(&unit.kind);
+                    if !cancellable
+                        && !matches!(unit.kind.as_str(), "hq" | "barracks" | "factory" | "lab")
+                    {
                         return Err(
                             "Production controls require an HQ or production building".into()
                         );
@@ -645,7 +708,7 @@ impl World {
                     if target.construction_remaining > 0 {
                         return Err("Resume construction instead of repairing this building".into());
                     }
-                    if target.hp >= stats(&target.kind).unwrap().hp {
+                    if target.hp >= target.max_hp {
                         return Err("Target is already fully repaired".into());
                     }
                 }
@@ -662,6 +725,28 @@ impl World {
                     }
                     if is_building(&unit.kind) {
                         return Err("HQ and buildings cannot move".into());
+                    }
+                }
+                "teleport" => {
+                    if !can_teleport(&unit.kind) {
+                        return Err("Only mobile units can teleport".into());
+                    }
+                    if unit.arrive_tick > self.tick {
+                        return Err("Unit is still arriving from its last teleport".into());
+                    }
+                    validate_position(order.x, order.y, map.size)?;
+                    let field = field.as_ref().unwrap();
+                    if !field.powered(unit.owner, unit.x, unit.y) {
+                        return Err(
+                            "Teleport starts inside your power field; this unit is outside it"
+                                .into(),
+                        );
+                    }
+                    if !field.powered(unit.owner, order.x, order.y) {
+                        return Err("Teleport destination must be inside your power field".into());
+                    }
+                    if !Navigation::new(map, &self.units).free(order.x, order.y) {
+                        return Err("Destination is obstructed".into());
                     }
                 }
                 "hold" => {
@@ -718,7 +803,15 @@ impl World {
                 | "train_scout" | "train_siege" => {
                     let trained = training.unwrap();
                     let faction = self.faction(unit.owner);
-                    if !producer(trained, &unit.kind, faction) {
+                    // A drifter can also be trained at any finished structure
+                    // standing in its owner's power field.
+                    let in_field = trains_in_field(trained)
+                        && labour_faction(trained) == Some(faction)
+                        && is_building(&unit.kind)
+                        && field
+                            .as_ref()
+                            .is_some_and(|field| field.powered(unit.owner, unit.x, unit.y));
+                    if !producer(trained, &unit.kind, faction) && !in_field {
                         // A faction asking for another faction's labour is a
                         // different mistake from asking the wrong building for
                         // it, and is reported as one.
@@ -794,7 +887,9 @@ impl World {
             self.spawn(command.owner, kind, command.order.x, command.order.y);
             let site = self.units.last_mut().unwrap();
             site.construction_remaining = definition.training_ticks;
-            site.hp = definition.hp / 10;
+            site.hp = site.max_hp / 10;
+            // Shields are raised by construction alongside hit points.
+            site.shields = 0;
             let worker = self
                 .units
                 .iter_mut()
@@ -885,6 +980,9 @@ impl World {
                 unit.order = command.order.clone();
                 if unit.order.kind == "attack_move" {
                     unit.order.target = 0;
+                }
+                if unit.order.kind == "teleport" {
+                    unit.warp_tick = self.tick + TELEPORT_CHANNEL_TICKS;
                 }
                 unit.returning = command.order.kind == "return";
                 if !command.queued {
@@ -989,7 +1087,7 @@ impl World {
         // Zones are rebuilt from the same start-of-tick snapshot every other
         // rule reads, so every unit moving this tick sees one defined field and
         // not a field that shifts as earlier units in the loop move.
-        let zones = zones_of(&snapshot, &self.creep);
+        let zones = zones_of(&snapshot, &self.creep, &factions);
         // Takes the unit rather than a speed. There is deliberately no way to
         // pass a speed in: that is what stops one movement path from quietly
         // skipping the zone layer.
@@ -1009,6 +1107,12 @@ impl World {
         let mut discoveries = Vec::new();
         for unit in &mut self.units {
             if unit.construction_remaining > 0 {
+                continue;
+            }
+            // Just arrived from a teleport: inactive until `arrive_tick`. It
+            // does nothing at all this tick, but it is still in the snapshot,
+            // so it can be targeted and shot.
+            if unit.arrive_tick > self.tick {
                 continue;
             }
             let definition = stats(&unit.kind).unwrap();
@@ -1081,7 +1185,7 @@ impl World {
                         .iter()
                         .find(|target| target.id == unit.order.target && target.owner == unit.owner)
                     {
-                        let missing = stats(&target.kind).unwrap().hp
+                        let missing = target.max_hp
                             - target.hp
                             - repairs.get(&target.id).copied().unwrap_or(0);
                         if missing <= 0 {
@@ -1144,6 +1248,31 @@ impl World {
                 "move" => {
                     let (destination_x, destination_y) = (unit.order.x, unit.order.y);
                     completed = advance(unit, destination_x, destination_y, 0.0);
+                }
+                // Network: channel in place, then move instantly to anywhere
+                // in the owner's power field. Both ends are checked again when
+                // the channel completes, against this tick's field: a relay
+                // killed during the channel strands the unit where it stands.
+                // Damage during the channel cancels it (see the damage step).
+                "teleport" => {
+                    if self.tick >= unit.warp_tick {
+                        let (destination_x, destination_y) = (unit.order.x, unit.order.y);
+                        if zones.powered(unit.owner, unit.x, unit.y)
+                            && zones.powered(unit.owner, destination_x, destination_y)
+                        {
+                            let landing = if navigation.free(destination_x, destination_y) {
+                                Some((destination_x, destination_y))
+                            } else {
+                                navigation.escape(destination_x, destination_y)
+                            };
+                            if let Some((x, y)) = landing {
+                                unit.x = x;
+                                unit.y = y;
+                                unit.arrive_tick = self.tick + TELEPORT_ARRIVAL_TICKS;
+                            }
+                        }
+                        completed = true;
+                    }
                 }
                 "attack" => {
                     if let Some(target) = snapshot
@@ -1293,7 +1422,12 @@ impl World {
                 }
                 _ => {}
             }
-            if definition.damage > 0 && unit.next_attack <= self.tick {
+            // A channelling unit holds its fire: the channel is a commitment,
+            // not something to do between shots.
+            if definition.damage > 0
+                && unit.next_attack <= self.tick
+                && unit.order.kind != "teleport"
+            {
                 let target = if matches!(unit.order.kind.as_str(), "attack" | "attack_move") {
                     snapshot
                         .iter()
@@ -1349,13 +1483,24 @@ impl World {
                 let definition = stats(&unit.kind).unwrap();
                 let before = unit.construction_remaining;
                 unit.construction_remaining = before.saturating_sub(*work);
-                let total = definition.hp - definition.hp / 10;
+                let total = unit.max_hp - unit.max_hp / 10;
                 let old_hp =
                     total as u64 * (definition.training_ticks - before) / definition.training_ticks;
                 let new_hp = total as u64
                     * (definition.training_ticks - unit.construction_remaining)
                     / definition.training_ticks;
-                unit.hp = (unit.hp + (new_hp - old_hp) as i32).min(definition.hp);
+                unit.hp = (unit.hp + (new_hp - old_hp) as i32).min(unit.max_hp);
+                // Shields rise from nothing to full over the same work, so a
+                // finished Network building is at full health rather than
+                // waiting minutes to regenerate half of it.
+                let shields = unit.max_shields as u64;
+                let old_shields = shields * (definition.training_ticks - before)
+                    / definition.training_ticks;
+                let new_shields = shields
+                    * (definition.training_ticks - unit.construction_remaining)
+                    / definition.training_ticks;
+                unit.shields =
+                    (unit.shields + (new_shields - old_shields) as i32).min(unit.max_shields);
             }
             for (owner, research) in &discoveries {
                 if unit.owner == *owner && unit.kind == "hq" && !unit.research.contains(research) {
@@ -1363,7 +1508,32 @@ impl World {
                 }
             }
             unit.hp += repairs.get(&unit.id).copied().unwrap_or(0);
-            unit.hp -= damage.get(&unit.id).copied().unwrap_or(0);
+            let incoming = damage.get(&unit.id).copied().unwrap_or(0);
+            if incoming > 0 {
+                // Shields take the hit first; hit points only take what the
+                // shields could not.
+                let absorbed = incoming.min(unit.shields);
+                unit.shields -= absorbed;
+                unit.hp -= incoming - absorbed;
+                unit.damaged_tick = self.tick;
+                if unit.order.kind == "teleport" {
+                    unit.order = if unit.queue.is_empty() {
+                        Order::idle()
+                    } else {
+                        unit.queue.remove(0)
+                    };
+                }
+            } else if unit.shields < unit.max_shields
+                && unit.construction_remaining == 0
+                && self.tick % SHIELD_REGEN_INTERVAL_TICKS == 0
+                && (unit.damaged_tick == 0
+                    || self.tick - unit.damaged_tick >= SHIELD_REGEN_DELAY_TICKS)
+            {
+                // Faster in the owner's power field. Read at the end-of-tick
+                // position against the start-of-tick field.
+                let rate = shield_regen(zones.shield_regen_percent(unit.owner, unit.x, unit.y));
+                unit.shields = (unit.shields + rate).min(unit.max_shields);
+            }
         }
         // Death is a terminal event that pays once, for army units only. It is
         // measured before the dead are removed, and paid after elimination is
@@ -1393,6 +1563,22 @@ impl World {
             .filter_map(|unit| death_spawn(&unit.kind).map(|(kind, count)| (unit, kind, count)))
             .flat_map(|(unit, kind, count)| {
                 (0..count).map(move |_| (unit.owner, kind, unit.x, unit.y))
+            })
+            .collect();
+        // The same deaths, read for the power field. One of an owner's entities
+        // dying inside that owner's field restores shields to the owner's other
+        // entities nearby, by a share of the dead entity's total health. Same
+        // snapshot rule as the spawns, and applied with them, after
+        // elimination. The additions are each capped at the recipient's
+        // maximum, so the order they are applied in cannot change the result.
+        let restores: Vec<(u8, f32, f32, i32)> = self
+            .units
+            .iter()
+            .filter(|unit| unit.hp <= 0)
+            .filter_map(|unit| {
+                let percent = zones.restores_on_death(unit.owner, unit.x, unit.y)?;
+                let amount = (unit.max_hp + unit.max_shields) * percent / 100;
+                (amount > 0).then_some((unit.owner, unit.x, unit.y, amount))
             })
             .collect();
         // The same deaths, read a second time for the match history. Hit points
@@ -1454,6 +1640,16 @@ impl World {
                 self.spawn_temporary(owner, kind, x, y);
             }
         }
+        for (owner, x, y, amount) in restores {
+            for unit in &mut self.units {
+                if unit.owner == owner
+                    && unit.max_shields > 0
+                    && distance(unit.x, unit.y, x, y) <= POWER_RESTORE_RADIUS
+                {
+                    unit.shields = (unit.shields + amount).min(unit.max_shields);
+                }
+            }
+        }
         for (owner, kind, x, y, rally) in births {
             if survivors.contains(&owner) {
                 self.spawn(owner, &kind, x, y);
@@ -1480,6 +1676,24 @@ impl World {
                             x: node.x,
                             y: node.y,
                             target: if is_labour(&kind) { node.id } else { 0 },
+                        })
+                } else if trains_in_field(&kind) {
+                    // No rally: a drifter goes straight to work on the nearest
+                    // material deposit to where it appeared, which is what
+                    // makes training one at a far relay an expansion.
+                    self.nodes
+                        .iter()
+                        .filter(|node| node.kind == ResourceKind::Material && node.amount > 0)
+                        .min_by(|left, right| {
+                            distance(x, y, left.x, left.y)
+                                .total_cmp(&distance(x, y, right.x, right.y))
+                                .then(left.id.cmp(&right.id))
+                        })
+                        .map(|node| Order {
+                            kind: "gather".into(),
+                            x: 0.0,
+                            y: 0.0,
+                            target: node.id,
                         })
                 } else {
                     None
@@ -1973,7 +2187,7 @@ mod tests {
         );
         // The field reads it on the very first tick, as movement (the
         // harvesters' off-creep slow) and death only.
-        let field = zones_of(&world.units, &world.creep);
+        let field = zones_of(&world.units, &world.creep, &world.factions);
         assert_eq!(field.count_in(crate::ZoneConcept::Death), 1);
         assert_eq!(field.count_in(crate::ZoneConcept::Movement), 1);
         assert_eq!(field.count_in(crate::ZoneConcept::Economy), 0);
@@ -2027,7 +2241,7 @@ mod tests {
         assert_eq!(world.tick, 1001);
         assert_eq!(patch_of(&world, outpost), None, "removed at radius 0");
         // And gone from the field with it, while the HQ's creep stays.
-        let field = zones_of(&world.units, &world.creep);
+        let field = zones_of(&world.units, &world.creep, &world.factions);
         assert!(field.iter().all(|zone| zone.source != outpost));
         assert_eq!(field.count_in(crate::ZoneConcept::Death), 1);
     }
@@ -2099,7 +2313,7 @@ mod tests {
                 .iter()
                 .find(|unit| unit.kind == "soldier")
                 .unwrap();
-            let field = zones_of(&world.units, &world.creep);
+            let field = zones_of(&world.units, &world.creep, &world.factions);
             assert!(
                 field.iter().any(|zone| zone.template.name == "creep"
                     && zone.contains(soldier.x, soldier.y)),
@@ -4022,5 +4236,333 @@ mod tests {
                 "the stipend stops after three minutes"
             );
         }
+    }
+
+    // --- shields and the Network power field ---------------------------------
+
+    /// Network's base: an HQ, which projects a power field of 320, at
+    /// `NETWORK_HQ`. Industrial is parked in the far corner so a one-player
+    /// world does not resolve to victory, and projects nothing.
+    const NETWORK_HQ: (f32, f32) = (200.0, 1300.0);
+    /// Inside the Network HQ's field, clear of the HQ's footprint.
+    const POWERED: (f32, f32) = (300.0, 1250.0);
+    /// Outside every field, 800 from the Network HQ, on open ground.
+    const UNPOWERED: (f32, f32) = (1000.0, 1300.0);
+    /// A relay far from the HQ, and a point inside its field.
+    const RELAY: (f32, f32) = (600.0, 300.0);
+    const BY_RELAY: (f32, f32) = (600.0, 390.0);
+
+    fn power_arena() -> World {
+        let mut world = World::new_on_with_factions(
+            crate::maps::default_map(),
+            &[(0, Faction::Network), (1, Faction::Industrial)],
+        );
+        world.units.clear();
+        world.spawn(0, "hq", NETWORK_HQ.0, NETWORK_HQ.1);
+        world.spawn(1, "hq", 1400.0, 200.0);
+        world
+    }
+
+    fn spawned(world: &mut World, owner: u8, kind: &str, at: (f32, f32)) -> u32 {
+        world.spawn(owner, kind, at.0, at.1);
+        world.units.last().unwrap().id
+    }
+
+    fn order_at(unit: u32, kind: &str, at: (f32, f32)) -> Command {
+        Command {
+            order: Order {
+                kind: kind.into(),
+                x: at.0,
+                y: at.1,
+                target: 0,
+            },
+            ..command(1, 0, unit, kind, 0)
+        }
+    }
+
+    #[test]
+    fn network_splits_health_into_shields_and_nobody_else_has_any() {
+        assert_eq!(vitals("soldier", Faction::Network), (70, 70));
+        assert_eq!(vitals("hq", Faction::Network), (600, 600));
+        assert_eq!(vitals("drifter", Faction::Network), (20, 20));
+        assert_eq!(vitals("relay", Faction::Network), (150, 150));
+        for faction in [Faction::Industrial, Faction::Organic] {
+            assert_eq!(vitals("soldier", faction), (140, 0), "{faction}");
+            assert_eq!(vitals("hq", faction), (1200, 0), "{faction}");
+        }
+        // Temporary units never carry shields, whoever is asked about.
+        assert_eq!(vitals("brood", Faction::Network), (30, 0));
+        let world = power_arena();
+        let network = world.units.iter().find(|unit| unit.owner == 0).unwrap();
+        assert_eq!((network.hp, network.max_hp), (600, 600));
+        assert_eq!((network.shields, network.max_shields), (600, 600));
+        let industrial = world.units.iter().find(|unit| unit.owner == 1).unwrap();
+        assert_eq!((industrial.hp, industrial.shields, industrial.max_shields), (1200, 0, 0));
+    }
+
+    #[test]
+    fn shields_take_damage_before_hit_points() {
+        let mut world = power_arena();
+        let target = spawned(&mut world, 0, "soldier", UNPOWERED);
+        spawned(&mut world, 1, "soldier", (UNPOWERED.0 + 60.0, UNPOWERED.1));
+        world.step();
+        let hit = unit_of(&world, target);
+        assert_eq!((hit.shields, hit.hp), (52, 70), "18 off the shields only");
+        assert_eq!(hit.damaged_tick, world.tick);
+
+        // A hit bigger than the shields left spills the rest onto hit points.
+        let mut world = power_arena();
+        let target = spawned(&mut world, 0, "soldier", UNPOWERED);
+        world.units.last_mut().unwrap().shields = 5;
+        spawned(&mut world, 1, "soldier", (UNPOWERED.0 + 60.0, UNPOWERED.1));
+        world.step();
+        let hit = unit_of(&world, target);
+        assert_eq!((hit.shields, hit.hp), (0, 57));
+    }
+
+    #[test]
+    fn shields_wait_ten_seconds_then_regenerate_three_times_faster_in_a_field() {
+        let mut world = power_arena();
+        world.tick = 1000;
+        let inside = spawned(&mut world, 0, "soldier", POWERED);
+        let outside = spawned(&mut world, 0, "soldier", UNPOWERED);
+        for unit in world.units.iter_mut().filter(|unit| unit.kind == "soldier") {
+            unit.shields = 10;
+            unit.damaged_tick = 1000;
+        }
+        for _ in 0..199 {
+            world.step();
+        }
+        assert_eq!(world.tick, 1199);
+        assert_eq!(unit_of(&world, inside).shields, 10, "still inside the delay");
+        assert_eq!(unit_of(&world, outside).shields, 10, "still inside the delay");
+        for _ in 0..101 {
+            world.step();
+        }
+        // Regeneration pulses on 1200, 1210, ... 1300: eleven of them.
+        assert_eq!(unit_of(&world, outside).shields, 10 + 11, "2 per second");
+        assert_eq!(unit_of(&world, inside).shields, 10 + 33, "6 per second");
+        for _ in 0..200 {
+            world.step();
+        }
+        assert_eq!(unit_of(&world, inside).shields, 70, "never past the maximum");
+        // Hit points never regenerate: that is what repair is for.
+        assert_eq!(unit_of(&world, inside).hp, 70);
+    }
+
+    #[test]
+    fn a_death_in_the_field_restores_shields_to_nearby_friendlies_only() {
+        let restored = |at: (f32, f32)| {
+            let mut world = power_arena();
+            let victim = spawned(&mut world, 0, "soldier", at);
+            let unit = world.units.last_mut().unwrap();
+            unit.hp = 1;
+            unit.shields = 0;
+            let friend = spawned(&mut world, 0, "soldier", (at.0 + 30.0, at.1 + 40.0));
+            world.units.last_mut().unwrap().shields = 0;
+            let far = spawned(&mut world, 0, "soldier", (at.0 - 190.0, at.1));
+            world.units.last_mut().unwrap().shields = 0;
+            let shooter = spawned(&mut world, 1, "soldier", (at.0 + 70.0, at.1));
+            world.units.last_mut().unwrap().order = Order {
+                kind: "attack".into(),
+                x: 0.0,
+                y: 0.0,
+                target: victim,
+            };
+            world.step();
+            assert!(world.units.iter().all(|unit| unit.id != victim), "victim died");
+            assert!(world.units.iter().any(|unit| unit.id == shooter));
+            (unit_of(&world, friend).shields, unit_of(&world, far).shields)
+        };
+        // 20% of the dead soldier's 70 + 70 to the friend 50 away; nothing to
+        // the one 190 away, outside the 180 reach.
+        assert_eq!(restored(POWERED), (28, 0));
+        // The same death outside any field restores nothing at all.
+        assert_eq!(restored(UNPOWERED), (0, 0));
+    }
+
+    #[test]
+    fn a_drifter_trains_at_any_structure_in_the_field_and_goes_straight_to_work() {
+        let mut world = power_arena();
+        world.balances.insert(0, Balance::new(1000, 0));
+        let relay = spawned(&mut world, 0, "relay", RELAY);
+        let barracks = spawned(&mut world, 0, "barracks", UNPOWERED);
+        let far_barracks = world.validate(&command(1, 0, barracks, "train_drifter", 0));
+        assert_eq!(
+            far_barracks,
+            Err("Production requires the correct HQ, barracks, or factory".into()),
+            "a barracks outside every field cannot train a drifter"
+        );
+        // A soldier still needs a barracks, field or no field.
+        assert!(world
+            .validate(&command(1, 0, relay, "train_soldier", 0))
+            .is_err());
+        world
+            .execute(&command(1, 0, relay, "train_drifter", 0))
+            .unwrap();
+        for _ in 0..60 {
+            world.step();
+        }
+        let drifter = world
+            .units
+            .iter()
+            .find(|unit| unit.kind == "drifter")
+            .expect("the relay trained a drifter");
+        assert_eq!(drifter.order.kind, "gather", "it goes to work unordered");
+        let node = node_of(&world, drifter.order.target);
+        assert_eq!(node.kind, ResourceKind::Material);
+        let nearest = world
+            .nodes
+            .iter()
+            .filter(|node| node.kind == ResourceKind::Material)
+            .map(|node| distance(RELAY.0, RELAY.1, node.x, node.y))
+            .fold(f32::MAX, f32::min);
+        assert!(distance(RELAY.0, RELAY.1, node.x, node.y) <= nearest + 150.0);
+
+        // An unfinished relay projects nothing, so a barracks beside it is
+        // still unpowered.
+        let mut world = power_arena();
+        world.balances.insert(0, Balance::new(1000, 0));
+        spawned(&mut world, 0, "relay", RELAY);
+        world.units.last_mut().unwrap().construction_remaining = 50;
+        let beside = spawned(&mut world, 0, "barracks", (RELAY.0 + 120.0, RELAY.1));
+        assert!(world
+            .validate(&command(1, 0, beside, "train_drifter", 0))
+            .is_err());
+        world.units.retain(|unit| unit.kind != "relay");
+        spawned(&mut world, 0, "relay", RELAY);
+        assert_eq!(
+            world.validate(&command(1, 0, beside, "train_drifter", 0)),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn only_network_projects_power_and_only_from_relays_and_hubs() {
+        for kind in ["relay", "hq", "outpost"] {
+            assert!(crate::projects_power(kind, Faction::Network), "{kind}");
+            assert!(!crate::projects_power(kind, Faction::Industrial), "{kind}");
+            assert!(!crate::projects_power(kind, Faction::Organic), "{kind}");
+        }
+        for kind in ["barracks", "factory", "lab", "turret", "soldier", "drifter"] {
+            assert!(!crate::projects_power(kind, Faction::Network), "{kind}");
+        }
+        let field = power_arena().zone_field();
+        assert!(field.powered(0, POWERED.0, POWERED.1));
+        assert!(!field.powered(1, POWERED.0, POWERED.1), "owner only");
+        assert!(!field.powered(0, UNPOWERED.0, UNPOWERED.1));
+        assert!(!field.powered(1, 1400.0, 260.0), "an Industrial HQ projects none");
+        // Connectivity and combat/death, and nothing else.
+        let template = crate::power_field();
+        for concept in crate::ZoneConcept::ALL {
+            let expected = matches!(
+                concept,
+                crate::ZoneConcept::Connectivity | crate::ZoneConcept::Death
+            );
+            assert_eq!(template.participates_in(concept), expected, "{concept}");
+        }
+        // It changes no one's speed.
+        assert_eq!(field.movement_multiplier(0, "soldier", POWERED.0, POWERED.1), 1.0);
+    }
+
+    #[test]
+    fn a_unit_teleports_across_its_field_after_a_channel_and_arrives_inactive() {
+        let mut world = power_arena();
+        spawned(&mut world, 0, "relay", RELAY);
+        let soldier = spawned(&mut world, 0, "soldier", POWERED);
+        world
+            .execute(&order_at(soldier, "teleport", BY_RELAY))
+            .unwrap();
+        for _ in 0..19 {
+            world.step();
+        }
+        let waiting = unit_of(&world, soldier);
+        assert_eq!((waiting.x, waiting.y), POWERED, "channelling in place");
+        world.step();
+        let arrived = unit_of(&world, soldier);
+        assert!(distance(arrived.x, arrived.y, BY_RELAY.0, BY_RELAY.1) < 20.0);
+        assert_eq!(arrived.order.kind, "stop");
+        assert_eq!(arrived.arrive_tick, world.tick + crate::TELEPORT_ARRIVAL_TICKS);
+        let landed = (arrived.x, arrived.y);
+        // Inactive on arrival: a move order waits out the window.
+        assert!(world
+            .validate(&order_at(soldier, "teleport", POWERED))
+            .unwrap_err()
+            .contains("still arriving"));
+        world
+            .execute(&order_at(soldier, "move", (RELAY.0 + 200.0, RELAY.1 + 200.0)))
+            .unwrap();
+        for _ in 0..39 {
+            world.step();
+        }
+        let idle = unit_of(&world, soldier);
+        assert_eq!((idle.x, idle.y), landed, "inactive until arrival ends");
+        for _ in 0..10 {
+            world.step();
+        }
+        let moving = unit_of(&world, soldier);
+        assert!((moving.x, moving.y) != landed, "active again");
+    }
+
+    #[test]
+    fn teleport_is_refused_outside_the_field_and_cancelled_by_damage() {
+        let mut world = power_arena();
+        let outside = spawned(&mut world, 0, "soldier", UNPOWERED);
+        let inside = spawned(&mut world, 0, "soldier", POWERED);
+        let hq = world.units[0].id;
+        let refused = |world: &World, unit: u32, at: (f32, f32)| {
+            world
+                .validate(&order_at(unit, "teleport", at))
+                .unwrap_err()
+        };
+        assert!(refused(&world, outside, POWERED).contains("this unit is outside it"));
+        assert!(refused(&world, inside, UNPOWERED).contains("destination"));
+        assert!(refused(&world, hq, POWERED).contains("Only mobile units"));
+        let mut queued = order_at(inside, "teleport", (POWERED.0, POWERED.1 - 100.0));
+        queued.queued = true;
+        assert!(world.validate(&queued).is_err(), "teleport cannot be queued");
+
+        // An Industrial unit has no field to teleport in.
+        let industrial = spawned(&mut world, 1, "soldier", (1400.0, 300.0));
+        let mut theirs = order_at(industrial, "teleport", (1400.0, 350.0));
+        theirs.owner = 1;
+        assert!(world.validate(&theirs).is_err());
+
+        // Damage during the channel cancels it: the unit stays where it was.
+        let mut world = power_arena();
+        spawned(&mut world, 0, "relay", RELAY);
+        let soldier = spawned(&mut world, 0, "soldier", POWERED);
+        world
+            .execute(&order_at(soldier, "teleport", BY_RELAY))
+            .unwrap();
+        spawned(&mut world, 1, "scout", (POWERED.0 + 60.0, POWERED.1));
+        for _ in 0..25 {
+            world.step();
+        }
+        let stayed = unit_of(&world, soldier);
+        assert_ne!(stayed.order.kind, "teleport");
+        assert!(distance(stayed.x, stayed.y, RELAY.0, RELAY.1) > 300.0, "never left");
+    }
+
+    #[test]
+    fn a_network_building_raises_its_shields_with_construction() {
+        let mut world = power_arena();
+        world.balances.insert(0, Balance::new(1000, 0));
+        let drifter = spawned(&mut world, 0, "drifter", (POWERED.0, POWERED.1 - 60.0));
+        world
+            .execute(&order_at(drifter, "build_relay", (POWERED.0 + 150.0, POWERED.1 - 80.0)))
+            .unwrap();
+        let site = world.units.iter().find(|unit| unit.kind == "relay").unwrap();
+        assert_eq!((site.shields, site.max_shields), (0, 150));
+        let id = site.id;
+        for _ in 0..400 {
+            world.step();
+            if unit_of(&world, id).construction_remaining == 0 {
+                break;
+            }
+        }
+        let relay = unit_of(&world, id);
+        assert_eq!(relay.construction_remaining, 0, "the drifter built it");
+        assert_eq!(relay.shields, relay.max_shields, "finished at full shields");
     }
 }

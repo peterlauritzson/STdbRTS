@@ -208,7 +208,9 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       const balanceTick = host.db.room.id.find(matchId)!.tick;
       const balances = me(host).material;
       await assert.rejects(order(host, [6], "move"), /another player/);
-      await assert.rejects(order(host, [2], "teleport"), /Unknown/);
+      await assert.rejects(order(host, [2], "summon"), /Unknown/);
+      // Teleport is a real order now, and an Industrial unit has no field to use it in.
+      await assert.rejects(order(host, [2], "teleport"), /power field/);
       await assert.rejects(order(host, [2], "move", { x: -10 }), /outside/);
       await assert.rejects(order(host, [2], "move", { x: Number.NaN }), /coordinates/);
       await assert.rejects(order(host, [1], "move"), /HQ/);
