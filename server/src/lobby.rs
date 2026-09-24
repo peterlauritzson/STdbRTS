@@ -1,7 +1,9 @@
 use crate::{game, schema::*};
 use rts_core::{
-    maps::default_map, simulation::World, validate_command_delay, DEFAULT_COMMAND_DELAY,
-    RULESET_VERSION,
+    faction_for_slot,
+    maps::{by_id, DEFAULT_MATCH_MAP},
+    simulation::World,
+    validate_command_delay, Faction, DEFAULT_COMMAND_DELAY, RULESET_VERSION, STARTING_BALANCE,
 };
 use spacetimedb::{ReducerContext, Table};
 
@@ -38,7 +40,15 @@ pub fn connected(ctx: &ReducerContext) {
             match_id: 0,
             name: "Commander".into(),
             slot: 0,
-            resources: 250,
+            material: STARTING_BALANCE.material,
+            catalyst: STARTING_BALANCE.catalyst,
+            collected_material: 0,
+            collected_catalyst: 0,
+            lost_material: 0,
+            lost_catalyst: 0,
+            killed_material: 0,
+            killed_catalyst: 0,
+            faction: Faction::default(),
             ready: false,
             online: true,
             last_order_tick: 0,
@@ -93,7 +103,11 @@ pub fn create_room(ctx: &ReducerContext, name: String, capacity: u8) -> Result<(
     // requested value is the ruleset default until the lobby gains a control
     // for it (M4); the bounds check is on the live path either way.
     let command_delay = validate_command_delay(DEFAULT_COMMAND_DELAY)?;
-    let map = default_map().identity();
+    // The match freezes the map it was created on; `game_tick` resolves this id
+    // back to the same definition for the match's whole life.
+    let map = by_id(DEFAULT_MATCH_MAP)
+        .ok_or("Configured match map is not a known map")?
+        .identity();
     let room = ctx.db.room().insert(Room {
         id: 0,
         name: clean_name(name)?,
@@ -109,6 +123,7 @@ pub fn create_room(ctx: &ReducerContext, name: String, capacity: u8) -> Result<(
         next_entity_id: 1,
         winner: -2,
         last_activity_micros: ctx.timestamp.to_micros_since_unix_epoch(),
+        last_tick_micros: ctx.timestamp.to_micros_since_unix_epoch(),
     });
     if room.id > u32::MAX as u64 {
         return Err("Room ID limit reached".into());
@@ -116,7 +131,21 @@ pub fn create_room(ctx: &ReducerContext, name: String, capacity: u8) -> Result<(
     player.match_id = room.id;
     player.slot = 0;
     player.ready = false;
-    player.resources = 250;
+    // The faction follows the slot, so the same room always deals the same
+    // spread whatever order people arrived in. `set_faction` departs from it;
+    // a player who never chooses keeps what the slot dealt.
+    player.faction = faction_for_slot(0);
+    player.material = STARTING_BALANCE.material;
+    player.catalyst = STARTING_BALANCE.catalyst;
+    // The history counters are per-match and reset with the balance. A player
+    // who carried last match's totals into this one would make its very first
+    // sample a lie.
+    player.collected_material = 0;
+    player.collected_catalyst = 0;
+    player.lost_material = 0;
+    player.lost_catalyst = 0;
+    player.killed_material = 0;
+    player.killed_catalyst = 0;
     player.last_order_tick = 0;
     player.orders_this_tick = 0;
     ctx.db.player().identity().update(player);
@@ -148,7 +177,18 @@ pub fn join_room(ctx: &ReducerContext, match_id: u64) -> Result<(), String> {
         .ok_or("Room is full")?;
     player.match_id = match_id;
     player.ready = false;
-    player.resources = 250;
+    player.faction = faction_for_slot(player.slot);
+    player.material = STARTING_BALANCE.material;
+    player.catalyst = STARTING_BALANCE.catalyst;
+    // The history counters are per-match and reset with the balance. A player
+    // who carried last match's totals into this one would make its very first
+    // sample a lie.
+    player.collected_material = 0;
+    player.collected_catalyst = 0;
+    player.lost_material = 0;
+    player.lost_catalyst = 0;
+    player.killed_material = 0;
+    player.killed_catalyst = 0;
     player.last_order_tick = 0;
     player.orders_this_tick = 0;
     ctx.db.player().identity().update(player);
@@ -172,6 +212,34 @@ pub fn set_ready(ctx: &ReducerContext, ready: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Choose the economy you will play. The slot still deals a default — see
+/// `create_room` and `join_room` — and this is the only way to depart from it.
+///
+/// Frozen at deployment exactly as the map, the ruleset and the command delay
+/// are: `start_match` copies every player's faction into the world it builds,
+/// so a faction that could still move afterwards would leave the client card,
+/// the simulation and the refusals disagreeing mid-match. A player only ever
+/// names a faction, never a target, so nobody can choose for anybody else.
+#[spacetimedb::reducer]
+pub fn set_faction(ctx: &ReducerContext, faction: Faction) -> Result<(), String> {
+    let mut player = current_player(ctx)?;
+    let room = ctx
+        .db
+        .room()
+        .id()
+        .find(player.match_id)
+        .ok_or("Join a room first")?;
+    if room.state != "lobby" {
+        return Err(format!(
+            "Faction is frozen once a match starts; you are playing {}",
+            player.faction
+        ));
+    }
+    player.faction = faction;
+    ctx.db.player().identity().update(player);
+    Ok(())
+}
+
 #[spacetimedb::reducer]
 pub fn start_match(ctx: &ReducerContext) -> Result<(), String> {
     let player = current_player(ctx)?;
@@ -191,8 +259,17 @@ pub fn start_match(ctx: &ReducerContext) -> Result<(), String> {
     if players.len() < 2 || players.iter().any(|player| !player.ready || !player.online) {
         return Err("At least two players must be online and everyone ready".into());
     }
-    let world = World::new(&players.iter().map(|player| player.slot).collect::<Vec<_>>());
+    let map = by_id(&room.map_id).ok_or("This match was created on an unknown map")?;
+    let world = World::new_on_with_factions(
+        map,
+        &players
+            .iter()
+            .map(|player| (player.slot, player.faction))
+            .collect::<Vec<_>>(),
+    );
     room.state = "playing".into();
+    // The match clock starts now, not when the room was created.
+    room.last_tick_micros = ctx.timestamp.to_micros_since_unix_epoch();
     game::save_world(ctx, &mut room, &world);
     ctx.db.room().id().update(room);
     game::sync_tick_schedule(ctx);
@@ -206,6 +283,10 @@ pub fn leave_room(ctx: &ReducerContext) -> Result<(), String> {
         if room.state == "playing" {
             let mut world = game::load_world(ctx, &room);
             world.surrender(player.slot);
+            // Conceding is one of the two ways a match ends, so it takes its
+            // final sample the same way the tick loop does. A concession that
+            // leaves the match running writes nothing.
+            game::record_final_sample(ctx, room.id, &world);
             game::save_world(ctx, &mut room, &world);
         }
         player.match_id = 0;

@@ -95,6 +95,247 @@ Every live room froze `command_delay 20`, `ruleset_version 1`, `skirmish` v1 and
 `0x4a80_e445_bc3b_ff70` in the Rust test. The pre-existing `stdbrts-playtest`
 database was not touched. See [HANDOFF.md](HANDOFF.md).
 
+## Increment D: dual-currency economy, refunds, stipend (server)
+
+The first slice a player can *see*. Increments A-C changed plumbing and
+feedback; this one changes how the game is played.
+
+Owns: `server/src/rules.rs`, `server/src/simulation.rs`, `server/src/maps.rs`,
+`server/src/schema.rs`, `server/src/game.rs`, `shared/maps/skirmish.json`.
+
+Values are fixed in [DECISIONS.md](DECISIONS.md) and are labeled experimental.
+
+- **D1** - Material and Catalyst replace the single ore balance, with costs that
+  make specialists require both. Affordability needs both currencies; partial
+  payment is impossible.
+- **D2** - army deaths (soldier, scout, siege) refund 50% of both currencies,
+  once, never to an eliminated player. Workers and buildings refund nothing.
+- **D3** - opening stipend, 200 material/min for 90s then 100/min for 90s, on an
+  integer tick accumulator rather than a float balance.
+- **D4** - map deposits gain a `kind`; two of the skirmish map's eight become
+  catalyst. Map version goes to 2 and `RULESET_VERSION` to 2, so the identity
+  freeze from Increment B earns its keep on its first real content change.
+
+Status: **server validated 2026-09-22**. 71 Rust tests pass (was 49). The
+20-minute determinism soak now asserts **per-currency** conservation with cargo
+attributed by `cargo_kind`, which is strictly stronger than the previous single
+total and proves the two currencies can never convert into one another. The
+agent also reduced the two catalyst deposits from 4000 to 1200, which was not
+asked for but is justified: at a catalyst price of 50, a 4000 stock is
+effectively infinite and not worth contesting. Not yet published or played.
+
+## Increment E: dual-currency client
+
+Follows D and cannot start before it, because it consumes D's regenerated
+bindings. Owns `src/`, `index.html`, `styles.css`, `tests/browser/`.
+
+The economy header shows both currencies distinctly, the command card shows
+multi-resource costs and disabled reasons, catalyst deposits are visually
+distinct from material ones on the battlefield and minimap, and refunds are
+legible when they happen. The practice bot must understand both currencies or it
+will stop functioning as an opponent.
+
+Status: **implemented 2026-09-22, not yet played**. Client gates pass; 14
+presentation tests (was 7). Catalyst is distinguished by silhouette and label as
+well as colour — three haloed spires against material's five chunks on the
+battlefield, a rotated outlined diamond against a square on the minimap, and the
+amount written as `1200 CAT`. Prices in `catalog.ts` were silently wrong before
+this (siege 200 flat, factory 250, lab 200, research a hardcoded 150) and now
+match the server table. Browser verification still outstanding.
+
+## Increment F: first territory mechanic
+
+The existing `outpost` becomes an autonomous extractor in the Industrial mould:
+it generates income without a worker, its output is switchable between material
+and catalyst, and sustained hostile damage suppresses that income for a fixed
+recovery window rather than requiring demolition. This is the cheapest route to
+a genuine Honey Badger territory mechanic because the building already exists.
+
+Suppression must be driven by authoritative damage events, never by a visual
+attack animation. Per [GAME-DESIGN.md](GAME-DESIGN.md) the source duration is an
+open question, so it ships as a labeled experimental value.
+
+Status: **not started**, design not yet written.
+
+## Sequencing note
+
+D through F build Honey Badger mechanics onto the existing shared roster. That
+is deliberate and matches M2's exit criterion, which expects a greybox match on
+one temporary shared roster before the three factions diverge in M3. Splitting
+into Network, Organic and Industrial comes after the mechanics work, not before.
+
+## Increment G: map expansion to a melee layout
+
+Map design is in scope for this conversion, not a later task. The current
+skirmish map is 1600x1600 with four lone corner starts, eight single deposits
+and four tiny terrain blocks: no expansions, no chokes, no contested ground.
+
+Owns: `shared/maps/skirmish.json`, `server/src/maps.rs`, `server/src/rules.rs`,
+`server/src/simulation.rs`, `src/presentation.ts`, `src/battlefield.ts`.
+Sequenced **after** Increment D, which is editing several of these.
+
+- **G1 - variable map size.** `size` is pinned to exactly `WORLD_SIZE`
+  ([maps.rs](../../server/src/maps.rs) rejects anything else) and `WORLD_SIZE`
+  is a compile-time constant used by `validate_position`
+  ([rules.rs](../../server/src/rules.rs)) and unit separation
+  ([simulation.rs](../../server/src/simulation.rs)). The client duplicates the
+  constant in [presentation.ts](../../src/presentation.ts) and hardcodes its
+  half-value `800` for camera centring in
+  [battlefield.ts](../../src/battlefield.ts). All of this must become
+  map-driven before the map can grow. Accept a bounded range, not any value.
+- **G2 - the new map.** A four-player melee layout at `size: 3200`, keeping
+  exactly four starts because the validator requires four and a four-spawn map
+  is a standard SC2 layout; 1v1 uses cross positions. Each spawn gets a main
+  with a mineral line, a natural behind a choke, an exposed third, and a
+  contested centre holding the high-value catalyst. At least two attack routes
+  between any two mains.
+- **G3 - validation and play.** Static reachability must pass for every start
+  and deposit, and the map must actually be played, not merely validated.
+
+Constraints the engine imposes on the design: no elevation, no ramps, no
+destructible rocks. Chokes are gaps between blocking rectangles. Navigation is a
+40-unit grid with 12-unit clearance, so corridors need to be comfortably wider
+than one cell for groups to move through.
+
+Open question this raises: `MAX_UNITS` is 60 per player and the architecture
+doc's supported entity tier is 60 until a larger one is measured. A map four
+times the area with a dozen expansions may want a larger army before it plays
+well. Measure before changing it.
+
+Status: **design in progress**, implementation not started.
+
+## Increment H: factions and asymmetric mining
+
+The economies stop being one shared loop. Values are fixed in
+[DECISIONS.md](DECISIONS.md).
+
+- **H1 (server)** — a `faction` per player; three labour units (`worker`,
+  `drifter`, `harvester`) plus the Organic `drone` builder; three gather models;
+  Organic hub stock with regeneration and a cap. Owns `server/src/rules.rs`,
+  `simulation.rs`, `schema.rs`, `lobby.rs`, `game.rs`.
+- **H2 (client)** — faction selection in the lobby, the new units in the catalog
+  and command card, distinct rendering per labour unit, Organic stock shown as a
+  real resource readout, and a bot that can play all three. Owns `src/`,
+  `index.html`, `styles.css`, `tests/`, `scripts/`.
+
+Status: **validated 2026-09-22** against a live database `stdbrts-fac`. 99 Rust
+tests, 23 client tests, 4 browser tests and 12/12 integration tests, including a
+new subtest that proves the slot rotation, each faction bootstrapping with its
+own labour, the three cross-faction refusals word for word, a drifter crediting
+in place with `cargo == 0` and `returning == false`, and Organic stock accruing
+to its cap while an Industrial hub holds zero forever. Practice runs as Network,
+so drifters now do the building in the browser suite.
+
+Follow-up, 2026-09-24: **the practice bot fields an army again** after tech
+gating. Hubs are only asked for labour, checked through `canProduce`, the
+client mirror of `rules::producer`; barracks and factory produce army. The bot
+had never placed a barracks on crossfire — all nine hardcoded offsets were
+obstructed — so site choice is now a ring search 220–460 from the HQ on 24
+bearings, preferring sites more than 180 from a deposit, which also removed a
+stale `hq.x < 800` extent. Live three-way on crossfire: barracks placed at
+10–11s for every faction, four army alive by 60s (Industrial), 48s (Network)
+and 35s (Organic), zero hub refusals.
+
+## Increment I: zones
+
+The territory layer, and the mechanic the author ranked first. Full design in
+[ZONES.md](ZONES.md), rewritten from the author's direct account of the
+reference game.
+
+One zone per faction, each paired with that faction's mining model:
+
+- **Industrial sensor tower** — units move about 30% faster in a long radius.
+  Movement cost only. **Built first**: it needs the zone primitive plus a speed
+  modifier and nothing else, so it proves the model with the least machinery.
+- **Organic creep** — grows from hubs only, recedes when the source dies, slows
+  the owner's harvesters to 0.6x off it (no drain or death), and **the owner's
+  units dying on it spawn free temporary units** whose kind depends on the dead
+  unit's cost. The ground/air split is documented only; no air unit exists.
+- **Network power field** — workers can be created at any structure inside it
+  and mine immediately, shields regenerate faster, a unit dying in it restores
+  shields to nearby friendlies scaling with its total health, and **any unit can
+  teleport from anywhere in the field to anywhere else in it**. Built last: it
+  needs shields as a second health pool first, then teleport.
+
+None of the three blocks sight, so **the territory layer is not blocked on the
+private-state experiment**. The earlier draft wrongly made Industrial smoke the
+third zone, which had put per-viewer visibility on the critical path for no
+reason; smoke is a unit ability in the reference game, not a territory mechanic.
+
+Status: **primitive and the sensor tower validated 2026-09-23**. 104 Rust tests,
+27 client tests, 4 browser tests, 12/12 integration. Zones are derived state:
+nothing persists or removes one, so a destroyed source has no field on the next
+rebuild. Overlap takes the **strongest**, never stacks, so a player cannot carpet
+an area for unbounded speed. `movement_speed` is the single accessor every
+movement path goes through, and a test enumerates `ZoneConcept::ALL` to prove the
+sensor field participates in movement and **nothing else** — that test fails if a
+seventh concept is added without being considered.
+
+Cost, measured: p95 went 7.3ms to 9.1ms at 60 units per player and 14.4ms to
+18.4ms at 120. Both inside the 25ms budget, but that is +25% for one zone type
+with a handful of sources. Creep will have many, so the per-tick rebuild is the
+thing to watch. Creep and the power field are still to come.
+
+Status, creep: **server, persistence and client rendering done and validated
+2026-09-24**. 135 Rust tests; client 42/42; integration 12/12; browser 4/4.
+`RULESET_VERSION` 6. Values and rationale in
+[DECISIONS.md](DECISIONS.md), design in [ZONES.md](ZONES.md). One disc per hub
+(`CreepPatch`), carried between ticks in `World::creep` because recession
+outlives the source — the only zone state that is not derived. `ZoneField` is
+now indexed by concept and by effect, and the off-creep slow is only walked for
+creep-dependent kinds, so every non-harvester speed is bit-identical to before.
+Death spawns resolve against the start-of-tick field; temporary units expire by
+removal at the top of the tick, never through the death pipeline.
+
+Cost, measured: persistence is a new `creep_patch` table diffed on save —
+~0.03 row writes per tick (66 over 2400 ticks with two outposts, one lost) and
+0 while radii are static. The read side, an index scan per tick, is unmeasured.
+Tick cost was indistinguishable from noise on a busy machine (p95 ~12.5–14ms
+against 12.6–13ms at 60 per player; ~26–28ms both ways at 120), so it must be
+rerun on an idle machine before it is quoted against the 9.1/18.4ms baseline.
+
+## Increment J: command-card construction
+
+Remove worker-driven building. Construction is ordered from the command card and
+the building raises itself, as in the reference game — see
+[DECISIONS.md](DECISIONS.md). Placement rules stay; the worker requirement goes.
+
+This touches `construction_remaining`, the `construct` order, builder
+assignment, the placement UI and the practice bot, so it is its own increment
+rather than a rider on another. Settle the open questions in that decision
+first: cancellation and refund terms, whether construction can be interrupted,
+and whether build radius still means anything.
+
+Status: **not started**.
+
+## Increment M: match history and the score screen
+
+A post-match screen with graphs. [ARCHITECTURE-AND-UX.md](ARCHITECTURE-AND-UX.md)
+already asks for this in the right shape: results should explain
+"territory/economy/loss/refund trends, not just kills".
+
+- **M1 (server)** — cumulative `collected`, `lost` and, if attributable,
+  `killed` counters per player, plus a `match_sample` time series written every
+  100 ticks and once more the moment a match finishes. Samples die with the
+  match. Owns `server/src/`.
+- **M2 (client)** — the score screen itself. Owns `src/`, `index.html`,
+  `styles.css`, `tests/`.
+
+The two graphs the author asked for are **income** and **army value**. Income
+must be *mined* income: the opening stipend pays 200 material/minute for 90
+seconds and then 100/minute for 90 more, with no deposit drain at all, so
+folding it into an economy graph would make the line a lie about how well
+anyone actually mined. Worth showing — but as its own thing, not as income.
+
+Other series worth plotting, all cheap once the samples exist: banked resources
+(unspent, which reads as "floating"), labour count, army count, and cumulative
+value lost. Together those say why a match was won or lost in a way a kill count
+never does.
+
+Status: **validated 2026-09-23**. 113 Rust tests, 36 client, 4 browser, 12/12
+integration, and the rendered screens inspected rather than inferred from
+assertions.
+
 ## Increment C: M1 private-state spike
 
 Gates fog, smoke, hidden scouting and fair bot vision. Everything in M2/M3 that

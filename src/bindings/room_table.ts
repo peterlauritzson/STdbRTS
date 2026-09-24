@@ -25,4 +25,5 @@ export default __t.row({
   nextEntityId: __t.u32().name("next_entity_id"),
   winner: __t.i16(),
   lastActivityMicros: __t.i64().name("last_activity_micros"),
+  lastTickMicros: __t.i64().name("last_tick_micros"),
 });

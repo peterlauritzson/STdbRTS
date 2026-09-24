@@ -34,6 +34,26 @@ export const Connection = __t.object("Connection", {
 });
 export type Connection = __Infer<typeof Connection>;
 
+export const CreepPatch = __t.object("CreepPatch", {
+  source: __t.u32(),
+  owner: __t.u8(),
+  x: __t.f32(),
+  y: __t.f32(),
+  radius: __t.u16(),
+  maxRadius: __t.u16(),
+  lostTick: __t.u64(),
+});
+export type CreepPatch = __Infer<typeof CreepPatch>;
+
+export const CreepPatchRow = __t.object("CreepPatchRow", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  get data() {
+    return CreepPatch;
+  },
+});
+export type CreepPatchRow = __Infer<typeof CreepPatchRow>;
+
 export const Entity = __t.object("Entity", {
   id: __t.u32(),
   owner: __t.u8(),
@@ -48,6 +68,9 @@ export const Entity = __t.object("Entity", {
     return __t.array(Order);
   },
   cargo: __t.u32(),
+  get cargoKind() {
+    return ResourceKind;
+  },
   returning: __t.bool(),
   nextAttack: __t.u64(),
   shotTick: __t.u64(),
@@ -58,14 +81,46 @@ export const Entity = __t.object("Entity", {
   },
   constructionRemaining: __t.u64(),
   research: __t.array(__t.string()),
+  stock: __t.u32(),
+  expiresTick: __t.u64(),
 });
 export type Entity = __Infer<typeof Entity>;
+
+// The tagged union or sum type for the algebraic type `Faction`.
+export const Faction = __t.enum("Faction", {
+  Industrial: __t.unit(),
+  Network: __t.unit(),
+  Organic: __t.unit(),
+});
+export type Faction = __Infer<typeof Faction>;
+
+export const MatchSample = __t.object("MatchSample", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  tick: __t.u64(),
+  slot: __t.u8(),
+  material: __t.u32(),
+  catalyst: __t.u32(),
+  collectedMaterial: __t.u32(),
+  collectedCatalyst: __t.u32(),
+  armyValueMaterial: __t.u32(),
+  armyValueCatalyst: __t.u32(),
+  labour: __t.u32(),
+  army: __t.u32(),
+  buildings: __t.u32(),
+  lostMaterial: __t.u32(),
+  lostCatalyst: __t.u32(),
+});
+export type MatchSample = __Infer<typeof MatchSample>;
 
 export const Node = __t.object("Node", {
   id: __t.u32(),
   x: __t.f32(),
   y: __t.f32(),
   amount: __t.u32(),
+  get kind() {
+    return ResourceKind;
+  },
 });
 export type Node = __Infer<typeof Node>;
 
@@ -82,7 +137,17 @@ export const Player = __t.object("Player", {
   matchId: __t.u64(),
   name: __t.string(),
   slot: __t.u8(),
-  resources: __t.u32(),
+  material: __t.u32(),
+  catalyst: __t.u32(),
+  collectedMaterial: __t.u32(),
+  collectedCatalyst: __t.u32(),
+  lostMaterial: __t.u32(),
+  lostCatalyst: __t.u32(),
+  killedMaterial: __t.u32(),
+  killedCatalyst: __t.u32(),
+  get faction() {
+    return Faction;
+  },
   ready: __t.bool(),
   online: __t.bool(),
   lastOrderTick: __t.u64(),
@@ -95,6 +160,13 @@ export const Production = __t.object("Production", {
   finishTick: __t.u64(),
 });
 export type Production = __Infer<typeof Production>;
+
+// The tagged union or sum type for the algebraic type `ResourceKind`.
+export const ResourceKind = __t.enum("ResourceKind", {
+  Material: __t.unit(),
+  Catalyst: __t.unit(),
+});
+export type ResourceKind = __Infer<typeof ResourceKind>;
 
 export const ResourceNode = __t.object("ResourceNode", {
   id: __t.u64(),
@@ -120,6 +192,7 @@ export const Room = __t.object("Room", {
   nextEntityId: __t.u32(),
   winner: __t.i16(),
   lastActivityMicros: __t.i64(),
+  lastTickMicros: __t.i64(),
 });
 export type Room = __Infer<typeof Room>;
 

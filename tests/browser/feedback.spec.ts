@@ -36,8 +36,11 @@ test("a rejected command explains itself inline at a short desktop height", asyn
   // Finding 1: provoke a genuine rejection the way the playtest did. Both
   // cancels are accepted while the queue is non-empty; the first empties it on
   // activation, so the second fails its activation check a tick later.
-  await page.getByRole("button", { name: "Worker 50 ore / 3s" }).click();
-  await expect(page.locator("#command-list")).toContainText("train worker");
+  // Practice joins the room the bot created, so the human takes slot 1 and is
+  // dealt Network: its labour unit is the drifter, at 40 material and 50 ticks,
+  // and the worker button is not on this player's card at all.
+  await page.getByRole("button", { name: "Drifter 40 material / 2.5s" }).click();
+  await expect(page.locator("#command-list")).toContainText("train drifter");
   const cancel = page.getByRole("button", { name: "Cancel all unfinished production", exact: true });
   await cancel.click();
   await cancel.click();
@@ -46,22 +49,30 @@ test("a rejected command explains itself inline at a short desktop height", asyn
   await expect(reason).toBeVisible({ timeout: 20000 });
   await expect(reason).not.toBeEmpty();
 
-  // The command list is rebuilt on a timer with replaceChildren, so every
-  // geometry claim below is read in one evaluate against a single render.
-  const row = await page.locator(".command-row.rejected").first().evaluate(node => {
-    const reasonNode = node.querySelector(".command-reason") as HTMLElement | null;
-    const labelNode = node.querySelector(".command-label") as HTMLElement | null;
-    const reasonRect = reasonNode!.getBoundingClientRect();
-    const labelRect = labelNode!.getBoundingClientRect();
+  // The command list is rebuilt on a timer with replaceChildren. Resolving an
+  // element handle and then evaluating against it races that rebuild: the node
+  // is detached in between and every rect reads back as zero. So the query and
+  // the measurement both happen inside one evaluate, retried until it observes
+  // a row that is actually laid out.
+  const row = await page.waitForFunction(() => {
+    const node = document.querySelector(".command-row.rejected") as HTMLElement | null;
+    const reasonNode = node?.querySelector(".command-reason") as HTMLElement | null;
+    const labelNode = node?.querySelector(".command-label") as HTMLElement | null;
+    if (!node || !reasonNode || !labelNode) return null;
+    const rowRect = node.getBoundingClientRect();
+    const reasonRect = reasonNode.getBoundingClientRect();
+    const labelRect = labelNode.getBoundingClientRect();
+    if (rowRect.width === 0 || reasonRect.width === 0) return null;
     return {
-      title: (node as HTMLElement).title,
-      text: reasonNode!.textContent ?? "",
+      title: node.title,
+      text: reasonNode.textContent ?? "",
       reasonTop: reasonRect.top,
       reasonWidth: reasonRect.width,
       labelBottom: labelRect.bottom,
-      rowWidth: (node as HTMLElement).getBoundingClientRect().width,
+      rowWidth: rowRect.width,
     };
-  });
+  }, undefined, { timeout: 20000 }).then(handle => handle.jsonValue());
+  if (!row) throw new Error("no laid-out rejected command row appeared");
 
   // The reason is readable in the row itself, not only in the native tooltip.
   const reasonText = row.text.trim();

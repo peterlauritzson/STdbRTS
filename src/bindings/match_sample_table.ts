@@ -9,29 +9,21 @@ import {
   type AlgebraicTypeType as __AlgebraicTypeType,
   type Infer as __Infer,
 } from "spacetimedb";
-import {
-  Faction,
-} from "./types";
-
 
 export default __t.row({
-  identity: __t.identity().primaryKey(),
+  id: __t.u64().primaryKey(),
   matchId: __t.u64().name("match_id"),
-  name: __t.string(),
+  tick: __t.u64(),
   slot: __t.u8(),
   material: __t.u32(),
   catalyst: __t.u32(),
   collectedMaterial: __t.u32().name("collected_material"),
   collectedCatalyst: __t.u32().name("collected_catalyst"),
+  armyValueMaterial: __t.u32().name("army_value_material"),
+  armyValueCatalyst: __t.u32().name("army_value_catalyst"),
+  labour: __t.u32(),
+  army: __t.u32(),
+  buildings: __t.u32(),
   lostMaterial: __t.u32().name("lost_material"),
   lostCatalyst: __t.u32().name("lost_catalyst"),
-  killedMaterial: __t.u32().name("killed_material"),
-  killedCatalyst: __t.u32().name("killed_catalyst"),
-  get faction() {
-    return Faction;
-  },
-  ready: __t.bool(),
-  online: __t.bool(),
-  lastOrderTick: __t.u64().name("last_order_tick"),
-  ordersThisTick: __t.u32().name("orders_this_tick"),
 });

@@ -1,5 +1,6 @@
 import { connectClient, me, order } from "./client";
 import { chooseOrders } from "./bot-policy";
+import { factionOf } from "../src/catalog";
 
 const roomArgument = process.argv.find(argument => /^--room=/.test(argument))?.split("=")[1];
 const durationArgument = process.argv.find(argument => /^--duration=/.test(argument))?.split("=")[1];
@@ -40,7 +41,9 @@ const timer = setInterval(async () => {
     const units = [...connection.db.unit.iter()].filter(unit => unit.matchId === room.id).map(unit => unit.data);
     const nodes = [...connection.db.resource_node.iter()].filter(node => node.matchId === room.id).map(node => node.data);
     const pending = new Set([...connection.db.command.iter()].filter(command => command.matchId === room.id && command.owner === player.slot && command.status === "scheduled").flatMap(command => command.units));
-    for (const decision of chooseOrders(player.slot, player.resources, units, nodes, pending)) {
+    // The faction is read from the bot's own Player row — the server dealt it by
+    // slot, and the bot has no more say in it than a human client does.
+    for (const decision of chooseOrders(player.slot, factionOf(player.faction), { material: player.material, catalyst: player.catalyst }, units, nodes, pending)) {
       try { await order(connection, decision.units, decision.order.kind, decision.order); }
       catch (error) { console.error(error instanceof Error ? error.message : String(error)); }
     }

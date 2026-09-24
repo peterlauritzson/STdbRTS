@@ -1,5 +1,6 @@
-import { Session } from "./network";
+import { Session, setFactionOn } from "./network";
 import { chooseOrders } from "../scripts/bot-policy";
+import { currencyOf, factionForSlot, factionOf, isLabour, PRACTICE_SLOT, type FactionName } from "./catalog";
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
   const started = Date.now();
@@ -28,7 +29,14 @@ export class Practice {
     if (localStorage.getItem(this.activeKey)) this.bot.connect(host, database);
   }
 
-  async start(host: string, database: string, callsign: string): Promise<void> {
+  /**
+   * One click from the lobby to a running match. `faction` is the only thing
+   * the human chooses on the way, and it defaults to the faction the practice
+   * slot deals, so a player who does not care still clicks exactly once and
+   * gets what they got before. The bot keeps slot 0 and its own faction: a
+   * mirror is a legitimate matchup, so no choice is refused here.
+   */
+  async start(host: string, database: string, callsign: string, faction: FactionName = factionForSlot(PRACTICE_SLOT)): Promise<void> {
     if (this.starting || this.human.snapshot.room || !this.human.ready) return;
     this.starting = true; this.onChange();
     this.activeKey = `stdbrts:practice:${host}:${database}`;
@@ -48,14 +56,24 @@ export class Practice {
       const joined = await this.human.act(async connection => {
         await connection.reducers.setName({ name: callsign.trim() || "Commander" });
         await connection.reducers.joinRoom({ matchId });
+        // Between joining and readying, while the room is still a lobby: the
+        // server freezes the faction at deployment, so this is the last moment
+        // it can move, and it costs the player no extra step.
+        await setFactionOn(connection, faction);
         await connection.reducers.setReady({ ready: true });
       });
       if (!joined) throw new Error("Could not join practice operation");
       await waitUntil(() => this.bot.snapshot.players.filter(player => player.matchId === matchId && player.ready).length === 2);
       if (!await this.bot.act(connection => connection.reducers.startMatch({}))) throw new Error("Could not deploy practice operation");
       await waitUntil(() => this.human.matchReady && this.human.snapshot.room?.state === "playing");
-      for (const worker of this.human.snapshot.units.filter(unit => unit.owner === this.human.snapshot.me?.slot && unit.kind === "worker")) {
-        const node = [...this.human.snapshot.nodes].sort((left, right) => Math.hypot(left.x - worker.x, left.y - worker.y) - Math.hypot(right.x - worker.x, right.y - worker.y))[0];
+      // The opening gather goes to whatever labour this slot was dealt. Looking
+      // for "worker" left a Network or Organic player's opening units standing
+      // idle at the hub with no way to know why.
+      for (const worker of this.human.snapshot.units.filter(unit => unit.owner === this.human.snapshot.me?.slot && isLabour(unit.kind))) {
+        // The opening goes to material: catalyst deposits sit in contested
+        // ground and are a decision the player makes, not a default.
+        const reachable = this.human.snapshot.nodes.filter(node => node.amount > 0 && currencyOf(node.kind) === "material");
+        const node = [...(reachable.length ? reachable : this.human.snapshot.nodes)].sort((left, right) => Math.hypot(left.x - worker.x, left.y - worker.y) - Math.hypot(right.x - worker.x, right.y - worker.y))[0];
         if (node) await this.human.order([worker.id], { kind: "gather", x: 0, y: 0, target: node.id });
       }
     } catch (error) {
@@ -82,7 +100,7 @@ export class Practice {
       const decide = async () => {
         const busy = new Set(commands.filter(command => command.owner === me.slot && command.status === "scheduled").flatMap(command => command.units));
         for (const pending of this.bot.pending.values()) for (const id of pending.units) busy.add(id);
-        for (const decision of chooseOrders(me.slot, me.resources, units, nodes, busy)) await this.bot.order(decision.units, decision.order);
+        for (const decision of chooseOrders(me.slot, factionOf(me.faction), { material: me.material, catalyst: me.catalyst }, units, nodes, busy)) await this.bot.order(decision.units, decision.order);
       };
       if (navigator.locks) await navigator.locks.request(`practice-ai:${this.activeKey}`, { ifAvailable: true }, async lock => { if (lock) await decide(); });
       else await decide();

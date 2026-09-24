@@ -3,7 +3,10 @@
 @import "@fontsource/space-grotesk/700.css";
 @import "@fontsource/ibm-plex-mono/400.css";
 
-:root { font-family: "Space Grotesk", sans-serif; color: #e2eae4; background: #182421; font-synthesis: none; letter-spacing: 0; --surface: #202e29; --line: #3d4c43; --muted: #a7b5aa; --accent: #cce48c; --danger: #ed8b94; }
+/* `--match-top` is where the match bar ends: masthead plus bar. The score
+   screen pins itself there so it covers the play area and the command deck
+   without ever covering the surrender/leave control. */
+:root { font-family: "Space Grotesk", sans-serif; color: #e2eae4; background: #182421; font-synthesis: none; letter-spacing: 0; --surface: #202e29; --line: #3d4c43; --muted: #a7b5aa; --accent: #cce48c; --danger: #ed8b94; --match-top: 114px; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
 [hidden] { display: none !important; }
@@ -53,7 +56,24 @@ h2 { font-size: 18px; font-weight: 500; }
 .room-row, .roster-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 22px; align-items: center; padding: 15px 0; border-bottom: 1px solid var(--line); }
 .room-row strong, .roster-row strong { overflow-wrap: anywhere; font-weight: 500; }
 .room-row .mono, .roster-row .mono { font-size: 11px; color: var(--muted); }
+.roster-row { grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 14px; }
 .roster-row .player-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* A slot deals a faction and the lobby lets you change your own, so every row
+   carries the word as well as the colour: yours is a choice you can check, and
+   everyone else's is a readout you are about to play against. */
+.faction-tag { font-size: 11px; letter-spacing: 0.06em; padding: 2px 7px; border: 1px solid; border-radius: 3px; white-space: nowrap; }
+.faction-tag.industrial, .readout.faction.industrial { color: #e8c98f; border-color: #7a6238; background: #2a231a; }
+.faction-tag.network, .readout.faction.network { color: #8fd8e8; border-color: #35707a; background: #17282c; }
+.faction-tag.organic, .readout.faction.organic { color: #a6e08f; border-color: #46783a; background: #1b2a1a; }
+/* The picker wears its faction's colour, like the tag and the match chip, and
+   carries the whole economy line so the choice is made on what it does. */
+.faction-select.industrial { color: #e8c98f; border-color: #7a6238; }
+.faction-select.network { color: #8fd8e8; border-color: #35707a; }
+.faction-select.organic { color: #a6e08f; border-color: #46783a; }
+.faction-choice { margin-top: 20px; max-width: 340px; }
+.practice-launch { display: grid; gap: 10px; }
+.faction-brief { margin-top: 14px; font-size: 11px; color: var(--muted); border-left: 2px solid currentColor; padding-left: 10px; }
+.faction-brief.industrial { color: #e8c98f; }.faction-brief.network { color: #8fd8e8; }.faction-brief.organic { color: #a6e08f; }
 .swatch { width: 10px; height: 10px; display: inline-block; flex-shrink: 0; }
 .room-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
 .ready-control { display: flex; align-items: center; gap: 10px; margin-right: auto; padding: 10px 0; }
@@ -71,8 +91,31 @@ h2 { font-size: 18px; font-weight: 500; }
 .operation-name { min-width: 0; display: flex; align-items: center; gap: 14px; }
 .operation-name strong { font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .live-tag { font-size: 9px; color: var(--accent); }
-.match-metrics { margin-left: auto; display: flex; gap: 24px; align-items: center; white-space: nowrap; font-size: 11px; color: var(--muted); }
+.match-metrics { margin-left: auto; display: flex; gap: 18px; align-items: center; white-space: nowrap; font-size: 11px; color: var(--muted); }
 .match-metrics b { color: #f1df9a; font-size: 14px; margin-left: 6px; }
+/* The two currencies are never summed and never interchangeable, so each gets
+   its own chip: a distinct icon, its own name, and its own colour. Catalyst is
+   the scarce one and reads as precious — violet, lit, and set apart from the
+   earthy material chip. Icon and wording carry the distinction on their own;
+   the colour only reinforces it. */
+.readout { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid; border-radius: 3px; }
+.readout svg { width: 14px; height: 14px; }
+.readout b { margin-left: 2px; }
+.readout-name .short { display: none; }
+.readout.material { color: #d8c894; border-color: #6d6134; background: #272b1e; }
+.readout.material b { color: #f7e5a6; }
+.readout.catalyst { color: #cbb0f2; border-color: #6d4fa4; background: #251d38; }
+.readout.catalyst b { color: #ecdcff; text-shadow: 0 0 9px #a06ff0b0; }
+.readout.catalyst.empty { opacity: 0.72; }
+.readout.catalyst.empty b { text-shadow: none; }
+/* Organic harvester stock. Free labour gated on an invisible counter is
+   unreadable, so stock reads as a balance beside the two currencies —
+   and is hidden outright for the two factions it means nothing to. */
+.readout.stock { color: #a6e08f; border-color: #46783a; background: #1b2a1a; }
+.readout.stock b { color: #d3f5c4; }
+.readout.stock.empty { opacity: 0.72; }
+.readout.stock.empty b { color: #ff9ba2; }
+.readout.faction b { letter-spacing: 0.06em; }
 .battlefield-wrap { min-width: 0; min-height: 0; position: relative; overflow: hidden; }
 #battlefield { display: block; width: 100%; height: 100%; touch-action: none; outline-offset: -3px; }
 .camera-tools { position: absolute; right: 16px; top: 16px; display: flex; gap: 4px; }
@@ -81,14 +124,91 @@ h2 { font-size: 18px; font-weight: 500; }
 .battle-players { position: absolute; left: 16px; top: 16px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; max-width: 45%; }
 .battle-player { font-size: 11px; color: #e4eddf; background: #14231ed9; display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-left: 2px solid; overflow-wrap: anywhere; }
 .battle-player.offline { opacity: 0.55; }
+.battle-player-name { min-width: 0; }
+.battle-player .faction-tag { font-size: 9px; padding: 1px 5px; margin-left: auto; }
 .input-modes { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; border: 1px solid #657862; border-radius: 4px; padding: 3px; gap: 3px; }
 .input-modes label { position: relative; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 10px; font-size: 11px; cursor: pointer; }
 .input-modes input { position: absolute; opacity: 0; width: 100%; height: 100%; inset: 0; margin: 0; cursor: pointer; }
 .input-modes label:has(input:checked) { background: #486046; color: #f3f6df; }
 .input-modes label:has(input:focus-visible) { outline: 2px solid var(--accent); }
+/* Two states in one element. While a match is still live it is a banner over
+   the battlefield that says the HQ has gone and blocks nothing; once the room
+   is finished it becomes the score screen, which covers the play area but
+   never the match bar, so the surrender/leave control stays reachable. */
 .result { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); text-align: center; max-width: 70%; background: #12201aee; border-block: 1px solid #d6e79b; padding: 16px 32px; pointer-events: none; }
 #result-title { font-size: 28px; color: #e8efb2; }
-.result button { pointer-events: auto; margin: 12px auto 0; font-size: 12px; }
+.result-head { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.result button { pointer-events: auto; font-size: 12px; }
+.result.final { position: fixed; inset: var(--match-top) 0 0 0; transform: none; max-width: none; text-align: left; padding: 0; pointer-events: auto; background: #12201a; border-block: 0; border-top: 1px solid #d6e79b; display: flex; flex-direction: column; z-index: 30; }
+.result.final .result-head { flex-direction: row; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding: 12px 24px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+.result.final #result-title { font-size: 22px; }
+.scoreboard { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 24px 22px; display: grid; gap: 14px; align-content: start; }
+/* The roster is the legend: every commander's key, name, faction and outcome
+   sit on the row that also carries their end-of-match totals, so the mapping
+   from line to player is learned once and used by every graph below. */
+/* `overflow-x` lives on the table itself, not on `.score-roster`: the roster
+   div is a `.scoreboard` grid item with an implicit auto-sized row, and a
+   grid item whose own overflow is anything but `visible` gets its automatic
+   minimum *and* maximum content contribution to that track forced to zero —
+   so the row collapsed to 0px tall with the table (itself fully laid out at
+   its real height) invisibly overflowing out of it. Scoping the scroll to
+   the table leaves `.score-roster` at `overflow: visible`, so the grid
+   sizes the row from real content again, and a too-wide table still scrolls
+   inside itself exactly as before. */
+.score-table-grid { width: 100%; border-collapse: collapse; font-size: 12px; overflow-x: auto; }
+.score-table-grid th, .score-table-grid td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: middle; }
+.score-table-grid thead th { font: 10px "IBM Plex Mono", monospace; letter-spacing: 0.06em; color: var(--muted); font-weight: 400; }
+.score-table-grid td { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+.score-name-inner { display: inline-flex; align-items: center; gap: 8px; }
+.score-player { font-weight: 500; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.score-row.mine { background: #ffffff08; }
+.score-badge { font: 9px "IBM Plex Mono", monospace; letter-spacing: 0.06em; padding: 2px 6px; border: 1px solid var(--line); color: var(--muted); border-radius: 3px; }
+.score-badge.win { color: #18241c; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.score-badge.out { color: #ffc4c9; border-color: #87555c; }
+/* Both currencies, side by side, never added up — the same two colours the
+   command card prices everything in. */
+.score-cost { display: inline-flex; gap: 10px; }
+.score-controls { display: flex; gap: 10px; flex-wrap: wrap; }
+.score-mode { min-height: 30px; font-size: 11px; padding: 5px 10px; }
+.score-charts-frame { position: relative; }
+.score-charts { display: grid; gap: 18px; }
+.score-panel h3 { font-size: 14px; font-weight: 500; color: #e8efb2; margin: 0 0 4px; }
+.score-caption { font-size: 11px; color: var(--muted); line-height: 1.45; max-width: 92ch; margin-bottom: 9px; }
+.score-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px 22px; }
+/* No max-width: a facet fills whatever column the grid gives it. The plot's
+   own coordinate space is rebuilt in script to match that rendered width, so
+   growing the box grows the plot rather than just the blank space beside it,
+   and the type is sized off the real pixel box instead of a fixed viewBox. */
+.score-facet { margin: 0; min-width: 0; }
+.score-facet-label { font: 10px "IBM Plex Mono", monospace; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 3px; }
+.score-facet-label.material { color: #d8c894; }
+.score-facet-label.catalyst { color: #cbb0f2; }
+/* A fixed pixel height, not one derived from the viewBox's aspect ratio: width
+   can grow to fill the column without dragging the plot's height (and the
+   type inside it) up with it. */
+.score-plot { width: 100%; height: 210px; display: block; touch-action: none; }
+.score-plot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.score-grid-line { stroke: #2e3f38; stroke-width: 1; }
+.score-axis { fill: #9dac9f; font: 11px "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+.score-end { fill: #cad5cb; font: 11px "IBM Plex Mono", monospace; }
+.score-leader { stroke: #5c6d63; stroke-width: 1; }
+.score-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+/* A commander with nothing left on the field: the line is still theirs, but it
+   is not play any more, so it fades behind the ring that marks the moment. */
+.score-line.spent { opacity: 0.38; }
+.score-hairline { stroke: #93a898; stroke-width: 1; }
+.score-key { width: 38px; height: 14px; flex-shrink: 0; }
+.score-tip { position: absolute; z-index: 5; pointer-events: none; background: #16241ff5; border: 1px solid #6a7d6a; padding: 7px 10px; font-size: 11px; min-width: 128px; box-shadow: 0 8px 22px #0007; }
+.score-tip-head { color: var(--muted); font-size: 10px; margin-bottom: 5px; }
+.score-tip-row { display: flex; align-items: center; gap: 7px; }
+.score-tip-row b { color: #f1f6e4; font-variant-numeric: tabular-nums; }
+.score-tip-name { color: var(--muted); font-size: 10px; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.score-notes { display: grid; gap: 4px; }
+.score-note { font-size: 10px; color: #8d9b90; line-height: 1.5; }
+.score-empty { font-size: 11px; color: var(--muted); }
+.score-data summary { font-size: 11px; color: var(--muted); padding: 6px 0; }
+.score-table-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 18px; max-height: 300px; overflow: auto; padding-top: 6px; }
+.score-table-block h4 { font-size: 11px; font-weight: 500; margin: 0 0 5px; color: var(--muted); }
 #sound[aria-pressed="false"] { opacity: 0.6; }
 .command-deck { display: grid; grid-template-columns: 176px minmax(150px, 0.9fr) minmax(260px, 1.2fr) minmax(210px, 1fr); gap: 0; padding: 18px 22px; background: #17231f; border-top: 1px solid #697b59; }
 .command-deck section { padding: 0 20px; border-left: 1px solid var(--line); min-width: 0; }
@@ -114,6 +234,15 @@ button[aria-pressed="true"] { border-color: var(--accent); background: #4a603d; 
 .production-buttons .completed { opacity: 1; border-color: var(--accent); color: var(--accent); }
 .production-buttons button { justify-content: start; padding: 11px 8px; font-size: 12px; }
 .production-buttons small { display: block; font: 9px "IBM Plex Mono", monospace; color: #b5c4a8; margin-top: 5px; }
+/* Prices carry the same two colours as the header chips, so a cost that needs
+   catalyst is recognisable before it is read. `.short` marks the one currency
+   that is actually missing on a disabled button. */
+.cost-part.material { color: #d8c894; }
+.cost-part.catalyst { color: #cbb0f2; }
+.production-buttons button:disabled .cost-part.short { color: #ff9ba2; text-decoration: underline wavy; text-underline-offset: 2px; }
+/* A button disabled only for want of a currency stays readable enough to show
+   which one, instead of fading out with everything else. */
+.production-buttons button:disabled[data-shortfall] { opacity: 0.58; }
 .production-queue { font-size: 10px; color: #cde18d; margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; max-height: 50px; overflow: auto; }
 .production-item { border-bottom: 2px solid #a4c578; padding-bottom: 4px; }
 .orders-section .section-heading { margin-bottom: 4px; }
@@ -124,6 +253,8 @@ button[aria-pressed="true"] { border-color: var(--accent); background: #4a603d; 
 .command-row.rejected .command-label { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
 .command-row.rejected .command-status { flex: 0 0 auto; }
 .command-reason { flex: 0 0 100%; color: #f6c3c6; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
+.command-reason.material { color: #ecd79c; }
+.command-reason.catalyst { color: #d8bcff; }
 .telemetry { font-size: 9px; color: #a1afa2; padding-top: 9px; }
 .notice { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(560px, calc(100% - 32px)); background: #33292b; color: #ffd3cd; border: 1px solid #b6807f; border-radius: 4px; padding: 13px 20px; z-index: 50; font-size: 13px; overflow-wrap: anywhere; }
 dialog { background: #202e29; color: #e2eae4; border: 1px solid #a4b48d; border-radius: 6px; padding: 28px; max-width: calc(100% - 32px); }
@@ -139,7 +270,20 @@ dialog p { margin-top: 14px; color: var(--muted); font-size: 14px; }
    Placed after the 1000px rule and before the 760px rule, and restricted to vertical/height
    properties, so it composes with either width breakpoint instead of fighting it. */
 @media (max-height: 800px) {
+  :root { --match-top: 108px; }
   .match { grid-template-rows: 44px minmax(200px, 1fr) 240px; }
+  /* 990x650 is the short window the layout already supports, and the score
+     screen has to be readable in it: tighter chrome, narrower facets, and the
+     graphs keep their whole height rather than being cropped. */
+  .result.final .result-head { padding: 8px 18px; }
+  .result.final #result-title { font-size: 18px; }
+  .scoreboard { padding: 10px 18px 16px; gap: 10px; }
+  .score-charts { gap: 14px; }
+  .score-caption { margin-bottom: 7px; }
+  .score-grid { grid-template-columns: repeat(auto-fit, minmax(258px, 1fr)); gap: 10px 18px; }
+  .score-plot { height: 165px; }
+  .score-table-grid th, .score-table-grid td { padding: 4px 10px 4px 0; }
+  .score-table-body { max-height: 210px; }
   .command-deck { padding-block: 10px; }
   #minimap { width: 128px; }
   .selection-section h2 { font-size: 15px; margin-bottom: 5px; }
@@ -167,12 +311,29 @@ dialog p { margin-top: 14px; color: var(--muted); font-size: 14px; }
   .lobby-sidebar form { margin-bottom: 0; align-content: start; }.map-facts { grid-column: 1 / -1; }
   .operations { padding: 28px 0 0; }.map-diagram { height: 180px; }.room-row, .roster-row { gap: 12px; }
   .match { height: auto; min-height: calc(100dvh - 58px); grid-template-rows: 52px minmax(330px, 57dvh) auto; }
-  .match-bar { padding: 0 12px; gap: 10px; }.live-tag { display: none; }.operation-name { max-width: 24%; }.operation-name strong { font-size: 11px; }.match-metrics { gap: 12px; font-size: 9px; }.match-metrics b { font-size: 12px; margin-left: 2px; }
+  .match-bar { padding: 0 12px; gap: 8px; }.live-tag { display: none; }.operation-name { max-width: 18%; }.operation-name strong { font-size: 11px; }.match-metrics { gap: 7px; font-size: 9px; }.match-metrics b { font-size: 12px; margin-left: 2px; }
+  /* Both currencies stay legible on a phone: the names shorten to MAT / CAT and
+     the icons go, but neither chip is ever reduced to colour alone. */
+  .readout { padding: 2px 5px; gap: 4px; }.readout svg { display: none; }
+  .readout-name .long { display: none; }.readout-name .short { display: inline; }
+  /* The match bar is width-critical on a phone. Faction never changes mid-match
+     and is still named on every battle-player row over the battlefield, so the
+     chip goes; harvester stock is a live gate on production and stays. */
+  #faction-readout { display: none; }
   .command-deck { grid-template-columns: 120px minmax(0, 1fr); padding: 14px; gap: 20px 0; }
   .production-section { grid-column: 1 / -1; border-left: 0 !important; border-top: 1px solid var(--line); padding: 16px 0 0 !important; }
   .orders-section { grid-column: 1 / -1; border-left: 0 !important; padding: 0 !important; }.command-list { height: 75px; }
   .production-buttons button { font-size: 13px; }.production-buttons small { font-size: 10px; }
   .camera-tools { top: auto; bottom: 66px; right: 10px; flex-direction: column; }.camera-tools .icon-button { width: 34px; height: 34px; min-height: 34px; }
   .battle-players { top: 10px; left: 10px; }.battle-player { font-size: 10px; }.result { top: 80px; padding: 12px 22px; }#result-title { font-size: 24px; }
+  /* On a phone the page itself scrolls, so a score screen pinned under the
+     match bar would leave a strip of match showing above it. It takes the
+     whole viewport instead — and carries its own way out, so nothing is lost. */
+  :root { --match-top: 0px; }
+  .result.final .result-head { padding: 10px 12px; }
+  .result.final #result-title { font-size: 20px; }
+  .scoreboard { padding: 10px 12px 18px; }
+  .score-grid { grid-template-columns: minmax(0, 1fr); }
+  .score-player { max-width: 120px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

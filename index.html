@@ -31,7 +31,10 @@
           <label>Player Limit<select id="capacity"><option value="2">2 players</option><option value="3">3 players</option><option value="4">4 players</option></select></label>
           <button id="create-room" type="submit" class="primary"><i data-lucide="plus"></i>Create Room</button>
         </form>
-        <button id="practice" class="primary"><i data-lucide="bot"></i>Practice vs AI</button>
+        <div class="practice-launch">
+          <label for="practice-faction">Practice Faction<select id="practice-faction" class="faction-select"></select></label>
+          <button id="practice" class="primary"><i data-lucide="bot"></i>Practice vs AI</button>
+        </div>
         <dl class="map-facts"><div><dt>Battlefield</dt><dd>1600 x 1600</dd></div><div><dt>Command Delay</dt><dd>1.0 seconds</dd></div><div><dt>Unit Capacity</dt><dd>60 / player</dd></div></dl>
       </aside>
       <section class="operations">
@@ -39,6 +42,8 @@
         <div id="waiting-room" hidden>
           <div class="section-heading"><h2 id="waiting-name">Room</h2><span id="room-code" class="mono"></span></div>
           <div id="roster" class="roster"></div>
+          <label class="faction-choice" for="faction">Faction<select id="faction" class="faction-select"></select></label>
+          <p id="faction-brief" class="mono faction-brief"></p>
           <div class="room-actions"><label class="ready-control"><input type="checkbox" id="ready" />Ready</label><button id="start-match" class="primary"><i data-lucide="play"></i>Deploy</button><button id="leave-lobby"><i data-lucide="log-out"></i>Leave Room</button></div>
           <p id="waiting-status" class="muted" role="status"></p>
         </div>
@@ -48,11 +53,23 @@
   </main>
 
   <main id="match" class="match" hidden>
-    <div class="match-bar"><div class="operation-name"><span class="live-tag">OPERATION</span><strong id="match-name"></strong></div><div class="match-metrics"><span>ORE <b id="resources">250</b></span><span>UNITS <b id="unit-count">0 / 60</b></span><span id="match-clock" class="mono">00:00</span></div><button id="leave-match" class="icon-button danger" title="Surrender and leave" aria-label="Surrender and leave"><i data-lucide="log-out"></i></button></div>
+    <div class="match-bar"><div class="operation-name"><span class="live-tag">OPERATION</span><strong id="match-name"></strong></div><div class="match-metrics"><span id="material-readout" class="readout material" title="Material / expansion, workers and the basic army"><i data-lucide="boxes"></i><span class="readout-name"><span class="long">MATERIAL</span><span class="short">MAT</span></span><b id="material">250</b></span><span id="catalyst-readout" class="readout catalyst" title="Catalyst / scarce: technology, factory, laboratory and siege"><i data-lucide="gem"></i><span class="readout-name"><span class="long">CATALYST</span><span class="short">CAT</span></span><b id="catalyst">0</b></span><span id="stock-readout" class="readout stock" title="Harvester stock / regenerates 1 every 60 ticks up to 7" hidden><i data-lucide="sprout"></i><span class="readout-name"><span class="long">STOCK</span><span class="short">STK</span></span><b id="stock">0 / 7</b></span><span id="faction-readout" class="readout faction industrial" title="Your faction"><span class="readout-name"><span class="long">FACTION</span><span class="short">FAC</span></span><b id="faction-name">INDUSTRIAL</b></span><span>UNITS <b id="unit-count">0 / 60</b></span><span id="match-clock" class="mono">00:00</span></div><button id="leave-match" class="icon-button danger" title="Surrender and leave" aria-label="Surrender and leave"><i data-lucide="log-out"></i></button></div>
     <section class="battlefield-wrap">
       <canvas id="battlefield" tabindex="0" aria-label="Battlefield"></canvas>
       <div id="targeting-state" class="targeting-state mono" role="status" hidden></div>
-      <div id="result" class="result" hidden><span id="result-title"></span><button id="return-lobby"><i data-lucide="log-out"></i>Return to lobby</button></div>
+      <div id="result" class="result" hidden>
+        <div class="result-head"><span id="result-title"></span><button id="return-lobby" class="primary"><i data-lucide="log-out"></i>Return to lobby</button></div>
+        <div id="scoreboard" class="scoreboard" hidden>
+          <div id="score-roster" class="score-roster"></div>
+          <div class="score-controls"><button id="score-income-mode" class="score-mode">Show income per minute</button></div>
+          <div class="score-charts-frame">
+            <div id="score-charts" class="score-charts"></div>
+            <div id="score-tip" class="score-tip mono" role="status" hidden></div>
+          </div>
+          <div id="score-notes" class="score-notes"></div>
+          <details id="score-table" class="score-data"><summary>Show every sample as a table</summary><div class="score-table-body"></div></details>
+        </div>
+      </div>
       <div id="battle-players" class="battle-players"></div>
       <div class="camera-tools"><button id="sound" class="icon-button" title="Sound on" aria-label="Sound" aria-pressed="true"><i data-lucide="volume-2"></i></button><button id="camera-home" class="icon-button" title="Center on HQ" aria-label="Center on HQ"><i data-lucide="house"></i></button><button id="camera-fit" class="icon-button" title="Show whole map" aria-label="Show whole map"><i data-lucide="maximize-2"></i></button><button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button><button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button></div>
       <div class="input-modes" role="group" aria-label="Pointer mode"><label title="Select units"><input type="radio" name="mode" value="select" checked /><i data-lucide="mouse-pointer-2"></i><span>Select</span></label><label title="Issue order"><input type="radio" name="mode" value="order" /><i data-lucide="crosshair"></i><span>Order</span></label><label title="Pan camera"><input type="radio" name="mode" value="pan" /><i data-lucide="move"></i><span>Pan</span></label></div>
@@ -63,7 +80,7 @@
         <button id="stop" class="icon-button" title="Stop selected units" aria-label="Stop selected units"><i data-lucide="square"></i></button>
         <button id="attack-move" class="icon-button" title="Attack-move" aria-label="Attack-move" aria-pressed="false"><i data-lucide="crosshair"></i></button>
         <button id="hold" class="icon-button" title="Hold position" aria-label="Hold position"><i data-lucide="shield"></i></button>
-        <button id="repair" class="icon-button" title="Repair / 1 ore per 5 HP" aria-label="Repair" aria-pressed="false"><i data-lucide="wrench"></i></button>
+        <button id="repair" class="icon-button" title="Repair / 1 material per 5 HP" aria-label="Repair" aria-pressed="false"><i data-lucide="wrench"></i></button>
         <button id="return" class="icon-button" title="Return cargo" aria-label="Return cargo"><i data-lucide="corner-down-left"></i></button>
         <button id="select-army" class="icon-button" title="Select army" aria-label="Select army"><i data-lucide="swords"></i></button>
         <button id="idle-worker" class="icon-button" title="Select idle worker" aria-label="Select idle worker"><i data-lucide="hard-hat"></i></button>

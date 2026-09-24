@@ -1,7 +1,8 @@
-import type { Entity, Order } from "./bindings/types";
+import type { CreepPatch, Entity, Order } from "./bindings/types";
 import { Session } from "./network";
-import { clamp, COLORS, countdown, VISUALS, WORLD_SIZE } from "./presentation";
-import { isArmy, isBuilding, placementError, terrain } from "./catalog";
+import { clamp, clampToMap, COLORS, countdown, VISUALS, WORLD_SIZE } from "./presentation";
+import { cargoCapacity, carriesCargo, currencyOf, fights, isArmy, isBuilding, isLabour, isTemporary, placementError, terrain } from "./catalog";
+import { creepGoneTick, lifetimeFraction, offCreep } from "./creep";
 
 interface Point { x: number; y: number }
 interface Motion { from: Point; to: Point; at: number }
@@ -16,7 +17,7 @@ export class Battlefield {
   onSelection: () => void = () => {};
   private context: CanvasRenderingContext2D;
   private miniContext: CanvasRenderingContext2D;
-  private camera = { x: 800, y: 800, zoom: 0.8 };
+  private camera = { x: WORLD_SIZE / 2, y: WORLD_SIZE / 2, zoom: 0.8 };
   private width = 1;
   private height = 1;
   private motions = new Map<number, Motion>();
@@ -116,8 +117,9 @@ export class Battlefield {
     this.onSelection();
   }
 
+  /** Idle labour of whatever faction this player is — worker, drifter or harvester. */
   selectIdleWorker(): void {
-    const workers = this.session.snapshot.units.filter(unit => unit.owner === this.session.snapshot.me?.slot && unit.kind === "worker" && unit.order.kind === "stop");
+    const workers = this.session.snapshot.units.filter(unit => unit.owner === this.session.snapshot.me?.slot && isLabour(unit.kind) && unit.order.kind === "stop");
     const worker = workers.find(unit => !this.selected.has(unit.id)) ?? workers[0];
     if (worker) { this.selected = new Set([worker.id]); this.camera.x = worker.x; this.camera.y = worker.y; this.boundCamera(); this.onSelection(); }
   }
@@ -128,7 +130,7 @@ export class Battlefield {
   }
 
   fit(): void {
-    this.camera = { x: 800, y: 800, zoom: Math.min(this.width, this.height) / WORLD_SIZE * 0.97 };
+    this.camera = { x: WORLD_SIZE / 2, y: WORLD_SIZE / 2, zoom: Math.min(this.width, this.height) / WORLD_SIZE * 0.97 };
   }
 
   zoom(amount: number): void { this.camera.zoom = clamp(this.camera.zoom * amount, 0.18, 2.2); this.boundCamera(); }
@@ -136,8 +138,8 @@ export class Battlefield {
   arm(kind: TargetMode): void {
     const allowed = kind === "rally"
       ? this.session.snapshot.units.some(unit => unit.kind === "hq" && unit.owner === this.session.snapshot.me?.slot)
-      : kind.startsWith("build_") ? this.session.snapshot.units.some(unit => unit.owner === this.session.snapshot.me?.slot && unit.kind === "worker")
-      : this.ownedSelection().some(unit => kind === "repair" ? unit.kind === "worker" : isArmy(unit.kind));
+      : kind.startsWith("build_") ? this.session.snapshot.units.some(unit => unit.owner === this.session.snapshot.me?.slot && isLabour(unit.kind))
+      : this.ownedSelection().some(unit => kind === "repair" ? isLabour(unit.kind) : fights(unit.kind));
     if (!allowed) return;
     this.targeting = this.targeting === kind ? undefined : kind;
     this.onSelection();
@@ -145,7 +147,8 @@ export class Battlefield {
 
   issue(kind: "stop" | "return" | "hold"): void {
     this.targeting = undefined;
-    const units = this.ownedSelection().filter(unit => kind === "return" ? unit.kind === "worker" : kind === "hold" ? isArmy(unit.kind) : !isBuilding(unit.kind));
+    // Only a carrier can be told to bring a load home; a drifter has no load.
+    const units = this.ownedSelection().filter(unit => kind === "return" ? carriesCargo(unit.kind) : kind === "hold" ? fights(unit.kind) : !isBuilding(unit.kind));
     if (units.length) void this.session.order(units.map(unit => unit.id), { kind, x: 0, y: 0, target: 0 });
     this.onSelection();
   }
@@ -173,8 +176,8 @@ export class Battlefield {
   private boundCamera(): void {
     const halfWidth = this.width / this.camera.zoom / 2;
     const halfHeight = this.height / this.camera.zoom / 2;
-    this.camera.x = halfWidth >= 800 ? 800 : clamp(this.camera.x, halfWidth, WORLD_SIZE - halfWidth);
-    this.camera.y = halfHeight >= 800 ? 800 : clamp(this.camera.y, halfHeight, WORLD_SIZE - halfHeight);
+    this.camera.x = halfWidth >= WORLD_SIZE / 2 ? WORLD_SIZE / 2 : clamp(this.camera.x, halfWidth, WORLD_SIZE - halfWidth);
+    this.camera.y = halfHeight >= WORLD_SIZE / 2 ? WORLD_SIZE / 2 : clamp(this.camera.y, halfHeight, WORLD_SIZE - halfHeight);
   }
 
   private local(event: MouseEvent): Point {
@@ -238,7 +241,7 @@ export class Battlefield {
       const kind = this.targeting.slice(6);
       const error = placementError(kind, point.x, point.y, me.slot, units, nodes);
       if (error) { this.session.onNotice(error); return; }
-      const worker = owned.find(unit => unit.kind === "worker") ?? units.filter(unit => unit.owner === me.slot && unit.kind === "worker").sort((left, right) => Number(left.order.kind === "construct") - Number(right.order.kind === "construct") || Math.hypot(left.x - point.x, left.y - point.y) - Math.hypot(right.x - point.x, right.y - point.y))[0];
+      const worker = owned.find(unit => isLabour(unit.kind)) ?? units.filter(unit => unit.owner === me.slot && isLabour(unit.kind)).sort((left, right) => Number(left.order.kind === "construct") - Number(right.order.kind === "construct") || Math.hypot(left.x - point.x, left.y - point.y) - Math.hypot(right.x - point.x, right.y - point.y))[0];
       if (worker) {
         void this.session.order([worker.id], { kind: this.targeting, x: point.x, y: point.y, target: 0 });
         this.targeting = undefined; this.selected = new Set([worker.id]); this.onSelection();
@@ -247,7 +250,7 @@ export class Battlefield {
     }
     const headquarters = owned.find(unit => ["hq", "barracks", "factory", "lab"].includes(unit.kind)) ?? units.find(unit => unit.kind === "hq" && unit.owner === me?.slot);
     if (headquarters && (this.targeting === "rally" || (!this.targeting && owned.length === 1 && ["hq", "barracks", "factory"].includes(owned[0].kind)))) {
-      void this.session.order([headquarters.id], { kind: node ? "rally_gather" : "rally_move", x: clamp(point.x, 16, 1584), y: clamp(point.y, 16, 1584), target: node?.id ?? 0 });
+      void this.session.order([headquarters.id], { kind: node ? "rally_gather" : "rally_move", x: clampToMap(point.x), y: clampToMap(point.y), target: node?.id ?? 0 });
       this.targeting = undefined;
       this.onSelection();
       return;
@@ -257,23 +260,25 @@ export class Battlefield {
     const enemy = units.find(unit => unit.owner !== me?.slot && Math.hypot(point.x - unit.x, point.y - unit.y) < (VISUALS[unit.kind]?.radius ?? 12) + 8);
     const friendly = units.find(unit => unit.owner === me?.slot && Math.hypot(point.x - unit.x, point.y - unit.y) < (VISUALS[unit.kind]?.radius ?? 12) + 8);
     const hq = units.find(unit => unit.owner === me?.slot && ["hq", "outpost"].includes(unit.kind) && unit.constructionRemaining === 0n && Math.hypot(point.x - unit.x, point.y - unit.y) < 40);
-    const order: Order = { kind: "move", x: clamp(point.x, 16, 1584), y: clamp(point.y, 16, 1584), target: 0 };
-    if (this.targeting === "attack_move") { order.kind = "attack_move"; selected = selected.filter(unit => isArmy(unit.kind)); }
+    const order: Order = { kind: "move", x: clampToMap(point.x), y: clampToMap(point.y), target: 0 };
+    if (this.targeting === "attack_move") { order.kind = "attack_move"; selected = selected.filter(unit => fights(unit.kind)); }
     else if (this.targeting === "repair") {
       if (!friendly || friendly.hp >= VISUALS[friendly.kind].hp) { this.session.onNotice("Choose a damaged friendly unit or HQ"); return; }
-      order.kind = friendly.constructionRemaining > 0n ? "construct" : "repair"; order.target = friendly.id; selected = selected.filter(unit => unit.kind === "worker" && unit.id !== friendly.id);
+      order.kind = friendly.constructionRemaining > 0n ? "construct" : "repair"; order.target = friendly.id; selected = selected.filter(unit => isLabour(unit.kind) && unit.id !== friendly.id);
     }
-    else if (enemy) { order.kind = "attack"; order.target = enemy.id; selected = selected.filter(unit => isArmy(unit.kind)); }
-    else if (friendly && friendly.constructionRemaining > 0n) { order.kind = "construct"; order.target = friendly.id; selected = selected.filter(unit => unit.kind === "worker"); }
-    else if (node) { order.kind = "gather"; order.target = node.id; selected = selected.filter(unit => unit.kind === "worker"); }
-    else if (hq) { order.kind = "return"; selected = selected.filter(unit => unit.kind === "worker"); }
-    else if (friendly && friendly.hp < VISUALS[friendly.kind].hp) { order.kind = "repair"; order.target = friendly.id; selected = selected.filter(unit => unit.kind === "worker" && unit.id !== friendly.id); }
+    else if (enemy) { order.kind = "attack"; order.target = enemy.id; selected = selected.filter(unit => fights(unit.kind)); }
+    else if (friendly && friendly.constructionRemaining > 0n) { order.kind = "construct"; order.target = friendly.id; selected = selected.filter(unit => isLabour(unit.kind)); }
+    else if (node) { order.kind = "gather"; order.target = node.id; selected = selected.filter(unit => isLabour(unit.kind)); }
+    // Dropping a load at a hub is a carrier's order. A drifter told to return is
+    // refused by name on the server, so it is never included here.
+    else if (hq) { order.kind = "return"; selected = selected.filter(unit => carriesCargo(unit.kind)); }
+    else if (friendly && friendly.hp < VISUALS[friendly.kind].hp) { order.kind = "repair"; order.target = friendly.id; selected = selected.filter(unit => isLabour(unit.kind) && unit.id !== friendly.id); }
     if (selected.length) {
       void this.session.order(selected.map(unit => unit.id), order, queued);
       this.targeting = undefined;
       this.onSelection();
     }
-    else this.session.onNotice(enemy ? "Select army units to attack" : "Select workers for this order");
+    else this.session.onNotice(enemy ? "Select fighting units to attack" : "Select labour units for this order");
   }
 
   private paintTerrain(): void {
@@ -304,9 +309,10 @@ export class Battlefield {
     }
     context.strokeStyle = "#82968044";
     context.lineWidth = 2;
-    context.beginPath(); context.moveTo(800, 700); context.lineTo(900, 800); context.lineTo(800, 900); context.lineTo(700, 800); context.closePath(); context.stroke();
+    const mid = WORLD_SIZE / 2;
+    context.beginPath(); context.moveTo(mid, mid - 100); context.lineTo(mid + 100, mid); context.lineTo(mid, mid + 100); context.lineTo(mid - 100, mid); context.closePath(); context.stroke();
     context.font = "18px 'IBM Plex Mono'"; context.textAlign = "center"; context.fillStyle = "#a8b8a877";
-    context.fillText("BASIN / 07", 800, 807);
+    context.fillText("BASIN / 07", mid, mid + 7);
     for (const [x, y, width, height] of terrain) {
       context.fillStyle = "#122b2c"; context.fillRect(x + 8, y + 10, width, height);
       context.fillStyle = "#748480"; context.fillRect(x, y, width, height);
@@ -345,17 +351,37 @@ export class Battlefield {
     context.translate(-this.camera.x, -this.camera.y);
     context.drawImage(this.terrain, 0, 0);
     const { units, nodes, commands, room } = this.session.snapshot;
+    this.drawCreep(now);
     for (const node of nodes) {
       if (node.amount === 0) continue;
+      const currency = currencyOf(node.kind);
       context.save(); context.translate(node.x, node.y);
-      for (let index = 0; index < 5; index++) {
-        const x = (index % 3 - 1) * 15;
-        const y = Math.floor(index / 3) * 15 - 8;
-        context.fillStyle = index % 2 ? "#ecd58a" : "#b4cfa4";
-        context.strokeStyle = "#5b795a"; context.lineWidth = 2;
-        context.beginPath(); context.moveTo(x, y - 16); context.lineTo(x + 9, y - 2); context.lineTo(x + 6, y + 13); context.lineTo(x - 8, y + 8); context.closePath(); context.fill(); context.stroke();
+      if (currency === "catalyst") {
+        // Catalyst deposits are three tall violet spires inside a halo: a
+        // different silhouette, a different count and a different colour from
+        // the low material chunks, so shape alone still tells them apart.
+        context.strokeStyle = "#7e5cc0"; context.lineWidth = 1.5;
+        context.beginPath(); context.arc(0, 0, 30, 0, Math.PI * 2); context.stroke();
+        for (let index = 0; index < 3; index++) {
+          const x = (index - 1) * 14;
+          const height = index === 1 ? 30 : 22;
+          context.fillStyle = index === 1 ? "#d3a6ff" : "#a878ea";
+          context.strokeStyle = "#3c2c5c"; context.lineWidth = 2;
+          context.beginPath(); context.moveTo(x, -height); context.lineTo(x + 8, -4); context.lineTo(x, 16); context.lineTo(x - 8, -4); context.closePath(); context.fill(); context.stroke();
+        }
+      } else {
+        for (let index = 0; index < 5; index++) {
+          const x = (index % 3 - 1) * 15;
+          const y = Math.floor(index / 3) * 15 - 8;
+          context.fillStyle = index % 2 ? "#ecd58a" : "#b4cfa4";
+          context.strokeStyle = "#5b795a"; context.lineWidth = 2;
+          context.beginPath(); context.moveTo(x, y - 16); context.lineTo(x + 9, y - 2); context.lineTo(x + 6, y + 13); context.lineTo(x - 8, y + 8); context.closePath(); context.fill(); context.stroke();
+        }
       }
-      context.font = "11px 'IBM Plex Mono'"; context.textAlign = "center"; context.fillStyle = "#f3e8bd"; context.fillText(String(node.amount), 0, 42); context.restore();
+      // The kind is written out as well as drawn: colour is never the only cue.
+      context.font = "11px 'IBM Plex Mono'"; context.textAlign = "center";
+      context.fillStyle = currency === "catalyst" ? "#e0c9ff" : "#f3e8bd";
+      context.fillText(`${node.amount} ${currency === "catalyst" ? "CAT" : "MAT"}`, 0, 42); context.restore();
     }
     for (const unit of units) {
       if (this.selected.has(unit.id) || (unit.kind === "hq" && unit.owner === this.session.snapshot.me?.slot)) {
@@ -379,6 +405,7 @@ export class Battlefield {
       if (target) this.marker(target, "#ffffff", "...");
     }
     for (const unit of [...units].sort((left, right) => left.y - right.y)) this.drawUnit(unit, now);
+    this.drawCreepCountdowns(now);
     if (this.targeting?.startsWith("build_") && this.pointer && this.session.snapshot.me) {
       const kind = this.targeting.slice(6);
       const error = placementError(kind, this.pointer.x, this.pointer.y, this.session.snapshot.me.slot, units, nodes);
@@ -397,6 +424,66 @@ export class Battlefield {
     }
   }
 
+  /**
+   * Organic creep, drawn from the `creep_patch` rows rather than from units: a
+   * patch outlives the hub that grew it. Owner-tinted and faint, under
+   * everything but terrain. A patch whose source is gone gets a dashed,
+   * pulsing edge and a countdown to the tick it is removed -- the window an
+   * opponent has to act on it, or its owner to rebuild -- so the recession is
+   * read, not discovered.
+   */
+  private drawCreep(now: number): void {
+    const { creep } = this.session.snapshot;
+    if (!creep.length) return;
+    const context = this.context;
+    for (const patch of creep) {
+      const color = COLORS[patch.owner] ?? "#9fb39f";
+      context.fillStyle = `${color}16`;
+      context.beginPath(); context.arc(patch.x, patch.y, patch.radius, 0, Math.PI * 2); context.fill();
+      // A second, smaller wash gives the disc a denser core, so it reads as
+      // growth outward from the hub rather than as a flat range circle.
+      context.fillStyle = `${color}0e`;
+      context.beginPath(); context.arc(patch.x, patch.y, patch.radius * 0.6, 0, Math.PI * 2); context.fill();
+    }
+    for (const patch of creep) {
+      const color = COLORS[patch.owner] ?? "#9fb39f";
+      const lost = patch.lostTick !== 0n;
+      context.lineWidth = (lost ? 2.5 : 1.5) / this.camera.zoom;
+      if (lost) {
+        const pulse = 0.5 + 0.5 * Math.sin(now / 180);
+        context.strokeStyle = color; context.globalAlpha = 0.45 + 0.45 * pulse;
+        context.setLineDash([10 / this.camera.zoom, 8 / this.camera.zoom]);
+        context.lineDashOffset = -now / 60 / this.camera.zoom;
+      } else {
+        context.strokeStyle = `${color}40`;
+      }
+      context.beginPath(); context.arc(patch.x, patch.y, patch.radius, 0, Math.PI * 2); context.stroke();
+      context.setLineDash([]); context.lineDashOffset = 0; context.globalAlpha = 1;
+    }
+  }
+
+  /** The recession countdowns, drawn after units so a building never covers one. */
+  private drawCreepCountdowns(now: number): void {
+    const { creep, room } = this.session.snapshot;
+    const context = this.context;
+    const tick = room?.tick ?? 0n;
+    const since = now - this.session.tickReceivedAt;
+    for (const patch of creep) {
+      const gone = creepGoneTick(patch, tick);
+      if (gone !== undefined) {
+        const color = COLORS[patch.owner] ?? "#9fb39f";
+        const seconds = countdown(gone, tick, since);
+        context.font = `${12 / this.camera.zoom}px 'IBM Plex Mono'`; context.textAlign = "center";
+        context.fillStyle = "#101c19b0";
+        const label = `CREEP GONE IN ${seconds.toFixed(1)}s`;
+        const width = context.measureText(label).width + 10 / this.camera.zoom;
+        const y = patch.y - patch.radius - 8 / this.camera.zoom;
+        context.fillRect(patch.x - width / 2, y - 13 / this.camera.zoom, width, 17 / this.camera.zoom);
+        context.fillStyle = color; context.fillText(label, patch.x, y);
+      }
+    }
+  }
+
   private orderTarget(order: Order): Point | undefined {
     if (order.kind.startsWith("build_")) return order;
     if (["move", "attack_move", "rally_move"].includes(order.kind)) return order;
@@ -411,6 +498,30 @@ export class Battlefield {
     context.beginPath(); context.arc(point.x, point.y, 18, 0, Math.PI * 2); context.stroke();
     context.beginPath(); context.moveTo(point.x - 7, point.y); context.lineTo(point.x + 7, point.y); context.moveTo(point.x, point.y - 7); context.lineTo(point.x, point.y + 7); context.stroke();
     context.font = `${12 / this.camera.zoom}px 'IBM Plex Mono'`; context.textAlign = "center"; context.fillText(label, point.x, point.y - 26);
+  }
+
+  /**
+   * The load bar, for carriers only. A drifter never reaches this: it holds
+   * nothing at any moment, so drawing it an empty bar would claim a cargo model
+   * it does not have. The bar is scaled by that unit's own capacity, since a
+   * harvester's full load is 10 and a worker's is 25.
+   */
+  private drawLoad(unit: Entity): void {
+    if (!carriesCargo(unit.kind) || !unit.cargo) return;
+    const context = this.context;
+    // A load over the base capacity can only mean research_logistics is in.
+    const capacity = cargoCapacity(unit.kind, unit.cargo > cargoCapacity(unit.kind, false));
+    const width = unit.kind === "harvester" ? 10 : 14;
+    // The load bar takes the colour of what is actually being carried, and a
+    // catalyst load also gets a marker above it so the two are not told apart
+    // by colour alone at this size.
+    const catalyst = currencyOf(unit.cargoKind) === "catalyst";
+    context.fillStyle = catalyst ? "#c79bff" : "#f3d570";
+    context.fillRect(-width / 2, 11, width * Math.min(unit.cargo / capacity, 1), 4);
+    if (catalyst) {
+      context.beginPath(); context.moveTo(0, 6); context.lineTo(4, 10); context.lineTo(0, 14); context.lineTo(-4, 10); context.closePath();
+      context.fillStyle = "#efe0ff"; context.fill();
+    }
   }
 
   private drawUnit(unit: Entity, now: number): void {
@@ -458,9 +569,63 @@ export class Battlefield {
         context.fillStyle = color; context.fillRect(-17, -10, 8, 8); context.fillRect(9, -10, 8, 8);
       }
     } else if (unit.kind === "worker") {
+      // Industrial: a squat hauler with a load bar. The only labour unit that
+      // both fills up and walks the load home.
       context.beginPath(); context.moveTo(0, -12); context.lineTo(11, 5); context.lineTo(5, 11); context.lineTo(-9, 8); context.lineTo(-11, -3); context.closePath(); context.fill(); context.stroke();
       context.fillStyle = "#e7eddf"; context.fillRect(-4, -4, 8, 6);
-      if (unit.cargo) { context.fillStyle = "#f3d570"; context.fillRect(-7, 11, 14 * Math.min(unit.cargo / 25, 1), 4); }
+      this.drawLoad(unit);
+    } else if (unit.kind === "drifter") {
+      // Network: a hollow relay ring on a mast, parked at a deposit for the
+      // whole match. Open where the worker is solid, and taller than wide, so
+      // the two read apart at a glance and never by colour alone. It has no
+      // load bar at all, because it never holds a load.
+      context.lineWidth = 3;
+      context.beginPath(); context.moveTo(0, -16); context.lineTo(0, 10); context.strokeStyle = "#cdd9cb"; context.stroke();
+      context.strokeStyle = color;
+      context.beginPath(); context.arc(0, -3, 9, 0, Math.PI * 2); context.stroke();
+      context.beginPath(); context.arc(0, -3, 4.5, 0, Math.PI * 2); context.fillStyle = color; context.fill();
+      context.strokeStyle = "#172a26"; context.lineWidth = 2;
+      context.beginPath(); context.moveTo(-8, 11); context.lineTo(8, 11); context.stroke();
+      // Crediting in place: a rising tick above the ring while it works a
+      // deposit, which is what a drifter does instead of a return trip.
+      if (unit.order.kind === "gather") {
+        const phase = (Number(this.session.snapshot.room?.tick ?? 0n) % 20) / 20;
+        context.globalAlpha *= 1 - phase;
+        // Coloured by the deposit it is working, not by `cargoKind`: a drifter
+        // never carries, so its cargo kind stays at the default forever and
+        // would have painted a catalyst drifter gold.
+        const worked = this.session.snapshot.nodes.find(node => node.id === unit.order.target);
+        context.fillStyle = worked && currencyOf(worked.kind) === "catalyst" ? "#c79bff" : "#f3d570";
+        context.fillRect(-2, -20 - phase * 8, 4, 5);
+        context.globalAlpha = unit.constructionRemaining > 0n ? 0.6 : 1;
+      }
+    } else if (unit.kind === "harvester") {
+      // Organic: smaller and flimsier than either, a soft teardrop with a thin
+      // outline and a short load bar — it carries 10 where a worker carries 25.
+      context.lineWidth = 1.5;
+      context.beginPath(); context.moveTo(0, -11); context.bezierCurveTo(7, -6, 8, 5, 0, 9); context.bezierCurveTo(-8, 5, -7, -6, 0, -11); context.closePath();
+      context.fill(); context.stroke();
+      context.fillStyle = "#dff0d2"; context.beginPath(); context.ellipse(0, -1, 2.5, 4, 0, 0, Math.PI * 2); context.fill();
+      this.drawLoad(unit);
+    } else if (unit.kind === "brood") {
+      // Temporary: a small many-legged mite. Round and leggy where every
+      // trained unit is angular, so it never reads as a soldier.
+      context.strokeStyle = color; context.lineWidth = 1.5;
+      for (const side of [-1, 1]) for (const offset of [-4, 0, 4]) {
+        context.beginPath(); context.moveTo(side * 4, offset * 0.8); context.lineTo(side * 9, offset * 1.5 - 1); context.stroke();
+      }
+      context.fillStyle = "#2a1f33"; context.strokeStyle = color; context.lineWidth = 2;
+      context.beginPath(); context.ellipse(0, 0, 5, 6.5, 0, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.fillStyle = color; context.beginPath(); context.arc(0, -5, 2.5, 0, Math.PI * 2); context.fill();
+    } else if (unit.kind === "brute") {
+      // Temporary: a hunched carapace with two mandibles. Dark-bodied and
+      // owner-edged like the brood, so the pair read as one family.
+      context.fillStyle = "#2a1f33"; context.strokeStyle = color; context.lineWidth = 2.5;
+      context.beginPath(); context.moveTo(-11, 7); context.bezierCurveTo(-13, -6, -6, -12, 0, -12); context.bezierCurveTo(6, -12, 13, -6, 11, 7); context.closePath(); context.fill(); context.stroke();
+      context.strokeStyle = "#e6d9f2"; context.lineWidth = 2;
+      context.beginPath(); context.moveTo(-5, -11); context.lineTo(-8, -18); context.moveTo(5, -11); context.lineTo(8, -18); context.stroke();
+      context.strokeStyle = color; context.lineWidth = 1.5;
+      for (const offset of [-5, 0, 5]) { context.beginPath(); context.moveTo(offset - 3, -5); context.lineTo(offset + 3, -5); context.stroke(); }
     } else if (unit.kind === "scout") {
       context.beginPath(); context.moveTo(0, -18); context.lineTo(10, 12); context.lineTo(0, 6); context.lineTo(-10, 12); context.closePath(); context.fill(); context.stroke();
       context.fillStyle = "#e9eee0"; context.fillRect(-3, -6, 6, 9);
@@ -475,6 +640,20 @@ export class Battlefield {
     context.fillStyle = "#12201f"; context.fillRect(-radius, -radius - 15, radius * 2, 4);
     context.fillStyle = unit.hp / (VISUALS[unit.kind]?.hp ?? 1) > 0.3 ? color : "#ff8178";
     context.fillRect(-radius, -radius - 15, radius * 2 * clamp(unit.hp / (VISUALS[unit.kind]?.hp ?? 1), 0, 1), 4);
+    // A temporary unit also shows how long it has left, in its own colour,
+    // directly under its health: it expires whether or not it is hurt.
+    const life = isTemporary(unit.kind) ? lifetimeFraction(unit, this.session.snapshot.room?.tick ?? 0n) : undefined;
+    if (life !== undefined) {
+      context.fillStyle = "#12201f"; context.fillRect(-radius, -radius - 10, radius * 2, 3);
+      context.fillStyle = "#c9b2ff"; context.fillRect(-radius, -radius - 10, radius * 2 * life, 3);
+    }
+    // One of your own harvesters off your creep moves at 0.6x. A small amber
+    // double down-chevron beside it says so; never drawn for anyone else's.
+    if (unit.owner === this.session.snapshot.me?.slot && offCreep(unit, this.session.snapshot.creep)) {
+      context.strokeStyle = "#f0b85a"; context.lineWidth = 1.5;
+      context.beginPath(); context.moveTo(radius + 2, -3); context.lineTo(radius + 5, 1); context.lineTo(radius + 8, -3);
+      context.moveTo(radius + 2, 1); context.lineTo(radius + 5, 5); context.lineTo(radius + 8, 1); context.stroke();
+    }
     if (isBuilding(unit.kind)) {
       context.globalAlpha = 1; context.fillStyle = "#edf3dc"; context.font = "10px 'IBM Plex Mono'"; context.textAlign = "center";
       context.fillText(VISUALS[unit.kind].label, 0, radius + 17);
@@ -497,14 +676,38 @@ export class Battlefield {
     }
   }
 
+  private drawMiniCreep(creep: CreepPatch[], scale: number): void {
+    const context = this.miniContext;
+    for (const patch of creep) {
+      const color = COLORS[patch.owner] ?? "#9fb39f";
+      context.fillStyle = `${color}${patch.lostTick === 0n ? "30" : "18"}`;
+      context.beginPath(); context.arc(patch.x * scale, patch.y * scale, patch.radius * scale, 0, Math.PI * 2); context.fill();
+      if (patch.lostTick !== 0n) {
+        context.strokeStyle = color; context.lineWidth = 1; context.setLineDash([2, 2]);
+        context.beginPath(); context.arc(patch.x * scale, patch.y * scale, patch.radius * scale, 0, Math.PI * 2); context.stroke();
+        context.setLineDash([]);
+      }
+    }
+  }
+
   private drawMinimap(): void {
     const context = this.miniContext;
     const size = this.minimap.width;
     context.clearRect(0, 0, size, size); context.drawImage(this.terrain, 0, 0, size, size);
     const scale = size / WORLD_SIZE;
+    this.drawMiniCreep(this.session.snapshot.creep, scale);
     for (const node of this.session.snapshot.nodes) {
       if (!node.amount) continue;
-      context.fillStyle = "#ecd58a"; context.fillRect(node.x * scale - 2, node.y * scale - 2, 4, 4);
+      if (currencyOf(node.kind) === "catalyst") {
+        // A larger rotated diamond, so catalyst is findable on the minimap by
+        // shape and size even before its colour registers.
+        context.save(); context.translate(node.x * scale, node.y * scale); context.rotate(Math.PI / 4);
+        context.fillStyle = "#c79bff"; context.fillRect(-3, -3, 6, 6);
+        context.strokeStyle = "#f0e4ff"; context.lineWidth = 1; context.strokeRect(-3, -3, 6, 6);
+        context.restore();
+      } else {
+        context.fillStyle = "#ecd58a"; context.fillRect(node.x * scale - 2, node.y * scale - 2, 4, 4);
+      }
     }
     for (const unit of this.session.snapshot.units) {
       context.fillStyle = COLORS[unit.owner];

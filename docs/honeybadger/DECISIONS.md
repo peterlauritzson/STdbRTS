@@ -66,3 +66,248 @@ README already documents this gap for anyone hosting publicly.
 
 **Would overturn it.** A verified server-side mechanism that passes the
 adversarial-client tests. Convenience does not.
+
+---
+
+## 2026-09-22 — First dual-currency economy values
+
+**Decision.** Two currencies replace the single ore balance. **Material** funds
+expansion, workers and basic army; **Catalyst** funds technology and
+specialists. Opening balance is 250 material, 0 catalyst. First-pass costs:
+
+| Thing | Material | Catalyst |
+| --- | --- | --- |
+| worker | 50 | 0 |
+| soldier | 100 | 0 |
+| scout | 80 | 0 |
+| siege | 150 | 50 |
+| barracks | 150 | 0 |
+| turret | 125 | 0 |
+| outpost | 100 | 0 |
+| factory | 200 | 50 |
+| lab | 150 | 50 |
+| research (each) | 100 | 50 |
+
+Army deaths — soldier, scout, siege only — refund 50% of both currencies
+actually paid, rounded down, paid exactly once, never to an eliminated player.
+Workers and buildings refund nothing. Every player receives an opening stipend
+of 200 material/minute for 90 seconds, then 100/minute for 90 seconds, then
+nothing, accumulated in integer ticks.
+
+Map deposits gain a `kind` of `material` or `catalyst`. Two of the skirmish
+map's eight deposits become catalyst, placed centrally so the scarcer currency
+is the contested one.
+
+**Why.** [GAME-DESIGN.md](GAME-DESIGN.md) requires two currencies with genuinely
+different purposes, and states plainly that a generic ore balance with faction
+income bonuses would lose the essential decisions. The refund and stipend come
+from [RESEARCH.md](RESEARCH.md)'s documented 50% army refund and 200-then-100
+per minute opening, which exist to make losses recoverable and expansion
+attractive without making either safe. Specialists costing both currencies is
+what stops catalyst from being an optional side resource.
+
+**These are labeled experimental values, not balance.** The research ledger is
+explicit that its numbers are historical reference for a different game on a
+different engine, and that expansion behaviour depends on income, travel,
+depletion and build time evaluated together. Nothing here is validated by play.
+
+**Would overturn it.** Playtest evidence from the economy-openings and
+raid-and-recovery sessions in [ROADMAP.md](ROADMAP.md)'s protocol — in
+particular a dominant unopposed scaling pattern, or catalyst turning out to be
+irrelevant or mandatory rather than a choice.
+
+---
+
+## 2026-09-22 — Catalyst is per-base, like SC2 gas; the centre holds no resources
+
+**Decision.** Every base — main, natural, third, fourth — carries its own
+catalyst, in roughly SC2 gas proportions (about 2 catalyst sites per base
+alongside 6-8 material). No catalyst exists anywhere else, and the centre of the
+map holds **no resources at all**: it is open ground contested for position, not
+for income. This supersedes the earlier choice to concentrate catalyst at the
+contested centre.
+
+**Why.** Stated by the user on 2026-09-22: the map did not look like an SC2 map
+and catalyst in the middle was wrong. They are right, and the play evidence
+agrees. In StarCraft II gas is not a central objective; every base has geysers.
+Concentrating the second currency in the middle made teching contingent on
+holding the centre, which a live integration match showed in the worst way — a
+laboratory could not be afforded from the starting balance at all, and a worker
+had to walk to the centre and back twice before any tech existed.
+
+The earlier reading of [GAME-DESIGN.md](GAME-DESIGN.md) — "catalyst: fewer
+contestable sources" — was over-applied. Fewer sources than material does not
+mean *one shared source in the middle*. Per-base gas already satisfies it:
+catalyst sites are scarcer per base and deplete faster, so specialists still
+compete with expansion, without making the centre a tech gate.
+
+**What this does not change.** Catalyst still gates technology and specialists,
+and specialists still cost both currencies. The scarcity now comes from stock
+and from having to hold more bases, not from map position.
+
+**Would overturn it.** Playtest evidence that per-base catalyst makes tech so
+freely available that the material/catalyst tradeoff stops being a decision. The
+response would be to cut per-base catalyst stock, not to move it back to the
+centre.
+
+---
+
+## 2026-09-22 — The match clock follows wall time, not the scheduler's wake rate
+
+**Decision.** `game_tick` advances by however many whole simulation ticks of wall
+time have elapsed since the room was last simulated, capped at 4 ticks per wake,
+carrying the remainder on `Room.last_tick_micros`. The scheduler is asked to
+wake more often than one tick, and its wake rate no longer determines the tick
+rate.
+
+**Why.** The host does not deliver the requested period. Measured on this
+machine: a 50ms request arrived every 61.7ms, a 25ms request every 31.4ms, a
+15.625ms request every 26.7ms — neither a constant overhead nor a clean
+quantization. Stepping once per wake therefore ran matches at **16.2 TPS instead
+of 20, about 81% of real time, on every map**. That is not cosmetic: it stretched
+the frozen one-second command delay to roughly 1.23 seconds, and the command
+delay is the single most important tuning knob in the design. Every delay,
+economy and balance measurement taken before this was against a clock running
+19% slow.
+
+After the change the same probe reads exactly 20.0 TPS at a 50.0ms period.
+
+**Why the cap.** Without one, a stalled host hands the next wake an unbounded
+catch-up and the simulation spirals trying to overtake it. Four ticks is a fifth
+of a second of recovery per wake; beyond that the match legitimately falls behind
+and the clock says so, which is the honest behaviour the architecture doc asks
+for — report degraded wall-clock progress rather than skip gameplay ticks.
+
+**Would overturn it.** Evidence that catch-up stepping harms determinism or
+fairness under real network load. Stepping N ticks in one reducer call is
+identical to N calls by construction, so this is a robustness question, not a
+correctness one.
+
+---
+
+## 2026-09-22 — Three factions, distinguished first by how they mine
+
+**Decision.** Introduce a `faction` on each player — **Network**, **Organic**,
+**Industrial** (working names) — and make the first difference between them the
+worker and the mining loop itself, not the unit roster.
+
+| | Labour unit | Cost | How it gathers |
+| --- | --- | --- | --- |
+| **Industrial** | `worker` | 50 material | Mine and return. Fills 25 cargo, walks it to a hub. The baseline. |
+| **Network** | `drifter` | 40 material | **No return trip.** Credits directly while working a deposit, in smaller pulses. Fragile, and it stands out on the map the whole time. |
+| **Organic** | `harvester` | 0 material and 1 stock | Harvesters are **free** but limited by hub stock, carry little, and **cannot fight**. |
+
+*Superseded in part on 2026-09-22: an Organic `drone` builder was originally
+specified here and has been removed. See "Buildings are built from the command
+card" below — the reference game has no builder unit for any faction.*
+
+Organic hubs accumulate one stock every 60 ticks up to a cap of 7. A harvester
+consumes one stock and no material.
+
+**Why.** The user's priority, stated 2026-09-22: zones and per-faction mining
+matter far more than the autonomous extractor, which is "one of the least
+important mechanics". [GAME-DESIGN.md](GAME-DESIGN.md) agrees — different
+economies must create different vulnerabilities, and resource choice, travel,
+territory and production capacity must not collapse into one income multiplier.
+Mining is where that difference is most felt, every second of the match.
+
+Each model buys its advantage with a matching exposure: Network pays no travel
+time but leaves its labour parked in the open; Organic replaces losses for free
+but is throughput-limited by stock regeneration and cannot defend or build with
+its harvesters; Industrial is safe and steady and has no special escape.
+
+**Experimental values, not balance.** Every number above is a first pass.
+
+**Would overturn it.** Playtest evidence that one model dominates regardless of
+map position, or that no-return-trip mining removes so much decision-making that
+Network has no economic gameplay left.
+
+---
+
+## 2026-09-22 — Buildings are built from the command card, not by workers
+
+**Decision.** Construction is ordered from the command card and the building
+raises itself. No worker is needed to start it, to work on it, or to transform
+into it. This applies to every faction, so no faction has a builder unit.
+
+**Why.** Stated by the author: the reference game builds this way, closer to
+Command & Conquer than to StarCraft. The current engine instead requires a
+worker to place a site and then stand on it — `construction_remaining`,
+`construct` orders and builder assignment all exist to serve that. It is a
+StarCraft assumption inherited from the prototype, not a Honey Badger one.
+
+It also removes a reason for the Organic `drone` to exist at all, which is why
+that half of the faction decision above is withdrawn rather than adjusted.
+
+**What this changes, and what it does not.** Placement rules, build radius,
+terrain and occupancy checks all stay: where you may build is unchanged. What
+goes away is *who* must be there. Construction time stays a real cost, so
+buildings are still committed in advance rather than appearing instantly, and a
+site under construction is still destructible.
+
+**Open, to settle before implementing.** Whether an unfinished building can be
+cancelled for a refund and on what terms, whether construction can be sped up or
+interrupted now that no worker is attached, and whether build radius still makes
+sense when nothing has to walk to the site.
+
+**Would overturn it.** Nothing foreseeable; this is the author's account of the
+game being converted, not a balance preference.
+
+---
+
+## 2026-09-24 — Organic creep slows harvesters; it does not starve them
+
+**Decision.** An Organic harvester standing on none of its owner's creep moves
+at 0.6x speed. That is the whole penalty: no drain, no death timer, no effect on
+any other unit, friendly or enemy. Creep therefore participates in the
+**movement** and **combat/death** concepts only, and is **not** an
+economy/survival zone. This supersedes [RESEARCH.md](RESEARCH.md)'s "dies
+quickly off creep" and the earlier [ZONES.md](ZONES.md) phrasing "harvesters
+depend on it".
+
+**Why.** The author's call, 2026-09-24. Cutting creep still costs the Organic
+economy — harvesters walk slower between deposit and hub — without turning a
+severed patch into mass labour death, which is the readable response window
+the handover asked for.
+
+**Would overturn it.** Playtest evidence that a 0.6x slow makes creep
+irrelevant to the Organic economy. The response would be a harsher slow before
+a survival mechanic.
+
+---
+
+## 2026-09-24 — Creep: hubs only, one disc per source, owner-only death spawns
+
+**Decision.**
+
+- **Only hubs make creep**: HQ to 360, outpost to 300. Every other building,
+  Organic or not, spreads none.
+- **One disc per source**, a `CreepPatch` with a stored integer radius, not a
+  grid. A patch sprouts at 60 when its hub completes (starting HQs are full at
+  tick 0), grows 10/s stepped every 20 ticks, and on losing its source holds
+  for 100 ticks, recedes 20/s, and is removed at 0.
+- **Only the creep owner's own units, dying on that owner's creep, spawn.**
+  Buildings, research and temporary units spawn nothing. By total cost: under
+  50 nothing, 50–199 one `brood` (hp 30, speed 120, range 20, damage 6,
+  cooldown 10, lives 200 ticks), 200 and up one `brute` (hp 70, speed 90,
+  range 30, damage 14, cooldown 12, lives 300 ticks). An army unit dying on
+  creep gets both its refund and its spawn.
+- **Spawned units are tiny and weak for a reason**: controllable, attack-moving
+  to the death point on arrival, free, no supply, not counted toward
+  `MAX_UNITS`, not army. Expiry removes them outside the death pipeline, so it
+  never reaches `lost`, `killed`, refunds or spawns.
+- The reference game's air branch (a dying flyer leaving small flyers, a
+  "mite") is documented in `death_spawn` only. No air unit exists.
+
+`RULESET_VERSION` 6. Every number is experimental.
+
+**Why.** Hubs-only and owner-only are the author's decisions. A disc per source
+rather than a grid because the count is bounded by `MAX_BUILDINGS`, it is cheap
+to persist and diff, and recession needs state that outlives its source — which
+also makes creep the one zone carried between ticks instead of derived. Keeping
+spawns off supply and the unit cap stops a lost fight on creep from blocking
+the owner's own production.
+
+**Would overturn it.** Playtest evidence that death spawns dominate fights on
+creep, or that a shape other than a disc per hub is needed for creep to read as
+territory. Either would change values or representation, not ownership.

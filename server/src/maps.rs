@@ -1,4 +1,4 @@
-use crate::{distance, WORLD_SIZE};
+use crate::{distance, validate_world_size, ResourceKind, NAV_CELL_SIZE};
 use pathfinding::prelude::bfs_reach;
 use serde::Deserialize;
 use std::collections::BTreeSet;
@@ -11,6 +11,9 @@ pub struct Deposit {
     pub x: f32,
     pub y: f32,
     pub amount: u32,
+    /// Which currency this site yields. Required, never defaulted: a map author
+    /// must state it, because it decides what the deposit is worth.
+    pub kind: ResourceKind,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -86,8 +89,9 @@ impl MapDefinition {
     /// processes, runs, builds and platforms: same geometry in, same number out.
     pub fn content_hash(&self) -> u64 {
         let mut hasher = ContentHasher::new();
-        // Domain tag: bump the suffix if the encoding below ever changes.
-        hasher.text("rts-map-v1");
+        // Domain tag: bump the suffix if the encoding below ever changes. v2
+        // added the per-deposit resource kind.
+        hasher.text("rts-map-v2");
         hasher.text(&self.id);
         hasher.u32(self.version);
         hasher.f32(self.size);
@@ -101,7 +105,8 @@ impl MapDefinition {
                 .u32(deposit.id)
                 .f32(deposit.x)
                 .f32(deposit.y)
-                .u32(deposit.amount);
+                .u32(deposit.amount)
+                .text(deposit.kind.as_str());
         }
         hasher.u64(self.terrain.len() as u64);
         for rect in &self.terrain {
@@ -147,9 +152,9 @@ impl MapDefinition {
         {
             return Err("Map needs a stable lowercase ID and positive version".into());
         }
-        if self.size != WORLD_SIZE {
-            return Err("Only 1600-unit square maps are currently supported".into());
-        }
+        // The extent is the map's own, inside a bounded range, and a whole
+        // number of navigation cells so the static BFS grid divides evenly.
+        validate_world_size(self.size)?;
         if self.starts.len() != 4
             || self.deposits.is_empty()
             || self.deposits.len() > 256
@@ -218,7 +223,7 @@ impl MapDefinition {
     }
 
     fn validate_routes(&self) -> Result<(), String> {
-        let cell_size = 40.0;
+        let cell_size = NAV_CELL_SIZE;
         let side = (self.size / cell_size) as i32;
         let center = |cell: (i32, i32)| {
             (
@@ -297,7 +302,7 @@ mod tests {
     fn built_in_map_preserves_the_existing_layout() {
         let map = default_map();
         assert_eq!(map.id, "skirmish");
-        assert_eq!(map.version, 1);
+        assert_eq!(map.version, 2);
         assert_eq!(
             map.starts,
             [
@@ -308,7 +313,11 @@ mod tests {
             ]
         );
         assert_eq!(map.deposits.len(), 8);
-        assert!(map.deposits.iter().all(|deposit| deposit.amount == 4000));
+        assert!(map
+            .deposits
+            .iter()
+            .filter(|deposit| deposit.kind == ResourceKind::Material)
+            .all(|deposit| deposit.amount == 4000));
         assert_eq!(
             map.terrain,
             [
@@ -336,11 +345,98 @@ mod tests {
         );
     }
 
+    /// Catalyst must be worth fighting over: exactly the two sites flanking the
+    /// centre, each smaller than a material deposit, each far from every start.
+    #[test]
+    fn only_the_two_central_sites_yield_catalyst() {
+        let map = default_map();
+        assert_eq!(
+            map.deposits
+                .iter()
+                .filter(|deposit| deposit.kind == ResourceKind::Catalyst)
+                .map(|deposit| (deposit.id, deposit.x, deposit.y, deposit.amount))
+                .collect::<Vec<_>>(),
+            [(7, 600.0, 800.0, 1200), (8, 1000.0, 800.0, 1200)]
+        );
+        assert_eq!(
+            map.deposits
+                .iter()
+                .filter(|deposit| deposit.kind == ResourceKind::Material)
+                .count(),
+            6
+        );
+        let centre = map.size / 2.0;
+        for deposit in &map.deposits {
+            let to_centre = distance(deposit.x, deposit.y, centre, centre);
+            let to_nearest_start = map
+                .starts
+                .iter()
+                .map(|start| distance(deposit.x, deposit.y, start[0], start[1]))
+                .fold(f32::INFINITY, f32::min);
+            if deposit.kind == ResourceKind::Catalyst {
+                assert!(to_centre <= 200.0, "catalyst {} is not central", deposit.id);
+                assert!(
+                    to_nearest_start > 600.0,
+                    "catalyst {} is too safe",
+                    deposit.id
+                );
+                assert!(deposit.amount < 4000);
+            }
+        }
+    }
+
     /// Pinned so that any edit to the built-in skirmish geometry fails loudly
     /// here instead of silently changing what running matches were created
     /// against. If this fires because the change was intended, bump
     /// `MapDefinition.version` in shared/maps/skirmish.json and re-pin.
-    const SKIRMISH_CONTENT_HASH: u64 = 0x4a80_e445_bc3b_ff70;
+    const SKIRMISH_CONTENT_HASH: u64 = 0x4756_989d_5a0d_f082;
+
+    /// The map new matches are created on. `default_map()` stays on skirmish so
+    /// the simulation tests keep their small, coordinate-stable world; this is
+    /// what a player actually gets.
+    #[test]
+    fn matches_are_created_on_a_four_base_melee_map_with_no_resources_in_the_centre() {
+        let map = by_id(DEFAULT_MATCH_MAP).expect("the configured match map must exist");
+        assert_eq!(map.id, "crossfire");
+        assert_eq!(map.size, 3200.0);
+        assert_eq!(map.starts.len(), 4);
+        assert_eq!(map.deposits.len(), 152);
+        assert_eq!(map.terrain.len(), 28);
+        map.validate().expect("the match map must pass validation");
+
+        let catalyst = map
+            .deposits
+            .iter()
+            .filter(|d| d.kind == ResourceKind::Catalyst)
+            .count();
+        assert_eq!(catalyst, 32, "eight catalyst sites per player, two per base");
+        assert_eq!(map.deposits.len() - catalyst, 120);
+
+        // Catalyst is per-base, like gas, and the centre is fought over for
+        // position rather than income: nothing may be mined near the middle.
+        let centre = map.size / 2.0;
+        let nearest = map
+            .deposits
+            .iter()
+            .map(|d| distance(centre, centre, d.x, d.y))
+            .fold(f32::MAX, f32::min);
+        assert!(
+            nearest > 700.0,
+            "a deposit sits {nearest:.0} units from the centre; the centre must carry no resources"
+        );
+    }
+
+    #[test]
+    fn a_match_map_id_always_resolves_to_the_same_definition() {
+        assert_eq!(by_id("crossfire").unwrap().id, "crossfire");
+        assert_eq!(by_id("skirmish").unwrap().id, "skirmish");
+        assert!(by_id("no-such-map").is_none());
+        // A frozen id must keep resolving to one fixed map for the match's life.
+        assert_eq!(
+            by_id("crossfire").unwrap().content_hash(),
+            by_id("crossfire").unwrap().content_hash()
+        );
+    }
 
     #[test]
     fn built_in_map_hash_is_pinned() {
@@ -355,7 +451,7 @@ mod tests {
             map.identity(),
             MapIdentity {
                 id: "skirmish".into(),
-                version: 1,
+                version: 2,
                 hash: SKIRMISH_CONTENT_HASH,
             }
         );
@@ -385,6 +481,14 @@ mod tests {
 
         changed = base.clone();
         changed.deposits[0].x += 0.001;
+        assert_ne!(changed.content_hash(), base.content_hash());
+
+        // The currency a deposit yields is part of the frozen map content.
+        changed = base.clone();
+        changed.deposits[0].kind = ResourceKind::Catalyst;
+        assert_ne!(changed.content_hash(), base.content_hash());
+        changed = base.clone();
+        changed.deposits[6].kind = ResourceKind::Material;
         assert_ne!(changed.content_hash(), base.content_hash());
 
         changed = base.clone();
@@ -436,8 +540,14 @@ mod tests {
         assert_eq!(world.nodes.len(), map.deposits.len());
         for (node, deposit) in world.nodes.iter().zip(&map.deposits) {
             assert_eq!(
-                (node.id, node.x, node.y, node.amount),
-                (deposit.id, deposit.x, deposit.y, deposit.amount)
+                (node.id, node.x, node.y, node.amount, node.kind),
+                (
+                    deposit.id,
+                    deposit.x,
+                    deposit.y,
+                    deposit.amount,
+                    deposit.kind
+                )
             );
         }
     }
@@ -452,7 +562,12 @@ mod tests {
         invalid.version = 0;
         assert!(invalid.validate().is_err());
         invalid = valid.clone();
-        invalid.size = 2000.0;
+        // Not a whole number of navigation cells.
+        invalid.size = 2010.0;
+        assert!(invalid.validate().is_err());
+        invalid = valid.clone();
+        // Past the ceiling.
+        invalid.size = 8000.0;
         assert!(invalid.validate().is_err());
         invalid = valid.clone();
         invalid.terrain[0][2] = -10.0;
@@ -460,6 +575,66 @@ mod tests {
         invalid = valid;
         invalid.terrain[0][0] = f32::NAN;
         assert!(invalid.validate().is_err());
+    }
+
+    /// The size rule is a bounded range, not a single value and not "anything".
+    /// Checked through `validate` so the message a map author sees is the one
+    /// under test.
+    #[test]
+    fn map_size_is_a_bounded_range_rather_than_a_single_value() {
+        let sized = |size: f32| {
+            let mut map = default_map().clone();
+            map.size = size;
+            map.validate()
+        };
+        // The floor is the built-in map, so it still validates unchanged.
+        assert!(sized(crate::MIN_WORLD_SIZE).is_ok());
+        // A larger extent only adds empty ground around the same geometry.
+        assert!(sized(2400.0).is_ok());
+        assert!(sized(4080.0).is_ok());
+
+        assert!(sized(1560.0).unwrap_err().contains("between"));
+        assert!(sized(4120.0).unwrap_err().contains("between"));
+        assert!(sized(3210.0).unwrap_err().contains("navigation cell"));
+        assert!(sized(0.0).unwrap_err().contains("positive finite"));
+        assert!(sized(f32::NAN).unwrap_err().contains("positive finite"));
+        assert!(sized(f32::INFINITY).unwrap_err().contains("positive finite"));
+    }
+
+    /// The 3200 melee proposal, parsed and validated by the real validator —
+    /// including `validate_routes`, whose BFS is the expensive part and the
+    /// part an external re-implementation is least able to stand in for.
+    ///
+    /// This map is a **fixture**, not the built-in map: `default_map` must stay
+    /// `skirmish` until the client can draw a variable extent.
+    #[test]
+    fn a_3200_map_parses_validates_and_is_statically_reachable() {
+        let map = MapDefinition::parse(include_str!("../../shared/maps/quadrille.json"))
+            .expect("quadrille must pass the real validator");
+        assert_eq!(map.id, "quadrille");
+        assert_eq!(map.size, 3200.0);
+        assert_eq!(map.starts.len(), 4);
+        assert_eq!(map.deposits.len(), 81);
+        assert_eq!(map.terrain.len(), 24);
+        assert_eq!(
+            map.deposits
+                .iter()
+                .filter(|deposit| deposit.kind == ResourceKind::Catalyst)
+                .count(),
+            17
+        );
+        // `parse` already ran it; assert it explicitly so a future refactor that
+        // drops the route check out of `validate` fails here.
+        assert_eq!(map.validate_routes(), Ok(()));
+        // Everything outside the 1600 legacy extent would have been rejected
+        // before this increment.
+        assert!(map
+            .deposits
+            .iter()
+            .any(|deposit| deposit.x > crate::WORLD_SIZE || deposit.y > crate::WORLD_SIZE));
+        // Loading it did not change which map the engine boots on.
+        assert_eq!(default_map().id, "skirmish");
+        assert_eq!(default_map().size, crate::WORLD_SIZE);
     }
 
     #[test]
@@ -523,10 +698,47 @@ mod tests {
         map.deposits[0].x = f32::INFINITY;
         assert!(map.validate().is_err());
         let source = include_str!("../../shared/maps/skirmish.json").replacen(
-            "\"version\": 1",
-            "\"version\": 1, \"typo\": true",
+            "\"version\": 2",
+            "\"version\": 2, \"typo\": true",
             1,
         );
         assert!(MapDefinition::parse(&source).is_err());
+    }
+
+    #[test]
+    fn deposits_must_declare_a_known_resource_kind() {
+        let source = include_str!("../../shared/maps/skirmish.json");
+        // Omitted entirely: no silent default.
+        let missing = source.replacen(", \"kind\": \"material\" }", " }", 1);
+        assert!(MapDefinition::parse(&missing).is_err());
+        // Misspelled: rejected rather than coerced.
+        let unknown = source.replacen("\"catalyst\"", "\"Catalyst\"", 1);
+        assert!(MapDefinition::parse(&unknown).is_err());
+        let invented = source.replacen("\"catalyst\"", "\"plasma\"", 1);
+        assert!(MapDefinition::parse(&invented).is_err());
+    }
+}
+
+/// The melee map new matches are created on: four spawns, four bases each, and
+/// a centre that carries no resources at all.
+pub fn crossfire_map() -> &'static MapDefinition {
+    static MAP: OnceLock<MapDefinition> = OnceLock::new();
+    MAP.get_or_init(|| {
+        MapDefinition::parse(include_str!("../../shared/maps/crossfire.json"))
+            .expect("valid built-in crossfire map")
+    })
+}
+
+/// The map a newly created match is played on.
+pub const DEFAULT_MATCH_MAP: &str = "crossfire";
+
+/// Resolves a frozen `Room.map_id` back to its definition. A match records the
+/// map it was created on and must keep resolving to that same map for its whole
+/// life, so this never falls back to a different one.
+pub fn by_id(id: &str) -> Option<&'static MapDefinition> {
+    match id {
+        "crossfire" => Some(crossfire_map()),
+        "skirmish" => Some(default_map()),
+        _ => None,
     }
 }

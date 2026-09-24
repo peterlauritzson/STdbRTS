@@ -1,5 +1,29 @@
+import { BinaryWriter, ProductType, reducerSchema } from "spacetimedb";
 import { DbConnection, tables, type SubscriptionHandle } from "./bindings";
-import type { Command, Entity, Node, Order, Player, Room } from "./bindings/types";
+import { Faction, type Command, type CreepPatch, type Entity, type MatchSample, type Node, type Order, type Player, type Room } from "./bindings/types";
+import { factionValue, type FactionName } from "./catalog";
+
+/**
+ * `set_faction` called without a generated handle.
+ *
+ * The bindings under `src/bindings` are produced by `spacetime generate` and
+ * are not edited by hand, so a reducer added to the module has no typed
+ * accessor until they are regenerated. The call itself needs nothing more than
+ * the module already provides: the argument type is built from the same
+ * generated `Faction` schema the rows are decoded with, serialized exactly as
+ * the generated accessors serialize theirs, and sent by name. Once the bindings
+ * are regenerated this collapses to `connection.reducers.setFaction({ faction })`
+ * with no change in behaviour on either side.
+ */
+const SET_FACTION = reducerSchema("set_faction", { faction: Faction });
+const serializeFaction = ProductType.makeSerializer(SET_FACTION.paramsSpacetimeType);
+
+export function setFactionOn(connection: DbConnection, faction: FactionName): Promise<void> {
+  const args = { faction: factionValue(faction) };
+  const writer = new BinaryWriter(64);
+  serializeFaction(writer, args);
+  return connection.callReducer(SET_FACTION.reducerName, writer.getBuffer(), args);
+}
 
 export interface Snapshot {
   rooms: Room[];
@@ -9,6 +33,18 @@ export interface Snapshot {
   units: Entity[];
   nodes: Node[];
   commands: Command[];
+  /**
+   * The match's history, one row per player every hundred ticks plus a final
+   * row the instant it ends. Subscribed for the whole match rather than
+   * fetched at the end, so the score screen has the series in hand the moment
+   * the room turns `finished` and never has to race a subscription.
+   */
+  samples: MatchSample[];
+  /**
+   * Organic creep, one disc per source. Drawn from the table rather than from
+   * units: a patch outlives the hub that grew it and recedes on its own.
+   */
+  creep: CreepPatch[];
 }
 
 export interface PendingOrder {
@@ -27,7 +63,7 @@ export class Session {
   ackMs = 0;
   tickReceivedAt = performance.now();
   pending = new Map<string, PendingOrder>();
-  snapshot: Snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [] };
+  snapshot: Snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [] };
   onChange: () => void = () => {};
   onNotice: (message: string) => void = () => {};
   private epoch = 0;
@@ -48,7 +84,7 @@ export class Session {
     this.matchId = 0n;
     this.matchSubscription = undefined;
     this.pending.clear();
-    this.snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [] };
+    this.snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [] };
     this.status = "Connecting";
     this.onChange();
     const key = `stdbrts:v2:${this.identityScope}:${host}:${database}`;
@@ -119,6 +155,11 @@ export class Session {
         refresh();
       });
       connection.db.command.onDelete(refresh);
+      connection.db.match_sample.onInsert(refresh);
+      connection.db.match_sample.onDelete(refresh);
+      connection.db.creep_patch.onInsert(refresh);
+      connection.db.creep_patch.onUpdate(refresh);
+      connection.db.creep_patch.onDelete(refresh);
     } catch (error) { lost(error instanceof Error ? error.message : String(error)); }
   }
 
@@ -150,6 +191,8 @@ export class Session {
             tables.unit.where(row => row.matchId.eq(nextMatch)),
             tables.resource_node.where(row => row.matchId.eq(nextMatch)),
             tables.command.where(row => row.matchId.eq(nextMatch)),
+            tables.match_sample.where(row => row.matchId.eq(nextMatch)),
+            tables.creep_patch.where(row => row.matchId.eq(nextMatch)),
           ]);
       }
     }
@@ -158,6 +201,8 @@ export class Session {
       units: [...connection.db.unit.iter()].filter(row => row.matchId === nextMatch).map(row => row.data),
       nodes: [...connection.db.resource_node.iter()].filter(row => row.matchId === nextMatch).map(row => row.data),
       commands: [...connection.db.command.iter()].filter(row => row.matchId === nextMatch),
+      samples: [...connection.db.match_sample.iter()].filter(row => row.matchId === nextMatch),
+      creep: [...connection.db.creep_patch.iter()].filter(row => row.matchId === nextMatch).map(row => row.data),
     };
     this.onChange();
   }
@@ -176,6 +221,16 @@ export class Session {
     if (!this.ready || !this.connection) { this.onNotice("Not connected"); return false; }
     try { await action(this.connection); return true; }
     catch (error) { this.onNotice(error instanceof Error ? error.message : String(error)); return false; }
+  }
+
+  /**
+   * Choose the faction this player will deploy with. The server refuses it
+   * once the room is playing, and that refusal surfaces as a notice like any
+   * other, so the client never has to guess whether the change landed: the
+   * roster and the brief redraw from the row the server wrote.
+   */
+  async setFaction(faction: FactionName): Promise<boolean> {
+    return this.act(connection => setFactionOn(connection, faction));
   }
 
   async order(units: number[], order: Order, queued = false): Promise<void> {

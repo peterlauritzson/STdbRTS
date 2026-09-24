@@ -1,17 +1,17 @@
 {
   "id": "skirmish",
-  "version": 1,
+  "version": 2,
   "size": 1600,
   "starts": [[220, 220], [1380, 1380], [1380, 220], [220, 1380]],
   "deposits": [
-    { "id": 1, "x": 360, "y": 360, "amount": 4000 },
-    { "id": 2, "x": 1240, "y": 1240, "amount": 4000 },
-    { "id": 3, "x": 1240, "y": 360, "amount": 4000 },
-    { "id": 4, "x": 360, "y": 1240, "amount": 4000 },
-    { "id": 5, "x": 800, "y": 600, "amount": 4000 },
-    { "id": 6, "x": 800, "y": 1000, "amount": 4000 },
-    { "id": 7, "x": 600, "y": 800, "amount": 4000 },
-    { "id": 8, "x": 1000, "y": 800, "amount": 4000 }
+    { "id": 1, "x": 360, "y": 360, "amount": 4000, "kind": "material" },
+    { "id": 2, "x": 1240, "y": 1240, "amount": 4000, "kind": "material" },
+    { "id": 3, "x": 1240, "y": 360, "amount": 4000, "kind": "material" },
+    { "id": 4, "x": 360, "y": 1240, "amount": 4000, "kind": "material" },
+    { "id": 5, "x": 800, "y": 600, "amount": 4000, "kind": "material" },
+    { "id": 6, "x": 800, "y": 1000, "amount": 4000, "kind": "material" },
+    { "id": 7, "x": 600, "y": 800, "amount": 1200, "kind": "catalyst" },
+    { "id": 8, "x": 1000, "y": 800, "amount": 1200, "kind": "catalyst" }
   ],
   "terrain": [[560, 640, 160, 80], [880, 880, 160, 80], [640, 880, 80, 160], [880, 560, 80, 160]]
 }

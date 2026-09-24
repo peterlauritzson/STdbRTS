@@ -38,6 +38,7 @@ import CreateRoomReducer from "./create_room_reducer";
 import IssueOrderReducer from "./issue_order_reducer";
 import JoinRoomReducer from "./join_room_reducer";
 import LeaveRoomReducer from "./leave_room_reducer";
+import SetFactionReducer from "./set_faction_reducer";
 import SetNameReducer from "./set_name_reducer";
 import SetReadyReducer from "./set_ready_reducer";
 import StartMatchReducer from "./start_match_reducer";
@@ -46,6 +47,8 @@ import StartMatchReducer from "./start_match_reducer";
 
 // Import all table schema definitions
 import CommandRow from "./command_table";
+import CreepPatchRow from "./creep_patch_table";
+import MatchSampleRow from "./match_sample_table";
 import PlayerRow from "./player_table";
 import ResourceNodeRow from "./resource_node_table";
 import RoomRow from "./room_table";
@@ -69,6 +72,34 @@ const tablesSchema = __schema({
       { name: 'command_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, CommandRow),
+  creep_patch: __table({
+    name: 'creep_patch',
+    indexes: [
+      { accessor: 'id', name: 'creep_patch_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'match_id', name: 'creep_patch_match_id_idx_btree', algorithm: 'btree', columns: [
+        'matchId',
+      ] },
+    ],
+    constraints: [
+      { name: 'creep_patch_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, CreepPatchRow),
+  match_sample: __table({
+    name: 'match_sample',
+    indexes: [
+      { accessor: 'id', name: 'match_sample_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'match_id', name: 'match_sample_match_id_idx_btree', algorithm: 'btree', columns: [
+        'matchId',
+      ] },
+    ],
+    constraints: [
+      { name: 'match_sample_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MatchSampleRow),
   player: __table({
     name: 'player',
     indexes: [
@@ -130,6 +161,7 @@ const reducersSchema = __reducers(
   __reducerSchema("issue_order", IssueOrderReducer),
   __reducerSchema("join_room", JoinRoomReducer),
   __reducerSchema("leave_room", LeaveRoomReducer),
+  __reducerSchema("set_faction", SetFactionReducer),
   __reducerSchema("set_name", SetNameReducer),
   __reducerSchema("set_ready", SetReadyReducer),
   __reducerSchema("start_match", StartMatchReducer),
