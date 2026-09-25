@@ -3,7 +3,7 @@ import { Session } from "./network";
 import { clamp, clampToMap, COLORS, countdown, VISUALS, WORLD_SIZE } from "./presentation";
 import { cargoCapacity, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isLabour, isTemporary, placementError, terrain } from "./catalog";
 import { creepGoneTick, lifetimeFraction, offCreep } from "./creep";
-import { arriving, canTeleport, channelFraction, fieldsOf, powered, POWER_FIELD_RADIUS, SENSOR_FIELD_RADIUS, shieldsRegenerating, type Field } from "./zones";
+import { arriving, canTeleport, channelFraction, fieldsOf, powered, POWER_FIELD_RADIUS, recharging, SENSOR_FIELD_RADIUS, shieldsRegenerating, type Field } from "./zones";
 
 interface Point { x: number; y: number }
 interface Motion { from: Point; to: Point; at: number }
@@ -123,11 +123,16 @@ export class Battlefield {
     });
   }
 
-  /** Selected units that could start a teleport right now: mobile, powered, not still arriving. */
+  /** Selected units that could start a teleport right now: mobile, powered, not arriving or recharging. */
   teleporters(): Entity[] {
     const fields = this.fields();
     const tick = this.session.snapshot.room?.tick ?? 0n;
-    return this.ownedSelection().filter(unit => canTeleport(unit.kind) && !arriving(unit, tick) && powered(unit.owner, unit.x, unit.y, fields));
+    return this.ownedSelection().filter(unit => canTeleport(unit.kind) && !arriving(unit, tick) && !recharging(unit, tick) && powered(unit.owner, unit.x, unit.y, fields));
+  }
+
+  /** The unit a construction order is issued in the name of: your HQ. */
+  issuer(): Entity | undefined {
+    return this.session.snapshot.units.find(unit => unit.owner === this.session.snapshot.me?.slot && unit.kind === "hq");
   }
 
   ownedSelection(): Entity[] {
@@ -160,7 +165,7 @@ export class Battlefield {
   arm(kind: TargetMode): void {
     const allowed = kind === "rally"
       ? this.session.snapshot.units.some(unit => unit.kind === "hq" && unit.owner === this.session.snapshot.me?.slot)
-      : kind.startsWith("build_") ? this.session.snapshot.units.some(unit => unit.owner === this.session.snapshot.me?.slot && isLabour(unit.kind))
+      : kind.startsWith("build_") ? !!this.issuer()
       : kind === "teleport" ? this.teleporters().length > 0
       : this.ownedSelection().some(unit => kind === "repair" ? isLabour(unit.kind) : fights(unit.kind));
     if (!allowed) return;
@@ -264,10 +269,13 @@ export class Battlefield {
       const kind = this.targeting.slice(6);
       const error = placementError(kind, point.x, point.y, me.slot, units, nodes);
       if (error) { this.session.onNotice(error); return; }
-      const worker = owned.find(unit => isLabour(unit.kind)) ?? units.filter(unit => unit.owner === me.slot && isLabour(unit.kind)).sort((left, right) => Number(left.order.kind === "construct") - Number(right.order.kind === "construct") || Math.hypot(left.x - point.x, left.y - point.y) - Math.hypot(right.x - point.x, right.y - point.y))[0];
-      if (worker) {
-        void this.session.order([worker.id], { kind: this.targeting, x: point.x, y: point.y, target: 0 });
-        this.targeting = undefined; this.selected = new Set([worker.id]); this.onSelection();
+      // Command-card construction: the site raises itself, so no labour is
+      // sent and the selection is left alone. The HQ is named only because a
+      // command must name one of your units.
+      const issuer = this.issuer();
+      if (issuer) {
+        void this.session.order([issuer.id], { kind: this.targeting, x: point.x, y: point.y, target: 0 });
+        this.targeting = undefined; this.onSelection();
       }
       return;
     }
@@ -298,10 +306,10 @@ export class Battlefield {
     if (this.targeting === "attack_move") { order.kind = "attack_move"; selected = selected.filter(unit => fights(unit.kind)); }
     else if (this.targeting === "repair") {
       if (!friendly || friendly.hp >= friendly.maxHp) { this.session.onNotice("Choose a damaged friendly unit or HQ"); return; }
-      order.kind = friendly.constructionRemaining > 0n ? "construct" : "repair"; order.target = friendly.id; selected = selected.filter(unit => isLabour(unit.kind) && unit.id !== friendly.id);
+      if (friendly.constructionRemaining > 0n) { this.session.onNotice("Still under construction; it finishes on its own"); return; }
+      order.kind = "repair"; order.target = friendly.id; selected = selected.filter(unit => isLabour(unit.kind) && unit.id !== friendly.id);
     }
     else if (enemy) { order.kind = "attack"; order.target = enemy.id; selected = selected.filter(unit => fights(unit.kind)); }
-    else if (friendly && friendly.constructionRemaining > 0n) { order.kind = "construct"; order.target = friendly.id; selected = selected.filter(unit => isLabour(unit.kind)); }
     else if (node) { order.kind = "gather"; order.target = node.id; selected = selected.filter(unit => isLabour(unit.kind)); }
     // Dropping a load at a hub is a carrier's order. A drifter told to return is
     // refused by name on the server, so it is never included here.
@@ -562,7 +570,7 @@ export class Battlefield {
     if (order.kind.startsWith("build_")) return order;
     if (["move", "attack_move", "rally_move", "teleport"].includes(order.kind)) return order;
     if (["gather", "rally_gather"].includes(order.kind)) return this.session.snapshot.nodes.find(node => node.id === order.target);
-    if (["attack", "repair", "construct"].includes(order.kind)) return this.session.snapshot.units.find(unit => unit.id === order.target);
+    if (["attack", "repair"].includes(order.kind)) return this.session.snapshot.units.find(unit => unit.id === order.target);
     return undefined;
   }
 
@@ -800,7 +808,7 @@ export class Battlefield {
       }
     }
     context.restore();
-    if (["repair", "construct"].includes(unit.order.kind)) {
+    if (unit.order.kind === "repair") {
       const target = this.orderTarget(unit.order);
       if (target && Math.hypot(target.x - unit.x, target.y - unit.y) <= 61) {
         context.strokeStyle = "#b9f29a"; context.lineWidth = 1.5;

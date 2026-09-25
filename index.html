@@ -36,7 +36,7 @@
           <label for="practice-opponent">Opponent<select id="practice-opponent" class="faction-select"><option value="random">Random faction</option></select></label>
           <button id="practice" class="primary"><i data-lucide="bot"></i>Practice vs AI</button>
         </div>
-        <dl class="map-facts"><div><dt>Battlefield</dt><dd>1600 x 1600</dd></div><div><dt>Command Delay</dt><dd>1.0 seconds</dd></div><div><dt>Unit Capacity</dt><dd>60 / player</dd></div></dl>
+        <dl class="map-facts"><div><dt>Battlefield</dt><dd>1600 x 1600</dd></div><div><dt>Command Delay</dt><dd>1.0 seconds</dd></div><div><dt>Unit Capacity</dt><dd>120 / player</dd></div></dl>
       </aside>
       <section class="operations">
         <div id="room-browser"><div class="section-heading"><h2>Open Operations</h2><span id="room-count" class="mono">00</span></div><div id="room-list" class="room-list"></div></div>
@@ -54,7 +54,7 @@
   </main>
 
   <main id="match" class="match" hidden>
-    <div class="match-bar"><div class="operation-name"><span class="live-tag">OPERATION</span><strong id="match-name"></strong></div><div class="match-metrics"><span id="material-readout" class="readout material" title="Material / expansion, workers and the basic army"><i data-lucide="boxes"></i><span class="readout-name"><span class="long">MATERIAL</span><span class="short">MAT</span></span><b id="material">250</b></span><span id="catalyst-readout" class="readout catalyst" title="Catalyst / scarce: technology, factory, laboratory and siege"><i data-lucide="gem"></i><span class="readout-name"><span class="long">CATALYST</span><span class="short">CAT</span></span><b id="catalyst">0</b></span><span id="stock-readout" class="readout stock" title="Harvester stock / regenerates 1 every 60 ticks up to 7" hidden><i data-lucide="sprout"></i><span class="readout-name"><span class="long">STOCK</span><span class="short">STK</span></span><b id="stock">0 / 7</b></span><span id="faction-readout" class="readout faction industrial" title="Your faction"><span class="readout-name"><span class="long">FACTION</span><span class="short">FAC</span></span><b id="faction-name">INDUSTRIAL</b></span><span>UNITS <b id="unit-count">0 / 60</b></span><span id="match-clock" class="mono">00:00</span></div><button id="leave-match" class="icon-button danger" title="Surrender and leave" aria-label="Surrender and leave"><i data-lucide="log-out"></i></button></div>
+    <div class="match-bar"><div class="operation-name"><span class="live-tag">OPERATION</span><strong id="match-name"></strong></div><div class="match-metrics"><span id="material-readout" class="readout material" title="Material / expansion, workers and the basic army"><i data-lucide="boxes"></i><span class="readout-name"><span class="long">MATERIAL</span><span class="short">MAT</span></span><b id="material">250</b></span><span id="catalyst-readout" class="readout catalyst" title="Catalyst / scarce: technology, factory, laboratory and siege"><i data-lucide="gem"></i><span class="readout-name"><span class="long">CATALYST</span><span class="short">CAT</span></span><b id="catalyst">0</b></span><span id="stock-readout" class="readout stock" title="Harvester stock / regenerates 1 every 60 ticks up to 7" hidden><i data-lucide="sprout"></i><span class="readout-name"><span class="long">STOCK</span><span class="short">STK</span></span><b id="stock">0 / 7</b></span><span id="faction-readout" class="readout faction industrial" title="Your faction"><span class="readout-name"><span class="long">FACTION</span><span class="short">FAC</span></span><b id="faction-name">INDUSTRIAL</b></span><span>UNITS <b id="unit-count">0 / 120</b></span><span id="match-clock" class="mono">00:00</span></div><button id="leave-match" class="icon-button danger" title="Surrender and leave" aria-label="Surrender and leave"><i data-lucide="log-out"></i></button></div>
     <section class="battlefield-wrap">
       <canvas id="battlefield" tabindex="0" aria-label="Battlefield"></canvas>
       <div id="targeting-state" class="targeting-state mono" role="status" hidden></div>
@@ -83,10 +83,9 @@
         <button id="hold" class="icon-button" title="Hold position" aria-label="Hold position"><i data-lucide="shield"></i></button>
         <button id="repair" class="icon-button" title="Repair / 1 material per 5 HP" aria-label="Repair" aria-pressed="false"><i data-lucide="wrench"></i></button>
         <button id="return" class="icon-button" title="Return cargo" aria-label="Return cargo"><i data-lucide="corner-down-left"></i></button>
-        <button id="teleport" class="icon-button" title="Teleport within your power field (T) / 1s channel, 2s arrival" aria-label="Teleport" aria-pressed="false" hidden><i data-lucide="sparkles"></i></button>
+        <button id="teleport" class="icon-button" title="Teleport within your power field (T) / 1s channel, 2s arrival, 30s cooldown" aria-label="Teleport" aria-pressed="false" hidden><i data-lucide="sparkles"></i></button>
         <button id="select-army" class="icon-button" title="Select army" aria-label="Select army"><i data-lucide="swords"></i></button>
         <button id="idle-worker" class="icon-button" title="Select idle worker" aria-label="Select idle worker"><i data-lucide="hard-hat"></i></button>
-        <button id="cancel-construction" class="icon-button danger" title="Cancel construction / 75% refund" aria-label="Cancel construction"><i data-lucide="trash-2"></i></button>
       </div></section>
       <section class="production-section">
         <div class="industry-tabs" role="tablist" aria-label="Base controls"><button role="tab" id="tab-production" aria-controls="production-pane" aria-selected="true">Production</button><button role="tab" id="tab-build" aria-controls="build-pane" aria-selected="false">Build</button><button role="tab" id="tab-research" aria-controls="research-pane" aria-selected="false">Research</button></div>

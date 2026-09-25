@@ -5,8 +5,10 @@ import { buildScoreboard, formatClock, formatValue, niceMax, SAMPLE_INTERVAL_TIC
 import { DASHES, MARKERS } from "../src/scorescreen";
 import { chooseOrders } from "../scripts/bot-policy";
 import { pickOpponent, PRACTICE_FIRST_PUSH_TICK } from "../src/practice";
+import { mapContentHash } from "../src/maphash";
+import skirmishMap from "../shared/maps/skirmish.json";
 import { clampToMap, WORLD_SIZE } from "../src/presentation";
-import { affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
+import { affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, MAP_HASH, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
 import { Faction, ResourceKind, type CreepPatch, type Entity, type Node } from "../src/bindings/types";
 import { creepGoneTick, creepSecondsLeft, lifetimeFraction, offCreep } from "../src/creep";
 import { ARMY, armyBuilding, armyFaction, fights, isArmy, isTemporary, takesSupply, TEMPORARY_LIFETIME } from "../src/catalog";
@@ -158,13 +160,18 @@ test("placement previews reject occupied, remote, terrain and prerequisite sites
   assert.ok(!canProduce("siege", "hq", "industrial"));
 });
 
-test("bot builds a valid base without assigning a builder two simultaneous orders", () => {
+test("bot builds from the command card, never taking labour off its work", () => {
   const units = [unit(1, 0, "hq"), ...[2, 3, 4, 5].map(id => unit(id, 0, "worker"))];
   const decisions = chooseOrders(0, "industrial", purse(250), units, [deposit(1, 360, 360, 4000)], new Set());
   const build = decisions.find(decision => decision.order.kind === "build_barracks")!;
   assert.ok(build);
   assert.equal(placementError("barracks", build.order.x, build.order.y, 0, units, []), undefined);
-  assert.equal(decisions.filter(decision => decision.units.includes(build.units[0])).length, 1);
+  // Issued in the HQ's name; no worker is sent to build or to "construct".
+  assert.deepEqual(build.units, [1]);
+  assert.ok(!decisions.some(decision => decision.order.kind === "construct"));
+  // While a command naming the HQ is still scheduled, that build may be it:
+  // nothing is placed twice.
+  assert.ok(!chooseOrders(0, "industrial", purse(250), units, [deposit(1, 360, 360, 4000)], new Set([1])).some(decision => decision.order.kind.startsWith("build_")));
 });
 
 test("bot posts a share of its workers to catalyst once the opening is up", () => {
@@ -180,28 +187,30 @@ test("bot posts a share of its workers to catalyst once the opening is up", () =
   const grown = [unit(1, 0, "hq"), ...[2, 3, 4, 5].map(id => unit(id, 0, "worker"))];
   const decisions = chooseOrders(0, "industrial", purse(250), grown, [material, catalyst], new Set());
   const gathers = decisions.filter(decision => decision.order.kind === "gather");
-  // One worker is taken by the barracks; of the three left, exactly two go to
+  // No worker is taken by the barracks; of the four, exactly two go to
   // catalyst — enough to reach the tech that needs it, not enough to starve the
   // material economy that pays for the army.
   assert.equal(gathers.filter(decision => decision.order.target === catalyst.id).length, 2);
-  assert.equal(gathers.filter(decision => decision.order.target === material.id).length, 1);
+  assert.equal(gathers.filter(decision => decision.order.target === material.id).length, 2);
   // Workers already on catalyst are counted, so the posting does not grow.
   const posted = grown.map(worker => worker.kind === "worker" && worker.id > 3 ? { ...worker, order: { kind: "gather", x: 0, y: 0, target: catalyst.id } } : worker);
   const resent = chooseOrders(0, "industrial", purse(250), posted, [material, catalyst], new Set()).filter(decision => decision.order.kind === "gather");
   assert.ok(resent.every(decision => decision.order.target === material.id));
   // A map with no catalyst left must not idle the workforce.
   const drained = chooseOrders(0, "industrial", purse(250), grown, [material, { ...catalyst, amount: 0 }], new Set()).filter(decision => decision.order.kind === "gather");
-  assert.equal(drained.length, 3);
+  assert.equal(drained.length, 4);
   assert.ok(drained.every(decision => decision.order.target === material.id));
 });
 
 test("bot will not order a specialist it cannot pay the catalyst for", () => {
-  const units = [unit(1, 0, "hq"), unit(2, 0, "barracks"), unit(3, 0, "factory")];
-  const starved = chooseOrders(0, "industrial", purse(400, 49), units, [], new Set());
+  // The second barracks is still going up and the lab is busy, so nothing in
+  // the build order competes with the siege for this purse.
+  const units = [unit(1, 0, "hq"), unit(2, 0, "barracks"), unit(3, 0, "factory"), { ...unit(4, 0, "barracks"), constructionRemaining: 10n }, unit(5, 0, "lab")];
+  const starved = chooseOrders(0, "industrial", purse(400, 49), units, [], new Set([5]));
   assert.ok(!starved.some(decision => decision.order.kind === "train_siege"));
   // Material was plentiful the whole time: it is the catalyst that stopped it.
   assert.equal(shortfall(purse(400, 49), CATALOG.siege.cost), "catalyst");
-  const funded = chooseOrders(0, "industrial", purse(400, 50), units, [], new Set());
+  const funded = chooseOrders(0, "industrial", purse(400, 50), units, [], new Set([5]));
   assert.ok(funded.some(decision => decision.order.kind === "train_siege"));
   // 400/50 buys a worker, a soldier and the siege exactly; nothing is ordered
   // twice out of the same coin.
@@ -462,7 +471,7 @@ test("the bot never asks a hub for an army unit, and a saturated hub orders noth
     // old policy asked it for a soldier here, which the server refuses.
     const opening: Entity[] = [hubWith(1, 0, "hq", HUB_STOCK_CAP), ...[2, 3, 4, 5, 6, 7].map(id => gathering(id, kind))];
     const early = chooseOrders(0, faction, purse(400), opening, deposits, new Set());
-    assert.ok(!early.some(decision => decision.units.includes(1)), `${faction} asked its HQ for something past the opening`);
+    assert.ok(!early.some(decision => decision.units.includes(1) && decision.order.kind.startsWith("train_")), `${faction} asked its HQ for something past the opening`);
     // It is building the barracks instead — the only route to an army.
     assert.ok(early.some(decision => decision.order.kind === "build_barracks"), `${faction} never builds a barracks`);
 
@@ -830,4 +839,17 @@ test("each faction's army is priced and bodied as the server lists it", () => {
   assert.deepEqual(FACTIONS.map(faction => ARMY[faction][2]).map(armyBuilding), ["factory", "factory", "factory"]);
   assert.equal(armyFaction("lancer"), "network");
   assert.equal(armyFaction("brood"), undefined);
+});
+
+test("the client's map hash is the server's, byte for byte", () => {
+  // Pinned in server/src/maps.rs as SKIRMISH_CONTENT_HASH.
+  assert.equal(mapContentHash(skirmishMap), 0x4756989d5a0df082n);
+  // Crossfire's, as the server wrote it into a live room's map_hash.
+  assert.equal(MAP_HASH, 0x82f409b8597b4cf1n);
+});
+
+test("the bot adds a second barracks once its factory is under way", () => {
+  const base: Entity[] = [hubWith(1, 0, "hq", HUB_STOCK_CAP), ...[2, 3, 4, 5, 6, 7].map(id => unit(id, 0, "worker")), unit(8, 0, "barracks"), unit(9, 0, "factory"), ...[10, 11, 12].map(id => unit(id, 0, "soldier"))];
+  const decisions = chooseOrders(0, "industrial", purse(400, 0), [...base, unit(13, 0, "outpost")], [deposit(1, 300, 300, 4000)], new Set());
+  assert.ok(decisions.some(decision => decision.order.kind === "build_barracks"), JSON.stringify(decisions.map(decision => decision.order.kind)));
 });

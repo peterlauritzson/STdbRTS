@@ -32,7 +32,6 @@ Dependencies: M0. These bounded experiments can run independently; do not combin
 
 | Experiment | Smallest useful artifact | Pass/fail decision |
 | --- | --- | --- |
-| Secure observation | Private canonical rows, caller-filtered indexed view, two opponents and adversarial third client | No direct/query/subscription/event leak; installed SDK/client supports the approach, or a verified upgrade is required |
 | Order delay and policy | One unit using hold/advance/retreat presets with delayed policy updates | Stable intent, bounded transitions, no hidden-state access, no manual-order ambiguity; compare trial delays |
 | Movement | Reproducible mixed-size choke/formation/producer-exit scenarios | No permanent avoidable jam; deterministic resolution; path/tick cost measured |
 | Renderer | One original animated unit, structure, resource, terrain, selection/targeting, and zone in Three.js | Readable/interactable at target zoom; frame/asset budgets; desktop/narrow screenshots and nonblank moving canvas |
@@ -47,12 +46,13 @@ Dependencies: accepted M1 decisions.
 Deliverables:
 
 - Validated map/content formats, frozen match versions, generated client catalog, dual-resource accounting, supply and costs, command lifecycle/status contract.
-- Secure fog, last-seen observations, issuer-only order feedback, fog-safe events, fair bot observations.
+- Issuer-only order feedback.
 - Reliable group movement, selection/control groups, minimap navigation/orders, targeting previews, command card, multi-resource HUD, reconnect restoration.
+- Units auto-attack while moving (author, 2026-09-25; already true for every unit). Later: decide per kind whether a unit **stops to fire** (most of SC2) or **fires on the move** (the phoenix), and whether a plain move should ignore enemies. See [DECISIONS.md](DECISIONS.md).
 - Minimal ability/status/zone primitives, bounded server policies and useful presets, investment/death/refund accounting, configurable opening assistance.
 - Reproducible scenario harness and accepted-intent replay/checksum format, reusing existing core tests and real-server integration.
 
-Exit: a two-player greybox match with one temporary shared roster can expand, mine both resources, scout, fight, lose/refund/rebuild, use policies, reconnect, and finish. Hidden enemy actions cannot be queried. Greybox is a test vehicle, not the new game's final presentation.
+Exit: a two-player greybox match with one temporary shared roster can expand, mine both resources, scout, fight, lose/refund/rebuild, use policies, reconnect, and finish. Greybox is a test vehicle, not the new game's final presentation.
 
 ## Milestone M3: All Three Economic Identities
 
@@ -62,7 +62,7 @@ Dependencies: M2. Implement one faction loop at a time in the sandbox, but do no
 | --- | --- | --- |
 | Network | Remote material mining, fragile relay/supply infrastructure, stationary transfer, arrival vulnerability, then shield-funded recall | Expand without a base-centered mineral loop; respond through relays; opponent can disrupt mobility; recall trades base safety for preservation |
 | Industrial | Conventional labor, auto-extractors with output switch, damage suppression/burning, repair support, smoke and retreat penalty | A nonlethal raid measurably affects income; output choice changes tech/mass options; smoke affects opponents' sight only |
-| Organic | Shared local production stock, free small labor, labor-to-builder conversion, growing/decaying territory, temporary terrain source, death-spawns | Worker replacement competes with army production; severing territory changes economy; defending on territory has value without infinite spawning |
+| Organic | Shared local production stock, free small labor (no builder conversion: construction is from the command card for everyone), growing/decaying territory, temporary terrain source, death-spawns | Worker replacement competes with army production; severing territory changes economy; defending on territory has value without infinite spawning |
 
 This sequence is a provisional engineering order: stationary transfer tests zones, industrial smoke tests asymmetric sight, organic adds the largest entity/territory load. Reorder if M1 evidence favors it; do not infer priority from sequence.
 
@@ -110,6 +110,7 @@ Dependencies: stable M4/M5 ruleset.
 - Multi-match capacity, 30-minute-plus real-server soak at declared target load, network degradation/reconnect, rate limiting, observability, backup/retention, and version compatibility.
 - Hosted practice opponent if persistent practice is desired; the current browser bot stops thinking when its tab closes.
 - Post-match replay viewer and privacy-aware sharing; observer rules before live spectating.
+- **Fog of war, if ever** (demoted by the author 2026-09-25; it may never be needed): the secure-observation experiment (private canonical rows, caller-filtered views, an adversarial third client), then secure fog, last-seen observations, fog-safe events and fair bot observations. Until then every client sees the whole match, which is the intended game, not a leak.
 - Account/identity recovery and deployment region decisions before persistent competitive profiles.
 - Expand to 2-4-player formats with team vision, diplomacy/targeting rules, spawn/map validation, victory semantics, and performance gates. Existing lobby support alone is insufficient evidence of balanced new-ruleset multiplayer.
 - Touch controls, matchmaking/ranking, social systems, cosmetics, and campaign content are separate optional follow-ups, not hidden requirements of the initial 1v1 release.
@@ -140,7 +141,7 @@ Use replay comparison and conservation assertions for correctness. Use player ob
 | Delay feels like broken controls | Repeated clicks, hidden failed orders, unreliable manual overrides | Immediate cosmetic feedback, explicit states, honest countdowns, simpler intent contract |
 | Cheap expansion plus double defenses causes turtling | High income behind untouchable static positions | Test defensive investment and siege routes; historical multipliers are not sacred |
 | Organic swarm overloads simulation | Spawn bursts or vision/path work exceed tick budget | Spatial queries, cached topology, bounded rules, measured entity caps |
-| Fog is merely cosmetic | Arbitrary subscription sees unseen units/orders | Private state and caller-authorized views; block release |
+| Fog is merely cosmetic (only if fog is ever built) | Arbitrary subscription sees unseen units/orders | Private state and caller-authorized views before any fog ships; no fog is planned (2026-09-25) |
 | Render migration stalls playable work | Months of assets without tested economic loop | One M1 pilot, placeholder M3, limited original M4 asset set |
 | Content/schema changes corrupt matches | Mixed catalog/map versions or destructive publish | Frozen hashes, new DB for breaking schema, non-destructive migration gate |
 

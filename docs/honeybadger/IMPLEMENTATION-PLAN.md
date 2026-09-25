@@ -135,7 +135,8 @@ distinct from material ones on the battlefield and minimap, and refunds are
 legible when they happen. The practice bot must understand both currencies or it
 will stop functioning as an opponent.
 
-Status: **implemented 2026-09-22, not yet played**. Client gates pass; 14
+Status: **implemented 2026-09-22; played since** through steps 13-20 (both
+currencies are read, spent and mined in every scripted and bot match). Client gates pass; 14
 presentation tests (was 7). Catalyst is distinguished by silhouette and label as
 well as colour — three haloed spires against material's five chunks on the
 battlefield, a rotated outlined diamond against a square on the minimap, and the
@@ -155,7 +156,8 @@ Suppression must be driven by authoritative damage events, never by a visual
 attack animation. Per [GAME-DESIGN.md](GAME-DESIGN.md) the source duration is an
 open question, so it ships as a labeled experimental value.
 
-Status: **not started**, design not yet written.
+Status: **not started, and deprioritised by the author** (2026-09-24: one of
+the least important mechanics). Do not pick it up because it looks cheap.
 
 ## Sequencing note
 
@@ -197,12 +199,11 @@ destructible rocks. Chokes are gaps between blocking rectangles. Navigation is a
 40-unit grid with 12-unit clearance, so corridors need to be comfortably wider
 than one cell for groups to move through.
 
-Open question this raises: `MAX_UNITS` is 60 per player and the architecture
-doc's supported entity tier is 60 until a larger one is measured. A map four
-times the area with a dozen expansions may want a larger army before it plays
-well. Measure before changing it.
+`MAX_UNITS` was raised to **120 per player** on the author's instruction
+(2026-09-25). The last measurement at 120 on crossfire was ~26-28ms p95 on a
+busy machine, against a 25ms budget: rerun `bench_load` on an idle machine.
 
-Status: **design in progress**, implementation not started.
+Status: **done** as HANDOFF step 9 (the crossfire melee map, played on since).
 
 ## Increment H: factions and asymmetric mining
 
@@ -307,7 +308,12 @@ cancellation (remove `cancel_construction`, its refund and the client button),
 no interruption (an accepted placement builds until done or destroyed), and
 build radius stays part of placement.
 
-Status: **not started**.
+Status: **implemented 2026-09-25** (HANDOFF step 20). The site raises itself
+at one tick of work per tick; the command names the HQ only because a command
+must name a unit; `construct` and `cancel_construction` are gone, as are the
+75% refund and the client's cancel button. It exposed a pre-existing routing
+stall (a worker at a hub's edge could not route behind the hub), fixed in
+`navigation::advance`. Played by script; not yet by a person.
 
 ## Increment M: match history and the score screen
 
@@ -353,17 +359,25 @@ real server and a separate development database. If the installed SDK cannot
 express it, that is a finding; the response is a deliberate, isolated SDK
 upgrade attempt, **not** publishing projections and filtering on the client.
 
-Status: **not started**. Blocked on nothing; scheduled after A and B land so the
-tree is clean when the spike starts.
+Status: **not started, and demoted to the bottom of the list** (author,
+2026-09-25): fog of war may not be needed in the end. Nothing is waiting on it.
+The rule in [DECISIONS.md](DECISIONS.md) still holds if fog is ever wanted: no
+fog, smoke or hidden scouting without this experiment first.
 
-## Ordering after C
+## Standing design note: attacking while moving
 
-Per [ROADMAP.md](ROADMAP.md), the rest of M0's contract work — dual currencies,
-supply subdivisions, refund eligibility, primary-hub victory, terrain semantics,
-minimal original roster roles — is specification, and lands in
-[DECISIONS.md](DECISIONS.md) before code. M1's other experiments (movement,
-renderer, tick instrumentation) are independent of C and may be scheduled in any
-order once C's answer is recorded.
+Units auto-attack enemies in range while moving (the author's requirement,
+2026-09-25). This is already true for every unit and pinned by a test. Whether
+some kinds should stop to fire instead, and whether a plain move should ignore
+enemies, is deferred to the behaviour-presets work. See
+[DECISIONS.md](DECISIONS.md).
+
+## Ordering
+
+Fog no longer gates anything. The next chunky work is listed in
+[HANDOVER-2026-09-25.md](HANDOVER-2026-09-25.md). M1's remaining experiments
+(movement, renderer, tick instrumentation) are independent and may be scheduled
+in any order.
 
 ## Standing constraints
 

@@ -6,7 +6,8 @@ use crate::{
     advance_patch, creep_max_radius, creep_zone, death_spawn, fights, is_temporary, mining_yield,
     producer, stats, stipend_payment, temporary_lifetime, validate_position, zone_template,
     can_teleport, power_field, projects_power, shield_regen, trains_in_field, vitals, Balance,
-    Cost, CreepPatch, Faction, ResourceKind, Zone, ZoneField, CONSTRUCTION_CANCEL_REFUND_PERCENT,
+    TELEPORT_COOLDOWN_TICKS,
+    Cost, CreepPatch, Faction, ResourceKind, Zone, ZoneField,
     HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, MAX_BUILDINGS, MAX_QUEUE, MAX_UNITS,
     MINING_PULSE_TICKS, POWER_RESTORE_RADIUS, REPAIR_COST, SHIELD_REGEN_DELAY_TICKS,
     SHIELD_REGEN_INTERVAL_TICKS, STARTING_BALANCE, TELEPORT_ARRIVAL_TICKS, TELEPORT_CHANNEL_TICKS,
@@ -493,7 +494,7 @@ impl World {
             return Err("Your HQ has been destroyed".into());
         }
         if command.units.is_empty() || command.units.len() > MAX_UNITS {
-            return Err("Select between 1 and 60 units".into());
+            return Err(format!("Select between 1 and {MAX_UNITS} units"));
         }
         let mut ids = command.units.clone();
         ids.sort_unstable();
@@ -519,8 +520,11 @@ impl World {
                     ));
                 }
             }
+            // Construction is ordered from the command card and raises itself:
+            // no worker is sent, assigned or needed. The one unit named is only
+            // the issuer the command protocol requires; nothing happens to it.
             if command.units.len() != 1 || command.queued {
-                return Err("Select one labour unit; construction cannot be queued".into());
+                return Err("Construction is ordered once, from the command card, and cannot be queued".into());
             }
             validate_position(order.x, order.y, map.size)?;
             if !map.terrain_free(order.x, order.y, 50.0) {
@@ -598,7 +602,7 @@ impl World {
                 .iter()
                 .find(|unit| unit.id == *id && unit.owner == command.owner)
                 .ok_or("Unit is missing or belongs to another player")?;
-            if unit.construction_remaining > 0 && order.kind != "cancel_construction" {
+            if unit.construction_remaining > 0 {
                 return Err("Building is still under construction".into());
             }
             // The Organic harvester is labour and nothing else. Refused here,
@@ -620,32 +624,7 @@ impl World {
                 return Err("Order queue is full or action cannot be queued".into());
             }
             match order.kind.as_str() {
-                kind if kind.starts_with("build_") => {
-                    if !is_labour(&unit.kind) {
-                        return Err("Only labour units can construct buildings".into());
-                    }
-                }
-                "construct" => {
-                    if !is_labour(&unit.kind)
-                        || !self.units.iter().any(|target| {
-                            target.id == order.target
-                                && target.owner == unit.owner
-                                && target.construction_remaining > 0
-                        })
-                    {
-                        return Err(
-                            "Select a labour unit and an unfinished friendly building".into()
-                        );
-                    }
-                }
-                "cancel_construction" => {
-                    if command.queued
-                        || command.units.len() != 1
-                        || unit.construction_remaining == 0
-                    {
-                        return Err("Select one unfinished building".into());
-                    }
-                }
+                kind if kind.starts_with("build_") => {}
                 "research_weapons" | "research_armor" | "research_logistics" => {
                     if unit.kind != "lab" || command.queued || command.units.len() != 1 {
                         return Err("Research requires one completed lab".into());
@@ -706,7 +685,7 @@ impl World {
                         })
                         .ok_or("Select another friendly unit or HQ to repair")?;
                     if target.construction_remaining > 0 {
-                        return Err("Resume construction instead of repairing this building".into());
+                        return Err("This building is still under construction; it finishes on its own".into());
                     }
                     if target.hp >= target.max_hp {
                         return Err("Target is already fully repaired".into());
@@ -733,6 +712,10 @@ impl World {
                     }
                     if unit.arrive_tick > self.tick {
                         return Err("Unit is still arriving from its last teleport".into());
+                    }
+                    if unit.arrive_tick > 0 && self.tick < unit.arrive_tick + TELEPORT_COOLDOWN_TICKS {
+                        let left = (unit.arrive_tick + TELEPORT_COOLDOWN_TICKS - self.tick).div_ceil(20);
+                        return Err(format!("Teleport is recharging: {left}s left"));
                     }
                     validate_position(order.x, order.y, map.size)?;
                     let field = field.as_ref().unwrap();
@@ -859,7 +842,7 @@ impl World {
                         })
                         .sum();
                     if count + pending >= MAX_UNITS {
-                        return Err("Unit limit reached (60)".into());
+                        return Err(format!("Unit limit reached ({MAX_UNITS})"));
                     }
                     if unit.production.len() >= MAX_QUEUE {
                         return Err("Production queue is full".into());
@@ -891,33 +874,9 @@ impl World {
             site.hp = site.max_hp / 10;
             // Shields are raised by construction alongside hit points.
             site.shields = 0;
-            let worker = self
-                .units
-                .iter_mut()
-                .find(|unit| unit.id == command.units[0])
-                .unwrap();
-            worker.order = Order {
-                kind: "construct".into(),
-                target: building_id,
-                ..command.order.clone()
-            };
-            worker.queue.clear();
-            return Ok(());
-        }
-        if command.order.kind == "cancel_construction" {
-            let site = self
-                .units
-                .iter()
-                .find(|unit| unit.id == command.units[0])
-                .unwrap();
-            let refund = stats(&site.kind)
-                .unwrap()
-                .cost
-                .percent(CONSTRUCTION_CANCEL_REFUND_PERCENT);
-            self.credit(command.owner, refund);
-            // The site is removed, not killed: cancellation has already paid,
-            // so no death refund can follow for the same entity.
-            self.units.retain(|unit| unit.id != command.units[0]);
+            // No cancellation and no interruption: from here the site builds
+            // itself one tick at a time until it is finished or destroyed.
+            debug_assert_eq!(site.id, building_id);
             return Ok(());
         }
         for id in &command.units {
@@ -1107,7 +1066,10 @@ impl World {
         let mut construction = BTreeMap::<u32, u64>::new();
         let mut discoveries = Vec::new();
         for unit in &mut self.units {
+            // Command-card construction: every unfinished building advances by
+            // one tick of work on its own, and does nothing else.
             if unit.construction_remaining > 0 {
+                construction.insert(unit.id, 1);
                 continue;
             }
             // Just arrived from a teleport: inactive until `arrive_tick`. It
@@ -1168,19 +1130,6 @@ impl World {
             }
             let mut completed = false;
             match unit.order.kind.as_str() {
-                "construct" => {
-                    if let Some(target) = snapshot.iter().find(|target| {
-                        target.id == unit.order.target
-                            && target.owner == unit.owner
-                            && target.construction_remaining > 0
-                    }) {
-                        if advance(unit, target.x, target.y, 60.0) {
-                            *construction.entry(target.id).or_default() += 1;
-                        }
-                    } else {
-                        completed = true;
-                    }
-                }
                 "repair" => {
                     if let Some(target) = snapshot
                         .iter()
@@ -2007,6 +1956,30 @@ mod tests {
     }
 
     #[test]
+    fn a_worker_sent_behind_its_hub_after_a_delivery_routes_around_it() {
+        // Worker 2 delivers on the north-east side of the crossfire HQ and is
+        // then sent to the catalyst behind it, to the south-west. It stands at
+        // 45 from the hub, in a cell centred inside the hub's 44 footprint;
+        // routing from that cell used to fail, and the worker stood there for
+        // the rest of the match. Labour is no longer walked off to build
+        // sites, so nothing else ever moved it out.
+        let map = crate::maps::by_id("crossfire").unwrap();
+        let mut world =
+            World::new_on_with_factions(map, &[(0, Faction::Industrial), (1, Faction::Network)]);
+        for _ in 0..60 {
+            world.step_on(map);
+        }
+        world.execute_on(&command(1, 0, 2, "gather", 1), map).unwrap();
+        for _ in 0..400 {
+            world.step_on(map);
+            if unit_of(&world, 2).cargo_kind == ResourceKind::Catalyst && unit_of(&world, 2).cargo > 0 {
+                return;
+            }
+        }
+        panic!("worker 2 never reached the catalyst: {:?}", (unit_of(&world, 2).x, unit_of(&world, 2).y));
+    }
+
+    #[test]
     fn every_faction_opens_with_its_labour_already_mining_the_nearest_material() {
         let map = crate::maps::by_id("crossfire").expect("the match map");
         let world = World::new_on_with_factions(
@@ -2581,6 +2554,33 @@ mod tests {
     }
 
     #[test]
+    fn a_unit_on_a_move_order_fires_at_enemies_in_range_without_stopping() {
+        // Current behaviour, recorded on purpose (2026-09-25): every unit shoots
+        // while it moves, like SC2's phoenix. Whether some kinds should stop to
+        // fire instead is an open design question; see ROADMAP M2.
+        let mut world = World::new(&[0, 1]);
+        world.spawn(0, "soldier", 600.0, 300.0);
+        let soldier = world.units.last().unwrap().id;
+        world.spawn(1, "worker", 700.0, 360.0);
+        let target = world.units.last().unwrap().id;
+        let before = unit_of(&world, target).hp;
+        let mut order = command(world.tick, 0, soldier, "move", 0);
+        order.order.x = 900.0;
+        order.order.y = 300.0;
+        world.execute(&order).unwrap();
+        let mut positions = Vec::new();
+        for _ in 0..30 {
+            world.step();
+            positions.push(unit_of(&world, soldier).x);
+        }
+        assert!(unit_of(&world, target).hp < before, "it fired while passing");
+        assert!(
+            positions.windows(2).all(|pair| pair[1] > pair[0]),
+            "it never stopped to fire: {positions:?}"
+        );
+    }
+
+    #[test]
     fn a_fight_on_creep_with_spawns_and_expiry_replays_identically() {
         let mut first = creep_arena(Some(0));
         for index in 0..4 {
@@ -2750,11 +2750,13 @@ mod tests {
     }
 
     #[test]
-    fn construction_requires_labor_can_resume_and_unlocks_units() {
+    fn construction_raises_itself_from_the_command_card_and_unlocks_units() {
         let mut world = World::new(&[0, 1]);
         idle_labour(&mut world);
         world.balances.insert(0, Balance::new(1000, 0));
-        let mut build = command(1, 0, 2, "build_barracks", 0);
+        // Issued with the HQ (unit 1) as the command's one unit: nothing walks
+        // to the site and nothing is assigned to it.
+        let mut build = command(1, 0, 1, "build_barracks", 0);
         build.order.x = 440.0;
         build.order.y = 220.0;
         world.commands.push(build.clone());
@@ -2770,21 +2772,19 @@ mod tests {
         assert!(world
             .validate(&command(2, 0, site, "train_scout", 0))
             .is_err());
-        world.execute(&command(3, 0, 2, "stop", 0)).unwrap();
-        for _ in 0..200 {
-            world.step();
-        }
-        assert!(
-            world
-                .units
-                .iter()
-                .find(|unit| unit.id == site)
-                .unwrap()
-                .construction_remaining
-                > 0
-        );
-        world.execute(&command(4, 0, 2, "construct", site)).unwrap();
-        for _ in 0..250 {
+        // No labour moved: every labour unit is still idle.
+        assert!(world
+            .units
+            .iter()
+            .filter(|unit| is_labour(&unit.kind))
+            .all(|unit| unit.order.kind == "stop"));
+        // It builds on its own at one tick of work per tick, and there is no
+        // way to cancel it.
+        assert!(world
+            .validate(&command(3, 0, site, "cancel_construction", 0))
+            .is_err());
+        let ticks = stats("barracks").unwrap().training_ticks;
+        for _ in 0..ticks {
             world.step();
         }
         assert_eq!(
@@ -2797,19 +2797,16 @@ mod tests {
             0
         );
         world
-            .execute(&command(5, 0, site, "train_scout", 0))
+            .execute(&command(world.tick, 0, site, "train_scout", 0))
             .unwrap();
         for _ in 0..70 {
             world.step();
         }
         assert!(world.units.iter().any(|unit| unit.kind == "scout"));
-        // 1000 - 150 barracks - 80 scout + 90 stipend material by tick 540.
-        assert_eq!(world.balances[&0], Balance::new(860, 0));
-        assert_eq!(world.tick, 540);
     }
 
     #[test]
-    fn construction_refunds_once_and_research_is_unique_and_persistent() {
+    fn construction_cannot_be_cancelled_and_research_is_unique_and_persistent() {
         let mut world = World::new(&[0, 1]);
         // A laboratory needs a finished barracks before anything else
         // about it can be tested.
@@ -2817,15 +2814,11 @@ mod tests {
         world.balances.insert(0, Balance::new(1000, 200));
         world.execute(&command(1, 0, 2, "build_lab", 0)).unwrap();
         let site = world.next_id - 1;
-        world
-            .execute(&command(2, 0, site, "cancel_construction", 0))
-            .unwrap();
-        // The lab costs 150 material and 50 catalyst; cancelling returns 75% of
-        // each, rounded down independently: 112 and 37.
-        assert_eq!(world.balances[&0], Balance::new(962, 187));
+        // Placement is final: there is no cancellation and no refund.
         assert!(world
-            .execute(&command(3, 0, site, "cancel_construction", 0))
+            .execute(&command(2, 0, site, "cancel_construction", 0))
             .is_err());
+        assert_eq!(world.balances[&0], Balance::new(850, 150));
         world.spawn(0, "lab", 440.0, 220.0);
         let lab = world.next_id - 1;
         world
@@ -4514,6 +4507,36 @@ mod tests {
         }
         let moving = unit_of(&world, soldier);
         assert!((moving.x, moving.y) != landed, "active again");
+        // Active, but the teleport itself recharges for 30s from arrival.
+        let ready = moving.arrive_tick + crate::TELEPORT_COOLDOWN_TICKS;
+        assert!(world
+            .validate(&order_at(soldier, "teleport", BY_RELAY))
+            .unwrap_err()
+            .contains("recharging"));
+        while world.tick < ready {
+            world.step();
+        }
+        world
+            .validate(&order_at(soldier, "teleport", BY_RELAY))
+            .unwrap();
+    }
+
+    #[test]
+    fn network_shield_shares_vary_by_kind() {
+        // SC2-style: structures and the worker half and half, the skimmer too,
+        // the sentinel and the lancer a third shields. Totals never change.
+        for (kind, split) in [
+            ("hq", (600, 600)),
+            ("relay", (150, 150)),
+            ("drifter", (20, 20)),
+            ("skimmer", (35, 35)),
+            ("sentinel", (148, 72)),
+            ("lancer", (161, 79)),
+        ] {
+            assert_eq!(vitals(kind, Faction::Network), split, "{kind}");
+            assert_eq!(split.0 + split.1, stats(kind).unwrap().hp, "{kind}");
+        }
+        assert_eq!(vitals("lancer", Faction::Industrial).1, 0);
     }
 
     #[test]
@@ -4594,8 +4617,9 @@ mod tests {
                 .collect();
             assert_eq!(army, vec![fighter], "slot {slot}");
         }
-        // The Network fighter is half shields like everything else Network.
+        // The Network fighter is a third shields (SC2's zealot split): 220 is
+        // 148 hit points and 72 shields.
         let sentinel = world.units.iter().find(|unit| unit.kind == "sentinel").unwrap();
-        assert_eq!((sentinel.hp, sentinel.shields), (110, 110));
+        assert_eq!((sentinel.hp, sentinel.shields), (148, 72));
     }
 }

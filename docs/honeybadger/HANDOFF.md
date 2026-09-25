@@ -16,34 +16,33 @@ Since then: **the practice bot fields an army again (step 15)** and **Organic cr
 
 Latest: **shields and the Network power field (step 17)**, including the relay, drifter training at any powered structure, death restoration, teleport, and the Industrial sensor tower becoming buildable and visible on the client. All three factions' zones now exist in play. The playable build is on `stdbrts-shield`.
 
-Latest after that: **faction armies (step 18)**. Each faction now trains only its own three-unit army. It passes every automated suite and was played through the scripted browser UI and in bot-vs-bot matches, but **not yet by a person, and it is not committed.** Then **step 19** added a practice opponent picker and a held first push. The build is on `stdbrts-army`.
+Latest after that: **faction armies (step 18)** and **practice opponent choice with a held first push (step 19)**, committed by the author as `2a5459b`.
 
-Next action:
+Latest: **command-card construction (step 20, Increment J)**, plus the unit cap at 120, a second barracks for the bot, a client-side map-hash check, the teleport cooldown, SC2-style shield shares by kind, and a fix for workers freezing behind their own hub. Committed. The build is on `stdbrts-j`.
 
-1. Step 18 was played through the scripted browser UI and in bot-vs-bot matches (see "Step 18 play observations"). No bugs were found. A person still has to play it. Commit is pending the author's go-ahead.
-2. **Network survival → step 19** (opponent picker and held first push; implemented, not committed). Waiting on the author's own playtest of the held push. Softening options are recorded under step 19.
-3. *(Previous note, kept for context)* **Network survival.** In every live run the practice bot's first push, led by a siege unit out-ranging the defenders, killed a Network HQ at 80-115s. The step 18 matches changed the picture: a scripted Industrial player died just as fast (91-97s), and the Network bot beat the Industrial bot (102s) and the Organic bot (156s). So the early death looks like the human side's opening against an always-Industrial bot, not Network weakness. Network needs a playtest by a person before any values move.
-4. The two remaining open questions in [DECISIONS.md](DECISIONS.md) under shields: whether teleport needs a cooldown or a cost, and whether the shield split should vary by kind. (Hubs projecting power was confirmed 2026-09-25.)
+**The next chunky steps, with the questions to ask the author first, are in [HANDOVER-2026-09-25.md](HANDOVER-2026-09-25.md).** In short:
 
-**Increment F, the autonomous extractor, is explicitly deprioritised** — the author called it one of the least important mechanics. Do not pick it up because it looks cheap.
+1. A person plays steps 18-20. The scripts are weak players and cannot judge the held push, drawing legibility or how construction feels.
+2. Behaviour presets (hold / advance / retreat), the reduced-micro pillar.
+3. Primary-hub victory.
+4. First faction abilities.
+5. Movement and tick load at 120 units per player.
+6. Renderer pilot.
 
-**Increment J (command-card construction)** is unblocked. Settled 2026-09-25: no cancellation and no refund (remove `cancel_construction`, the 75% refund and the client button; the browser practice test currently cancels an outpost and must change); no interruption; build radius stays part of placement; no worker or builder unit takes part. C&C style. See [DECISIONS.md](DECISIONS.md), 2026-09-22.
-
-Also open: raise `MAX_UNITS` if wanted (120/player is measured-safe on the 1600 map, 240 is not; on crossfire 60 is 21.5ms p95 and 120 is over), and the **Increment C** private-state experiment — which the zone rewrite no longer blocks, since none of the three real zones obstructs sight.
+**Demoted by the author:** fog of war and the private-state experiment (Increment C), which may never be built, and Increment F, the autonomous extractor. Do not pick either up because it looks cheap.
 
 Smaller open items:
 
-- [EXPERIMENT-C-PRIVATE-STATE.md](EXPERIMENT-C-PRIVATE-STATE.md) holds the private-state protocol and its pass/fail rule. Nothing about fog, smoke or hidden scouting may be built before it reports.
-- The client cannot compare `map_hash`; bindings carry the column but no negotiation exists. `validate_map` does not print the hash.
+- [EXPERIMENT-C-PRIVATE-STATE.md](EXPERIMENT-C-PRIVATE-STATE.md) still holds the private-state protocol. The rule stands if fog is ever wanted: nothing about fog, smoke or hidden scouting without it.
+- The client compares `map_hash` and warns on a mismatch. It still bundles its own map instead of receiving it from the server. `validate_map` does not print the hash.
 - `tests/integration.test.ts` mirrors the stipend formula so its balance assertions can stay exact. If the Rust constants move, that helper must move with them.
 - [quadrille](../../shared/maps/quadrille.json) is the superseded first melee map, kept as a 3200 test fixture. It still has catalyst in the centre and is not played.
-- Unit costs, stats and resource amounts are all still first-pass experimental values, including the sensor tower's 450 radius and 30% speed bonus.
-- The zone field is rebuilt every tick and cost +25% on p95 for one zone type with few sources. Creep's added tick cost could not be separated from noise on a busy machine; rerun `bench_load` on an idle one before quoting it. The `creep_patch` read (an index scan per tick) is unmeasured.
-- Practice-bot observations not acted on: Network was eliminated before 120s in both live three-way runs (balance or combat, not the bot); Industrial floats ~3.4k material at 180s, which a second barracks would fix; every player opens with its labour **plus one soldier** — confirm that is intended.
-- Since step 18 every faction has its own army. Only buildings (barracks, factory, lab, turret, outpost) are still shared, apart from the sensor tower and the relay.
-- After placing a building, the builder stays selected, so placing a second building at once pulls the same labourer off the first site. Existing behaviour, found while playing step 17; press Escape between placements.
+- Unit costs, stats and resource amounts are all still first-pass experimental values.
+- Tick cost: the zone field is rebuilt every tick; creep's cost and the 120 cap were only measured on a busy machine (~26-28ms p95 at 120 against a 25ms budget). Rerun `bench_load` on an idle machine. The `creep_patch` read is unmeasured.
+- Every player opens with its labour **plus one fighter**: confirm that is intended.
+- Only buildings (barracks, factory, lab, turret, outpost) are shared between factions, apart from the sensor tower and the relay.
 
-Steps up to 17 are committed (`bb224a2`). Steps 18 and 19 are not committed; the author asked to wait.
+Steps up to 20 are committed.
 
 ## Constraints
 
@@ -261,7 +260,7 @@ Observed directly:
 
 No code was changed as a result of these matches. Rerun afterwards against `stdbrts-army`: Rust 146/146, client 46/46, integration 12/12, browser 4/4.
 
-### Step 19: Practice opponent choice and a held first push (in progress 2026-09-25; not committed)
+### Step 19: Practice opponent choice and a held first push (committed as `2a5459b`)
 
 - The author chose "both" for Network survival: let practice meet every faction, and make the first push gentler.
 - **Opponent picker.** The lobby has an "Opponent" select (`#practice-opponent`: Random, Industrial, Network or Organic; default Random, remembered in `stdbrts:v1:practice-opponent`). The bot still takes slot 0 and sets the picked faction in the lobby with `set_faction`, as the human does. `pickOpponent` in `src/practice.ts`. No server change.
@@ -269,6 +268,24 @@ No code was changed as a result of these matches. Rerun afterwards against `stdb
 - Tests: client 47/47 (a hold assertion and an opponent test); browser 4/4 (the practice test now picks an Organic opponent and checks it); typecheck passes. Integration not rerun: no server or integration-facing change.
 - **Played** (Playwright through the UI, not a person): Network vs an Organic bot, and Industrial vs a Network bot. The lobby picker defaults to Random and survives a reload. Each bot's faction matched the pick and it fielded only its own kinds, up to crusher and lancer. No bot unit came near the human HQ before 3:00: first contact at 212s, and the HQs fell at 222s and 209s. No console or page errors.
 - **The hold alone does not make the push gentler.** At 3:00 the bot's army was 36 units (12 swarmer, 9 spitter, 15 crusher) and 29 units (9 sentinel, 8 skimmer, 12 lancer). The scripted player had 5 units and never reached a factory, so it is not a fair stand-in for a person. Still, three minutes of banking makes the first wave bigger, not smaller. The author chose to keep only the 3:00 hold for now and judge the wave by hand before softening it further (options offered: cap the army during the hold, send a partial first wave, or keep heavy units home for the first push).
+
+### Step 20: Command-card construction and the author's 2026-09-25 list (implemented; played by script; committed)
+
+- **Increment J.** A `build_*` order still names one of your units (the protocol needs one; the client sends the HQ), but nothing happens to it: the site is spawned at 10% health and advances one tick of work per tick on its own (`construction` in `step_on`). The `construct` and `cancel_construction` orders, `CONSTRUCTION_CANCEL_REFUND_PERCENT` and the client's cancel button are gone. Repair on an unfinished building is refused ("finishes on its own"). The bot places buildings in the HQ's name and waits while a command for the HQ is still scheduled, so the one-second delay cannot place a building twice.
+- **Routing stall fixed** (pre-existing, exposed by J). A worker delivering at 45 from a hub stands in a nav cell centred inside the hub's 44 footprint. Routing from that cell failed, so a worker sent to anything behind its hub froze for the rest of the match. Labour used to be walked off to build sites, which hid this. `navigation::advance` now routes from the nearest free cell the unit can walk straight to. Regression test: `a_worker_sent_behind_its_hub_after_a_delivery_routes_around_it`. This probably explains why the step 18/19 scripted players never mined catalyst.
+- **Unit cap 120** (server, bot, UI and tests). **Second barracks** for the bot once its factory is under way. **Map hash**: `src/maphash.ts` ports the server's hash byte for byte (pinned for skirmish and crossfire); the client warns once per match on a mismatch.
+- **Teleport cooldown** 30s from arrival (`TELEPORT_COOLDOWN_TICKS`, derived from `arrive_tick`, no schema change); the client skips recharging units. **Shield shares by kind**: sentinel and lancer a third shields, everything else Network half. `RULESET_VERSION` 9. Published to the new database `stdbrts-j`; no schema change.
+- Tests: Rust 149 (was 146; construction rewritten, cooldown, shield split, routing, and one pinning that units fire while moving); client 49; integration 12/12; browser 4/4; typecheck and build pass. Two tests changed their assumptions, not their intent: the integration test now expects `construct` to be an unknown order, and the browser test's purchase checks read the largest fall from the running peak, because labour now keeps mining through every purchase and a ~25 load can land inside the command delay.
+- **Played** (Playwright through the UI, plus SQL polling, not a person): Industrial vs an Organic bot and Network vs an Industrial bot.
+  - Buildings placed from the Build tab and finished on their own (construction_remaining 44 to 0 in about 8s). The worker's order stayed `gather`, and no unit ever had a `construct` order.
+  - The selection read "Constructing / 7.5s left". Repair on the site showed the notice. There is no cancel button.
+  - The unit readout shows `/ 120`. Both bots reached 2 barracks by about 62s and kept mining.
+  - A worker sent from the HQ to catalyst walked there and cycled 25 per trip, and catalyst rose 0 to 150 in 36s. In match B, 485 catalyst was mined.
+  - A sentinel read 148 hp + 72 shields. After one teleport the button was disabled, and a forced click sent no second order.
+  - No console or page errors.
+  - **Unexplained:** in the first run of match A the scripted catalyst order never took effect (0 catalyst all match). A clean retest and match B both worked. It may be the script's timing, but that is not proven.
+- Both scripted players lost at about 3:25-3:30 to the held push while keeping their army home.
+- **Played by a person:** not yet (author, asked 2026-09-25). The held push, drawing legibility at default zoom and how construction feels are still unjudged. The author chose to commit step 20 anyway and start behaviour presets.
 
 ## Remaining Implementation
 

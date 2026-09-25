@@ -131,6 +131,15 @@ impl<'a> Navigation<'a> {
                 .any(|(other_x, other_y)| distance(x, y, *other_x, *other_y) < 44.0)
     }
 
+    /// Off the grid counts as blocked.
+    fn cell_blocked(&self, cell: (i32, i32)) -> bool {
+        cell.0 < 0
+            || cell.1 < 0
+            || cell.0 >= self.side
+            || cell.1 >= self.side
+            || self.blocked[(cell.1 * self.side + cell.0) as usize]
+    }
+
     fn center(cell: (i32, i32)) -> (f32, f32) {
         ((cell.0 as f32 + 0.5) * CELL, (cell.1 as f32 + 0.5) * CELL)
     }
@@ -261,7 +270,33 @@ impl<'a> Navigation<'a> {
                 None => refused = true,
             }
         }
-        let start = ((*x / CELL) as i32, (*y / CELL) as i32);
+        let mut start = ((*x / CELL) as i32, (*y / CELL) as i32);
+        // A unit can legally stand in a cell whose centre is not free: a worker
+        // delivering at 45 from a hub stands in a cell centred inside the hub's
+        // 44 footprint. Routed from that cell, every step back to its centre is
+        // refused and the unit froze for good whenever its next target lay
+        // behind the hub. Route instead from the nearest free cell it can
+        // walk straight to.
+        if self.cell_blocked(start) {
+            let (from_x, from_y) = (*x, *y);
+            if let Some(free) = (-2..=2)
+                .flat_map(|dy| (-2..=2).map(move |dx| (start.0 + dx, start.1 + dy)))
+                .filter(|cell| !self.cell_blocked(*cell))
+                .filter(|cell| {
+                    let (center_x, center_y) = Self::center(*cell);
+                    self.clear(from_x, from_y, center_x, center_y)
+                })
+                .min_by(|left, right| {
+                    let (left_x, left_y) = Self::center(*left);
+                    let (right_x, right_y) = Self::center(*right);
+                    distance(from_x, from_y, left_x, left_y)
+                        .total_cmp(&distance(from_x, from_y, right_x, right_y))
+                        .then(left.cmp(right))
+                })
+            {
+                start = free;
+            }
+        }
         let result = astar(
             &start,
             |cell| {

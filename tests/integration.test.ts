@@ -75,13 +75,13 @@ test("laboratory construction and logistics research use mined resources", { tim
     await until(() => units().some(unit => unit.kind === "lab"), "lab site created");
     const labId = units().find(unit => unit.kind === "lab")!.id;
     await assert.rejects(order(builder, [labId], "research_logistics"), /construction/);
-    // Unit 6 is the peer's drifter. It is labour, so it could construct — what
-    // stops it is that the site belongs to somebody else, and the refusal says
-    // exactly that rather than complaining about the unit.
-    await assert.rejects(order(opponent, [6], "construct", { target: labId }), /labour unit and an unfinished friendly building/);
+    // Nothing constructs any more: the old worker order is gone, and a placed
+    // site can be neither worked on nor cancelled.
+    await assert.rejects(order(opponent, [6], "construct", { target: labId }), /Unknown order/);
+    await assert.rejects(order(builder, [labId], "cancel_construction"), /construction/);
     // A drifter has no return trip at all, and is refused one by name.
     await assert.rejects(order(opponent, [6], "return"), /Drifters never carry a load/);
-    await until(() => units().find(unit => unit.id === labId)?.constructionRemaining === 0n, "lab completed by worker", 20000);
+    await until(() => units().find(unit => unit.id === labId)?.constructionRemaining === 0n, "lab raised itself", 20000);
     // Research costs another 100 material and 50 catalyst, so the centre has to
     // be worked a second time.
     await order(builder, [2], "gather", { target: 1 });

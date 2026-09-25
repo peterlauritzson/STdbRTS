@@ -86,3 +86,8 @@ export function channelFraction(unit: Pick<Entity, "order" | "warpTick">, tick: 
 
 /** Just arrived from a teleport and still inactive. */
 export const arriving = (unit: Pick<Entity, "arriveTick">, tick: bigint): boolean => unit.arriveTick > tick;
+/** `rules::TELEPORT_COOLDOWN_TICKS`: counted from arrival, never reset. */
+export const TELEPORT_COOLDOWN_TICKS = 600n;
+/** Teleported within the cooldown, so the server would refuse another. */
+export const recharging = (unit: Pick<Entity, "arriveTick">, tick: bigint): boolean =>
+  unit.arriveTick > 0n && tick < unit.arriveTick + TELEPORT_COOLDOWN_TICKS;

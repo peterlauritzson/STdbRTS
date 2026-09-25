@@ -29,7 +29,7 @@ These decisions override any earlier proposal to reproduce precise unit multipli
 
 ## First release-shaped goal
 
-Three small but genuinely different factions, two purpose-built 1v1 maps, secure fog, dependable group movement, dual-resource tradeoffs, clear delayed-order feedback, useful behavior presets, and readable original 3D presentation. Start with one map and one representative loop per faction; do not wait for a complete roster to playtest.
+Three small but genuinely different factions, two purpose-built 1v1 maps, dependable group movement, dual-resource tradeoffs, clear delayed-order feedback, useful behavior presets, and readable original 3D presentation. Start with one map and one representative loop per faction; do not wait for a complete roster to playtest.
 
 Existing skirmish code is the starting point, not disposable scaffolding. See [current engineering record](../ENGINEERING.md) and [existing playtest notes](../PLAYTEST.md). Existing 2-4-player functionality need not be removed; the new ruleset's release gates initially cover 1v1.
 

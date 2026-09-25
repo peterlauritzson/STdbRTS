@@ -8,7 +8,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 8;
+pub const RULESET_VERSION: u32 = 9;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -258,11 +258,6 @@ pub const REPAIR_COST: Cost = Cost::material(1);
 /// owner when it dies. Workers and buildings return nothing.
 pub const ARMY_DEATH_REFUND_PERCENT: u32 = 50;
 
-/// Share returned when an unfinished building is cancelled. Cancellation and
-/// death are distinct terminal events; an entity is only ever paid for by one
-/// of them.
-pub const CONSTRUCTION_CANCEL_REFUND_PERCENT: u32 = 75;
-
 /// Credit owed to the owner of a dying entity. Only army kinds (see
 /// [`is_army`]) are eligible; every other kind — labour, buildings, temporary
 /// units, unknown kinds — returns nothing.
@@ -372,7 +367,7 @@ pub fn validate_world_size(size: f32) -> Result<f32, String> {
     Ok(size)
 }
 
-pub const MAX_UNITS: usize = 60;
+pub const MAX_UNITS: usize = 120;
 pub const MAX_QUEUE: usize = 8;
 pub const MAX_BUILDINGS: usize = 16;
 
@@ -543,9 +538,8 @@ pub fn labour_faction(kind: &str) -> Option<Faction> {
 }
 
 /// Anything that can be ordered to work a deposit, whatever model it works it
-/// under. This is also, for now, exactly the set that can construct and repair:
-/// construction is driven by a labour unit for every faction alike, and that
-/// whole path is due to be replaced by command-card construction.
+/// under. This is also exactly the set that can repair. Nothing constructs:
+/// buildings are ordered from the command card and raise themselves.
 pub fn is_labour(kind: &str) -> bool {
     labour_faction(kind).is_some()
 }
@@ -904,11 +898,18 @@ pub fn stats(kind: &str) -> Option<Stats> {
 // Every value below is **experimental**; none of it is playtested.
 
 /// The share of a kind's listed health a Network entity carries as shields
-/// instead of hit points. The total is unchanged — a Network soldier has 70
-/// hit points and 70 shields where anyone else's has 140 hit points — so what
-/// the faction gains is regeneration, not durability. The reference game split
-/// its shielded faction the same way, half and half for most units.
-pub const NETWORK_SHIELD_PERCENT: i32 = 50;
+/// instead of hit points. The total is unchanged, so what the faction gains is
+/// regeneration, not durability. The split varies by kind, as SC2's Protoss
+/// does (author's decision, 2026-09-25): every structure and the drifter are
+/// half and half (nexus, pylon, cannon, probe), the skimmer too (adept 70/70),
+/// while the sentinel and the lancer are a third shields (zealot 100/50,
+/// immortal 200/100). A kind not listed here gets half.
+pub fn network_shield_percent(kind: &str) -> i32 {
+    match kind {
+        "sentinel" | "lancer" => 33,
+        _ => 50,
+    }
+}
 
 /// Ticks an entity must go without taking damage before its shields start to
 /// come back. Ten seconds, the reference game's figure.
@@ -933,7 +934,7 @@ pub fn vitals(kind: &str, faction: Faction) -> (i32, i32) {
     if faction != Faction::Network || is_temporary(kind) || kind.starts_with("research_") {
         return (definition.hp, 0);
     }
-    let shields = definition.hp * NETWORK_SHIELD_PERCENT / 100;
+    let shields = definition.hp * network_shield_percent(kind) / 100;
     (definition.hp - shields, shields)
 }
 
@@ -956,6 +957,11 @@ pub const TELEPORT_CHANNEL_TICKS: u64 = 20;
 /// but it can be shot. The arrival window is the price of the move, and it is
 /// what makes an opponent's defence of the landing point worth something.
 pub const TELEPORT_ARRIVAL_TICKS: u64 = 40;
+/// Ticks after arriving before the same unit may teleport again: 30 seconds.
+/// A cooldown and not a cost, by the author's decision (2026-09-25), so an
+/// army cannot hop out of every fight inside its own field. Counted from
+/// `arrive_tick`, which is never reset, so it needs no extra state.
+pub const TELEPORT_COOLDOWN_TICKS: u64 = 600;
 
 /// Can `kind` teleport at all? Anything mobile. Buildings never move, and a
 /// temporary unit belongs to Organic, which projects no power field.
@@ -2192,8 +2198,10 @@ mod tests {
         // temporary units spawned by deaths on it. Bumped to 7 by Network
         // shields and the power field: health split into two pools, and
         // teleport and field-gated production. Bumped to 8 by the faction
-        // armies: the roster is no longer shared.
-        assert_eq!(RULESET_VERSION, 8);
+        // armies: the roster is no longer shared. Bumped to 9 by command-card
+        // construction (no builder, no cancel), shield shares by kind, and the
+        // teleport cooldown.
+        assert_eq!(RULESET_VERSION, 9);
         assert!(RULESET_VERSION > 0);
     }
 

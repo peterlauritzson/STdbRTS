@@ -376,12 +376,15 @@ the price of the move.
 **Confirmed by the author (2026-09-25):** hubs and relays both project power,
 as above (not the relays-only pylon reading).
 
-**Open for the author.**
+**Settled by the author (2026-09-25).**
 
-- Whether teleport needs a cooldown or a cost, such as the reference game's
-  shield-funded recall.
-- Whether the split should vary by kind (the reference game's worker was
-  5 / 25, mostly shield).
+- Teleport gets a **cooldown, not a cost**: 30s from arrival
+  (`TELEPORT_COOLDOWN_TICKS` 600, experimental), derived from `arrive_tick`,
+  so no new state.
+- The split **varies by kind, as in SC2**: every structure, the drifter and
+  the skimmer are half and half (nexus, pylon, cannon, probe, adept); the
+  sentinel and the lancer are a third shields (zealot 100/50, immortal 200/100).
+  Totals are unchanged. `rules::network_shield_percent`. `RULESET_VERSION` 9.
 
 **Would overturn it.** Playtest evidence that teleport without a cooldown lets
 an army dodge every fight in its own base, or that 6/s regeneration makes
@@ -414,3 +417,56 @@ they differ by stats only.
 
 **Would overturn it.** Play showing one faction's roster dominating, or a role
 that no faction's player ever builds.
+
+---
+
+## 2026-09-25 — Fog of war demoted; it may never be built
+
+**Decision.** Fog of war, and the private-state experiment (Increment C) that
+gates it, move to the very bottom of the roadmap (M6, "if ever"). Every client
+sees the whole match. That is the intended game for now, not a leak.
+
+**Why.** Stated by the author: "that might not even be needed in the end."
+Nothing else waits on it: none of the three territory zones blocks sight.
+
+**What still holds.** The 2026-09-22 rule stands if fog is ever wanted: no fog,
+smoke or hidden scouting until the experiment passes. Only the priority changed.
+
+---
+
+## 2026-09-25 — Unit cap 120; map hash compared on the client
+
+**Decision.** `MAX_UNITS` is 120 per player (author's instruction). The client
+computes the bundled map's content hash (`src/maphash.ts`, a byte-for-byte port
+of `MapDefinition::content_hash`, pinned against both maps in tests) and shows a
+notice if it differs from the room's `map_hash`.
+
+**Why the hash, given server authority.** The server decides everything, so a
+mismatch cannot cheat. But the client draws terrain and previews placement from
+its own bundled copy: after a republish, a stale tab would show walls that are
+not there and pre-reject legal sites. The check costs one hash at load. When a
+map editor exists, the client should receive the map from the server instead,
+and this check becomes a guard on that transfer.
+
+**Would overturn it.** Tick cost at 120 per player: the last reading, on a busy
+machine, was ~26-28ms p95 against a 25ms budget. Measure on an idle machine.
+
+---
+
+## 2026-09-25 — Units auto-attack while moving
+
+**Decision (author).** Units should auto-attack enemies in range while they move,
+not only when idle or on attack-move. Otherwise, with a one-second command
+delay, micro is too hard.
+
+**Already true.** Every unit with a weapon fires at the nearest enemy in range
+whenever its cooldown is ready, whatever its order (teleport channelling
+excepted), and on a `move` order it keeps walking while it does. Pinned by
+`a_unit_on_a_move_order_fires_at_enemies_in_range_without_stopping`.
+
+**Open, for later.** Whether some or all kinds should **stop to fire** (most of
+SC2) or keep **firing on the move** (SC2's phoenix), which is what every unit
+does today. Probably a per-kind stat once units differ enough. A side effect to
+decide at the same time: there is no "move and ignore enemies" order (SC2's
+plain move), so a retreat still spends its shots and never breaks off for them.
+Belongs with the behaviour presets, whose retreat preset needs an answer.

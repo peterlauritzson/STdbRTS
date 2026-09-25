@@ -1,5 +1,5 @@
 import type { Entity, Node, Order } from "../src/bindings/types";
-import { affords, ARMY, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isHub, isLabour, LABOUR, placementError, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, type Cost, type FactionName } from "../src/catalog";
+import { affords, ARMY, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isHub, isLabour, LABOUR, MAX_UNITS, placementError, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, type Cost, type FactionName } from "../src/catalog";
 
 export interface Decision { units: number[]; order: Order }
 
@@ -83,22 +83,26 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost,
   // because repair is only ever charged in material.
   const reserve = repairing || repairer ? REPAIR_RESERVE : 0;
   const spendable = (): Cost => ({ material: Math.max(0, available.material - reserve), catalyst: available.catalyst });
-  // Construction is driven by any labour unit now, not only by a worker.
-  const site = owned.find(unit => unit.constructionRemaining > 0n && !workers.some(worker => worker.order.kind === "construct" && worker.order.target === unit.id));
-  const builder = workers.filter(worker => !assigned.has(worker.id) && !["construct", "repair"].includes(worker.order.kind)).sort((left, right) => Number(left.order.kind !== "stop") - Number(right.order.kind !== "stop"))[0];
-  if (site && builder) { decisions.push({ units: [builder.id], order: { kind: "construct", x: 0, y: 0, target: site.id } }); assigned.add(builder.id); }
   const has = (kind: string) => owned.some(unit => unit.kind === kind);
+  const count = (kind: string) => owned.filter(unit => unit.kind === kind).length;
   const ready = (kind: string) => owned.some(unit => unit.kind === kind && unit.constructionRemaining === 0n);
   const desired = workers.length >= 4 && !has("barracks") ? "barracks"
     : workers.length >= OPENING_LABOUR && !has("outpost") ? "outpost"
     : ready("barracks") && soldiers.length >= 3 && !has("factory") ? "factory"
+    // A second barracks once the factory is under way: with one, every faction
+    // floated thousands of material by 3:00 that it had nowhere to spend.
+    : has("factory") && count("barracks") < 2 ? "barracks"
     : soldiers.length >= 3 && !has("turret") ? "turret"
     : ready("factory") && !has("lab") ? "lab" : undefined;
-  if (desired && builder && !assigned.has(builder.id) && affords(available, CATALOG[desired].cost)) {
+  // Command-card construction: the order names the HQ and the site raises
+  // itself, so no labour is taken off mining. A command still scheduled for
+  // the HQ may be this build, not yet executed, so nothing is placed until it
+  // clears; otherwise the one-second delay would place the same building twice.
+  if (desired && !busy.has(hq.id) && affords(available, CATALOG[desired].cost)) {
     const point = buildSite(desired, hq, owner, units, nodes);
     if (point) {
-      decisions.push({ units: [builder.id], order: { kind: `build_${desired}`, ...point, target: 0 } });
-      available = spend(available, CATALOG[desired].cost); assigned.add(builder.id);
+      decisions.push({ units: [hq.id], order: { kind: `build_${desired}`, ...point, target: 0 } });
+      available = spend(available, CATALOG[desired].cost);
     }
   }
   // Catalyst has to be mined deliberately: it is nowhere near a start position
@@ -183,7 +187,7 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost,
     // stock. Without this the bot would order one every pass and be refused
     // every pass, because `affords` is trivially true for a price of nothing.
     if (kind === "harvester" && !(stockLeft.get(producer.id) ?? 0)) continue;
-    if (affords(spendable(), CATALOG[kind].cost) && producer.production.length < 2 && population < 60) {
+    if (affords(spendable(), CATALOG[kind].cost) && producer.production.length < 2 && population < MAX_UNITS) {
       decisions.push({ units: [producer.id], order: { kind: `train_${kind}`, x: 0, y: 0, target: 0 } });
       available = spend(available, CATALOG[kind].cost); population++;
       if (kind === labour) labourCount++;

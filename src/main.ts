@@ -3,7 +3,7 @@ import { createIcons, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, Zo
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
 import { COLORS, countdown, VISUALS } from "./presentation";
-import { addCost, ARMY, armyFaction, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, parseFaction, PRACTICE_SLOT, STOCK_REASON, type Cost, type FactionName } from "./catalog";
+import { addCost, ARMY, armyFaction, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, type Cost, type FactionName } from "./catalog";
 import { Practice, type PracticeOpponent } from "./practice";
 import { Feedback } from "./feedback";
 import { ScoreScreen, type ScorePlayer } from "./scorescreen";
@@ -210,6 +210,7 @@ function productionBuilding() {
   return owned ?? session.snapshot.units.find(unit => unit.owner === session.snapshot.me?.slot && unit.kind === "hq");
 }
 
+let warnedMapRoom: bigint | undefined;
 session.onNotice = message => {
   element("notice").textContent = message;
   element("notice").hidden = false;
@@ -274,10 +275,6 @@ for (const [id, kind] of [["clear-rally", "clear_rally"], ["cancel-production", 
 });
 element("select-army").addEventListener("click", () => { battlefield.selectArmy(); });
 element("idle-worker").addEventListener("click", () => battlefield.selectIdleWorker());
-element("cancel-construction").addEventListener("click", () => {
-  const site = battlefield.ownedSelection().find(unit => unit.constructionRemaining > 0n);
-  if (site) void session.order([site.id], { kind: "cancel_construction", x: 0, y: 0, target: 0 });
-});
 element<HTMLSelectElement>("producer-select").addEventListener("change", event => {
   battlefield.selected = new Set([Number((event.target as HTMLSelectElement).value)]); renderMatch();
 });
@@ -376,7 +373,14 @@ function renderMatch(): void {
   element("material").textContent = String(balance.material);
   element("catalyst").textContent = String(balance.catalyst);
   element("catalyst-readout").classList.toggle("empty", balance.catalyst === 0);
-  element("unit-count").textContent = `${mobile.length} / 60`;
+  element("unit-count").textContent = `${mobile.length} / ${MAX_UNITS}`;
+  // The server owns the map; this client only draws its bundled copy. If they
+  // differ (a stale bundle after a republish), say so once per match rather
+  // than silently drawing walls that are not there.
+  if (room.mapHash !== MAP_HASH && warnedMapRoom !== room.id) {
+    warnedMapRoom = room.id;
+    session.onNotice(`This client's map (${mapIdentity.id} v${mapIdentity.version}) differs from the server's (${room.mapId} v${room.mapVersion}). Reload to update; terrain shown may be wrong.`);
+  }
   element("faction-name").textContent = FACTION_LABEL[faction].toUpperCase();
   element("faction-readout").className = `readout faction ${faction}`;
   element("faction-readout").title = `You are playing ${FACTION_LABEL[faction]} / ${FACTION_ECONOMY[faction]}`;
@@ -419,7 +423,7 @@ function renderMatch(): void {
     if (button.hidden) continue;
     // Construction is driven by any labour unit now, not only by a worker:
     // gating this on "worker" left Network and Organic unable to build at all.
-    const blocked = !canOrder || !owned.some(unit => isLabour(unit.kind)) || buildings.length >= 16 || (kind === "factory" && !buildings.some(unit => unit.kind === "barracks" && unit.constructionRemaining === 0n));
+    const blocked = !canOrder || !battlefield.issuer() || buildings.length >= 16 || (kind === "factory" && !buildings.some(unit => unit.kind === "barracks" && unit.constructionRemaining === 0n));
     affordability(element<HTMLButtonElement>(`build-${kind}`), definition.cost, balance, blocked, definition.role);
     element(`build-${kind}`).setAttribute("aria-pressed", String(battlefield.targeting === `build_${kind}`));
   }
@@ -470,7 +474,6 @@ function renderMatch(): void {
   // lab, so the button is disabled there rather than sending a refused order.
   const controllable = !!producer && isBuilding(producer.kind);
   element<HTMLButtonElement>("cancel-production").disabled = !canOrder || !producer?.production.length || !controllable;
-  element<HTMLButtonElement>("cancel-construction").disabled = !canOrder || !battlefield.ownedSelection().some(unit => unit.constructionRemaining > 0n);
   element<HTMLButtonElement>("idle-worker").disabled = !canOrder || !owned.some(unit => isLabour(unit.kind) && unit.order.kind === "stop");
   element("idle-worker").title = `Select idle ${CATALOG[labour].label.toLowerCase()}`;
   element("idle-worker").setAttribute("aria-label", element("idle-worker").title);
@@ -485,7 +488,7 @@ function renderMatch(): void {
   const rallyNode = producer?.order.kind === "rally_gather" ? session.snapshot.nodes.find(node => node.id === producer.order.target) : undefined;
   element("rally-status").textContent = producer?.order.kind === "rally_move" ? `Rally ${Math.round(producer.order.x)}, ${Math.round(producer.order.y)}`
     : producer?.order.kind === "rally_gather" ? `${rallyNode ? CURRENCY_LABEL[currencyOf(rallyNode.kind)] : "Deposit"} rally #${producer.order.target}` : "Rally unset";
-  element("selection-order").textContent = selection.length === 1 ? selection[0].constructionRemaining > 0n ? `Construction / ${(Number(selection[0].constructionRemaining) / 20).toFixed(1)}s work` : selection[0].order.kind.split("_").join(" ") : "";
+  element("selection-order").textContent = selection.length === 1 ? selection[0].constructionRemaining > 0n ? `Constructing / ${(Number(selection[0].constructionRemaining) / 20).toFixed(1)}s left` : selection[0].order.kind.split("_").join(" ") : "";
   const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : "Rally target";
   element("targeting-state").hidden = !battlefield.targeting;
   element("targeting-state").textContent = targetLabel;

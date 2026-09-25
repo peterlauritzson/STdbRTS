@@ -1,4 +1,5 @@
 import mapDefinition from "../shared/maps/crossfire.json";
+import { mapContentHash } from "./maphash";
 import { Faction } from "./bindings/types";
 import type { Entity, Node, ResourceKind } from "./bindings/types";
 
@@ -8,6 +9,10 @@ export const terrain = mapDefinition.terrain;
 // assumed 1600 would clamp the camera and previews to a quarter of the map.
 export const worldSize = mapDefinition.size;
 export const mapIdentity = { id: mapDefinition.id, version: mapDefinition.version } as const;
+/** `MapDefinition::content_hash` of the bundled map, compared with the room's `map_hash`. */
+export const MAP_HASH = mapContentHash(mapDefinition);
+/** Mobile units a player may hold, excluding temporary units: `rules::MAX_UNITS`. */
+export const MAX_UNITS = 120;
 
 /** The two currencies of the dual-currency economy, in server spelling. */
 export type Currency = "material" | "catalyst";
