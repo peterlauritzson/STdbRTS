@@ -12,7 +12,7 @@ use crate::{
     MINING_PULSE_TICKS, POWER_RESTORE_RADIUS, REPAIR_COST, SHIELD_REGEN_DELAY_TICKS,
     SHIELD_REGEN_INTERVAL_TICKS, STARTING_BALANCE, TELEPORT_ARRIVAL_TICKS, TELEPORT_CHANNEL_TICKS,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The zone field an entity snapshot and the creep patches project on one tick.
 ///
@@ -151,7 +151,6 @@ pub struct Entity {
     pub shot_y: f32,
     pub production: Vec<Production>,
     pub construction_remaining: u64,
-    pub research: Vec<String>,
     /// Organic harvester stock held by this hub. Accrues one point every
     /// `HUB_STOCK_INTERVAL_TICKS` up to `HUB_STOCK_CAP`, for Organic owners
     /// only, and is the entire price of a harvester. Always 0 on anything that
@@ -247,6 +246,10 @@ pub struct World {
     /// source left to hold it. Advanced by `advance_creep` at the top of every
     /// tick; read by `zones_of`.
     pub creep: Vec<CreepPatch>,
+    /// Completed research per slot. It belongs to the player, not to a
+    /// building, so a player who loses the HQ and fights on from an outpost
+    /// keeps every upgrade. Round-trips through the player row.
+    pub research: BTreeMap<u8, Vec<String>>,
     pub outcome: Option<i16>,
 }
 
@@ -289,6 +292,7 @@ impl World {
             lost: BTreeMap::new(),
             killed: BTreeMap::new(),
             creep: vec![],
+            research: BTreeMap::new(),
             outcome: None,
         };
         let mut ordered = roster.to_vec();
@@ -373,7 +377,6 @@ impl World {
             shot_y: y,
             production: vec![],
             construction_remaining: 0,
-            research: vec![],
             stock: 0,
             expires_tick: 0,
             max_hp,
@@ -486,12 +489,8 @@ impl World {
         if self.outcome.is_some() {
             return Err("Match has ended".into());
         }
-        if !self
-            .units
-            .iter()
-            .any(|unit| unit.owner == command.owner && unit.kind == "hq")
-        {
-            return Err("Your HQ has been destroyed".into());
+        if !self.survivors().contains(&command.owner) {
+            return Err("You have no hubs left".into());
         }
         if command.units.is_empty() || command.units.len() > MAX_UNITS {
             return Err(format!("Select between 1 and {MAX_UNITS} units"));
@@ -629,11 +628,12 @@ impl World {
                     if unit.kind != "lab" || command.queued || command.units.len() != 1 {
                         return Err("Research requires one completed lab".into());
                     }
-                    if self.units.iter().any(|other| {
-                        other.owner == unit.owner
-                            && (other.research.contains(&order.kind)
-                                || other.production.iter().any(|item| item.kind == order.kind))
-                    }) {
+                    if self.has_research(unit.owner, &order.kind)
+                        || self.units.iter().any(|other| {
+                            other.owner == unit.owner
+                                && other.production.iter().any(|item| item.kind == order.kind)
+                        })
+                    {
                         return Err("Technology already researched or queued".into());
                     }
                     if unit.production.len() >= MAX_QUEUE {
@@ -644,10 +644,14 @@ impl World {
                 "rally_move" | "rally_gather" | "clear_rally" | "cancel_production" => {
                     // Any building that can hold a queue can have it cancelled
                     // — a relay training drifters, an Organic outpost training
-                    // harvesters. Rallies stay with the four that produce.
+                    // harvesters. Rallies stay with the buildings that produce,
+                    // outposts included now that every hub trains labour.
                     let cancellable = order.kind == "cancel_production" && is_building(&unit.kind);
                     if !cancellable
-                        && !matches!(unit.kind.as_str(), "hq" | "barracks" | "factory" | "lab")
+                        && !matches!(
+                            unit.kind.as_str(),
+                            "hq" | "outpost" | "barracks" | "factory" | "lab"
+                        )
                     {
                         return Err(
                             "Production controls require an HQ or production building".into()
@@ -1079,10 +1083,7 @@ impl World {
                 continue;
             }
             let definition = stats(&unit.kind).unwrap();
-            let technology = snapshot
-                .iter()
-                .find(|other| other.owner == unit.owner && other.kind == "hq")
-                .map(|hq| &hq.research);
+            let technology = self.research.get(&unit.owner);
             let has_tech = |kind: &str| {
                 technology.is_some_and(|research| research.iter().any(|item| item == kind))
             };
@@ -1400,11 +1401,10 @@ impl World {
                     distance(unit.x, unit.y, target.x, target.y) <= definition.range
                         && line_of_sight(map, unit.x, unit.y, target.x, target.y)
                 }) {
-                    let armor = snapshot.iter().any(|other| {
-                        other.owner == target.owner
-                            && other.kind == "hq"
-                            && other.research.iter().any(|item| item == "research_armor")
-                    });
+                    let armor = self
+                        .research
+                        .get(&target.owner)
+                        .is_some_and(|research| research.iter().any(|item| item == "research_armor"));
                     let hit = attack_damage(
                         &unit.kind,
                         &target.kind,
@@ -1426,6 +1426,12 @@ impl World {
                     unit.queue.remove(0)
                 };
                 unit.returning = unit.order.kind == "return";
+            }
+        }
+        for (owner, research) in discoveries {
+            let known = self.research.entry(owner).or_default();
+            if !known.contains(&research) {
+                known.push(research);
             }
         }
         for unit in &mut self.units {
@@ -1451,11 +1457,6 @@ impl World {
                     / definition.training_ticks;
                 unit.shields =
                     (unit.shields + (new_shields - old_shields) as i32).min(unit.max_shields);
-            }
-            for (owner, research) in &discoveries {
-                if unit.owner == *owner && unit.kind == "hq" && !unit.research.contains(research) {
-                    unit.research.push(research.clone());
-                }
             }
             unit.hp += repairs.get(&unit.id).copied().unwrap_or(0);
             let incoming = damage.get(&unit.id).copied().unwrap_or(0);
@@ -1572,12 +1573,7 @@ impl World {
             }
         }
         self.units.retain(|unit| unit.hp > 0);
-        let survivors: Vec<u8> = self
-            .units
-            .iter()
-            .filter(|unit| unit.kind == "hq")
-            .map(|unit| unit.owner)
-            .collect();
+        let survivors = self.survivors();
         // Units of an eliminated player are cleaned up, not killed: no refund.
         self.units.retain(|unit| survivors.contains(&unit.owner));
         for (owner, refund) in refunds {
@@ -1745,13 +1741,25 @@ impl World {
         self.resolve_outcome();
     }
 
-    fn resolve_outcome(&mut self) {
-        let survivors: Vec<u8> = self
-            .units
+    /// Slots still in the match: those holding at least one *completed* hub,
+    /// the HQ or any outpost. A hub still under construction does not keep a
+    /// player alive, so a last-second outpost site cannot stall elimination.
+    pub fn survivors(&self) -> BTreeSet<u8> {
+        self.units
             .iter()
-            .filter(|unit| unit.kind == "hq")
+            .filter(|unit| is_hub(&unit.kind) && unit.construction_remaining == 0)
             .map(|unit| unit.owner)
-            .collect();
+            .collect()
+    }
+
+    pub fn has_research(&self, owner: u8, kind: &str) -> bool {
+        self.research
+            .get(&owner)
+            .is_some_and(|research| research.iter().any(|item| item == kind))
+    }
+
+    fn resolve_outcome(&mut self) {
+        let survivors = self.survivors();
         if survivors.len() <= 1 {
             self.outcome = Some(survivors.first().map_or(-1, |slot| *slot as i16));
             for command in &mut self.commands {
@@ -2693,7 +2701,7 @@ mod tests {
         for _ in 0..900 {
             world.step();
         }
-        assert_eq!(world.units[0].research.len(), 3);
+        assert_eq!(world.research[&0].len(), 3);
         assert_eq!(
             world
                 .units
@@ -2830,7 +2838,7 @@ mod tests {
         for _ in 0..300 {
             world.step();
         }
-        assert!(world.units[0].research.contains(&"research_weapons".into()));
+        assert!(world.has_research(0, "research_weapons"));
         assert!(world
             .validate(&command(6, 0, lab, "research_weapons", 0))
             .is_err());
@@ -3174,6 +3182,68 @@ mod tests {
         world.step();
         assert_eq!(world.outcome, Some(-1));
         assert!(world.units.is_empty());
+    }
+
+    #[test]
+    fn a_completed_outpost_keeps_a_player_alive_after_the_hq_falls() {
+        let mut world = World::new(&[0, 1]);
+        world.spawn(0, "outpost", 700.0, 400.0);
+        world.research.insert(0, vec!["research_armor".into()]);
+        world.units[0].hp = 0;
+        world.step();
+        assert_eq!(world.outcome, None);
+        assert!(world.units.iter().any(|unit| unit.owner == 0 && unit.kind == "outpost"));
+        assert!(world.units.iter().any(|unit| unit.owner == 0 && !is_building(&unit.kind)));
+        assert!(world.has_research(0, "research_armor"), "research outlives the HQ");
+        let outpost = world.units.iter().find(|unit| unit.kind == "outpost").unwrap().id;
+        world.units.retain(|unit| unit.id != outpost);
+        world.step();
+        assert_eq!(world.outcome, Some(1));
+    }
+
+    #[test]
+    fn an_unfinished_outpost_does_not_keep_a_player_alive() {
+        let mut world = World::new(&[0, 1]);
+        world.spawn(0, "outpost", 700.0, 400.0);
+        world.units.last_mut().unwrap().construction_remaining = 100;
+        world.units[0].hp = 0;
+        world.step();
+        assert_eq!(world.outcome, Some(1));
+        assert!(!world.units.iter().any(|unit| unit.owner == 0));
+    }
+
+    #[test]
+    fn losing_the_last_outposts_on_the_same_tick_is_a_draw() {
+        let mut world = World::new(&[0, 1]);
+        world.spawn(0, "outpost", 700.0, 400.0);
+        world.spawn(1, "outpost", 900.0, 400.0);
+        world.units.retain(|unit| unit.kind != "hq");
+        world.step();
+        assert_eq!(world.outcome, None);
+        for unit in world.units.iter_mut().filter(|unit| unit.kind == "outpost") {
+            unit.hp = 0;
+        }
+        world.step();
+        assert_eq!(world.outcome, Some(-1));
+    }
+
+    #[test]
+    fn an_outpost_trains_labour_and_takes_a_rally_like_the_hq() {
+        let mut world = World::new(&[0, 1]);
+        world.spawn(0, "outpost", 700.0, 400.0);
+        let outpost = world.units.last().unwrap().id;
+        let train = command(1, 0, outpost, "train_worker", 0);
+        assert_eq!(world.validate(&train), Ok(()));
+        let rally = command(2, 0, outpost, "rally_move", 0);
+        assert_eq!(world.validate(&rally), Ok(()));
+    }
+
+    #[test]
+    fn a_player_without_a_hub_is_refused_every_order() {
+        let mut world = World::new(&[0, 1, 2]);
+        world.units.retain(|unit| !(unit.owner == 0 && unit.kind == "hq"));
+        let order = command(1, 0, 2, "move", 0);
+        assert_eq!(world.validate(&order), Err("You have no hubs left".into()));
     }
 
     #[test]

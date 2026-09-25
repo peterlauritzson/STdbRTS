@@ -1,5 +1,5 @@
 import type { Entity, Node, Order } from "../src/bindings/types";
-import { affords, ARMY, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isHub, isLabour, LABOUR, MAX_UNITS, placementError, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, type Cost, type FactionName } from "../src/catalog";
+import { affords, ARMY, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isCompletedHub, isHub, isLabour, LABOUR, MAX_UNITS, placementError, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, type Cost, type FactionName } from "../src/catalog";
 
 export interface Decision { units: number[]; order: Order }
 
@@ -60,9 +60,12 @@ function buildSite(kind: string, hq: Entity, owner: number, units: Entity[], nod
  * is paid for in hub stock, which is checked here so the bot never spends a
  * pass on orders the server would refuse.
  */
-export function chooseOrders(owner: number, faction: FactionName, balance: Cost, units: Entity[], nodes: Node[], busy: Set<number>, holdArmy = false): Decision[] {
+export function chooseOrders(owner: number, faction: FactionName, balance: Cost & { research?: readonly string[] }, units: Entity[], nodes: Node[], busy: Set<number>, holdArmy = false): Decision[] {
   const owned = units.filter(unit => unit.owner === owner);
-  const hq = owned.find(unit => unit.kind === "hq");
+  // Primary-hub victory: after the HQ falls the bot plays on from any
+  // completed outpost, which then anchors building, repair and the attack.
+  const hq = owned.find(unit => unit.kind === "hq") ?? owned.find(isCompletedHub);
+  const researched = balance.research ?? [];
   if (!hq) return [];
   const decisions: Decision[] = [];
   const labour = LABOUR[faction];
@@ -139,7 +142,7 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost,
   // a factory.
   const hubs = owned.filter(unit => isHub(unit.kind) && unit.constructionRemaining === 0n).length;
   const labourTarget = has("barracks") ? Math.min(LABOUR_CAP, Math.max(OPENING_LABOUR, LABOUR_PER_HUB * hubs)) : OPENING_LABOUR;
-  const technology = Object.keys(TECHNOLOGIES).find(kind => !hq.research.includes(`research_${kind}`) && !owned.some(unit => unit.production.some(item => item.kind === `research_${kind}`)));
+  const technology = Object.keys(TECHNOLOGIES).find(kind => !researched.includes(`research_${kind}`) && !owned.some(unit => unit.production.some(item => item.kind === `research_${kind}`)));
   const lab = owned.find(unit => unit.kind === "lab" && unit.constructionRemaining === 0n && unit.production.length === 0 && !assigned.has(unit.id));
   // Technology costs both currencies. If it is wanted but unaffordable the bot
   // saves for it; once it has been ordered this turn it stops saving, so a
@@ -194,7 +197,8 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost,
       if (kind === "harvester") stockLeft.set(producer.id, (stockLeft.get(producer.id) ?? 0) - 1);
     }
   }
-  const targets = units.filter(unit => unit.owner !== owner && unit.kind === "hq").sort((left, right) => Math.hypot(left.x - hq.x, left.y - hq.y) - Math.hypot(right.x - hq.x, right.y - hq.y));
+  // Hubs, not just the HQ: a player is out only when every completed hub is gone.
+  const targets = units.filter(unit => unit.owner !== owner && isHub(unit.kind)).sort((left, right) => Math.hypot(left.x - hq.x, left.y - hq.y) - Math.hypot(right.x - hq.x, right.y - hq.y));
   const idle = soldiers.filter(unit => unit.order.kind === "stop" && !busy.has(unit.id));
   // `holdArmy` keeps the army at home: it still trains and still fights what
   // walks into range, but it is not sent across the map. Practice sets it for

@@ -164,6 +164,13 @@ pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
             creep.sort_unstable_by_key(|patch| patch.source);
             creep
         },
+        research: ctx
+            .db
+            .player()
+            .match_id()
+            .filter(room.id)
+            .map(|player| (player.slot, player.research))
+            .collect(),
         outcome: if room.state == "finished" {
             Some(room.winner)
         } else {
@@ -267,6 +274,7 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
         let collected = world.collected(player.slot);
         let lost = world.lost(player.slot);
         let killed = world.killed(player.slot);
+        let research = world.research.get(&player.slot).cloned().unwrap_or_default();
         let changed = balance.is_some_and(|balance| {
             (player.material, player.catalyst) != (balance.material, balance.catalyst)
         }) || faction.is_some_and(|faction| player.faction != faction)
@@ -274,7 +282,8 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
                 != (collected.material, collected.catalyst)
             || (player.lost_material, player.lost_catalyst) != (lost.material, lost.catalyst)
             || (player.killed_material, player.killed_catalyst)
-                != (killed.material, killed.catalyst);
+                != (killed.material, killed.catalyst)
+            || player.research != research;
         if changed {
             if let Some(balance) = balance {
                 player.material = balance.material;
@@ -293,6 +302,7 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
             player.lost_catalyst = lost.catalyst;
             player.killed_material = killed.material;
             player.killed_catalyst = killed.catalyst;
+            player.research = research;
             ctx.db.player().identity().update(player);
         }
     }

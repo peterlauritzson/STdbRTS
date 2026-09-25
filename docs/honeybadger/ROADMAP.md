@@ -150,7 +150,7 @@ Use replay comparison and conservation assertions for correctness. Use player ob
 1. Final fictional names, art direction references, and original/licensed asset budget.
 2. Target match duration and supported final army/worker counts. Measure swarm needs before choosing caps.
 3. Exact first-slice costs/rates, resource-node quantities, zone timings, and refund percentage. Use the reference as a starting hypothesis, not a numeric mandate.
-4. Primary-hub elimination proposal versus a different victory rule; settle in M0 before multi-base play.
+4. ~~Primary-hub elimination proposal versus a different victory rule~~: settled 2026-09-25, primary-hub elimination (see DECISIONS.md).
 5. How expressive advanced policies should become and which information/abilities they may use. Start bounded and review evidence in M5.
 6. Whether actual mod data is needed to resolve a specific contested interaction. The author can provide it when useful; no need to postpone the whole project.
 7. Production hosting/region/concurrency and minimum supported GPU/browser. Establish measured development targets first.

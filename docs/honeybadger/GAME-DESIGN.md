@@ -79,7 +79,7 @@ Desktop 1v1 first. Initial sandbox map includes mirrored starts, a reasonably de
 
 The first release adds a second map that stresses split fronts and long relay/territory chains. Keep at least one expansion accessible without forcing a single choke. Rich nodes should create a choice, not dictate one opening. Test mirrored spawns and swapped faction assignments; symmetry alone does not prove matchup fairness.
 
-**Proposed victory:** surrender or loss of all completed primary command hubs, with at least one completed hub required throughout the match. Incomplete emergency sites do not prolong elimination. This replaces the prototype's one-HQ assumption and must be decided before multi-base production is balanced. Define same-tick destruction as a draw when both lose their last hub. Disconnected players retain state under the existing grace/cleanup policy; disconnect is not surrender.
+**Victory (settled 2026-09-25, implemented as Increment K):** surrender or loss of all completed primary command hubs, with at least one completed hub required throughout the match. Incomplete emergency sites do not prolong elimination. This replaces the prototype's one-HQ assumption and must be decided before multi-base production is balanced. Define same-tick destruction as a draw when both lose their last hub. Disconnected players retain state under the existing grace/cleanup policy; disconnect is not surrender.
 
 ## Skill expression without compulsory micro
 

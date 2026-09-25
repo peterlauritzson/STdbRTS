@@ -91,10 +91,10 @@ test("laboratory construction and logistics research use mined resources", { tim
       90000,
     );
     await order(builder, [labId], "research_logistics");
-    assert.ok(!units().find(unit => unit.kind === "hq" && unit.owner === 0)!.research.length);
+    assert.ok(!me(builder).research.length);
     await until(() => units().find(unit => unit.id === labId)!.production.length === 1, "research activated");
     await assert.rejects(order(builder, [labId], "research_logistics"), /already/);
-    await until(() => units().find(unit => unit.kind === "hq" && unit.owner === 0)!.research.includes("research_logistics"), "research completed", 25000);
+    await until(() => me(builder).research.includes("research_logistics"), "research completed", 25000);
     await until(() => units().some(unit => unit.owner === 0 && unit.kind === "worker" && unit.cargo > 25), "upgraded worker cargo", 15000);
     assert.equal(units().find(unit => unit.id === labId)!.production.length, 0);
     assert.ok(units().filter(unit => unit.kind === "worker").every(unit => unit.cargo <= 40));

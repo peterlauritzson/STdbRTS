@@ -115,7 +115,7 @@ export class Practice {
       const decide = async () => {
         const busy = new Set(commands.filter(command => command.owner === me.slot && command.status === "scheduled").flatMap(command => command.units));
         for (const pending of this.bot.pending.values()) for (const id of pending.units) busy.add(id);
-        for (const decision of chooseOrders(me.slot, factionOf(me.faction), { material: me.material, catalyst: me.catalyst }, units, nodes, busy, room.tick < PRACTICE_FIRST_PUSH_TICK)) await this.bot.order(decision.units, decision.order);
+        for (const decision of chooseOrders(me.slot, factionOf(me.faction), { material: me.material, catalyst: me.catalyst, research: me.research }, units, nodes, busy, room.tick < PRACTICE_FIRST_PUSH_TICK)) await this.bot.order(decision.units, decision.order);
       };
       if (navigator.locks) await navigator.locks.request(`practice-ai:${this.activeKey}`, { ifAvailable: true }, async lock => { if (lock) await decide(); });
       else await decide();

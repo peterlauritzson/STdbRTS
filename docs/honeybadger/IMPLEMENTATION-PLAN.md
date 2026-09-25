@@ -315,6 +315,18 @@ must name a unit; `construct` and `cancel_construction` are gone, as are the
 stall (a worker at a hub's edge could not route behind the hub), fixed in
 `navigation::advance`. Played by script; not yet by a person.
 
+## Increment K: primary-hub victory
+
+A player is out once every **completed** hub (HQ or outpost, any faction) is
+gone; a same-tick last-hub loss on both sides is a draw. Settled by the author
+2026-09-25, see [DECISIONS.md](DECISIONS.md). Research moves from the HQ unit
+to the player row so it survives the HQ (schema change: new database
+`stdbrts-hub`). The bot plays on from an outpost and attacks hubs, not only
+HQs; the in-match banner reads "Eliminated"; the refusal reads "You have no
+hubs left". `RULESET_VERSION` 10.
+
+Status: **implemented 2026-09-25** (HANDOFF step 21). Followed by step 22: every outpost trains its labour, and training is C&C style (no selection needed).
+
 ## Increment M: match history and the score screen
 
 A post-match screen with graphs. [ARCHITECTURE-AND-UX.md](ARCHITECTURE-AND-UX.md)
@@ -369,7 +381,7 @@ fog, smoke or hidden scouting without this experiment first.
 Units auto-attack enemies in range while moving (the author's requirement,
 2026-09-25). This is already true for every unit and pinned by a test. Whether
 some kinds should stop to fire instead, and whether a plain move should ignore
-enemies, is deferred to the behaviour-presets work. See
+enemies, is settled (2026-09-25): a per-kind stat, and `move` keeps firing. See
 [DECISIONS.md](DECISIONS.md).
 
 ## Ordering

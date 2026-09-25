@@ -1,7 +1,7 @@
 import type { CreepPatch, Entity, Order } from "./bindings/types";
 import { Session } from "./network";
 import { clamp, clampToMap, COLORS, countdown, VISUALS, WORLD_SIZE } from "./presentation";
-import { cargoCapacity, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isLabour, isTemporary, placementError, terrain } from "./catalog";
+import { cargoCapacity, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isCompletedHub, RALLIES, isLabour, isTemporary, placementError, terrain } from "./catalog";
 import { creepGoneTick, lifetimeFraction, offCreep } from "./creep";
 import { arriving, canTeleport, channelFraction, fieldsOf, powered, POWER_FIELD_RADIUS, recharging, SENSOR_FIELD_RADIUS, shieldsRegenerating, type Field } from "./zones";
 
@@ -130,9 +130,10 @@ export class Battlefield {
     return this.ownedSelection().filter(unit => canTeleport(unit.kind) && !arriving(unit, tick) && !recharging(unit, tick) && powered(unit.owner, unit.x, unit.y, fields));
   }
 
-  /** The unit a construction order is issued in the name of: your HQ. */
+  /** The unit a construction order is issued in the name of: your HQ, or a surviving completed hub once it has fallen. */
   issuer(): Entity | undefined {
-    return this.session.snapshot.units.find(unit => unit.owner === this.session.snapshot.me?.slot && unit.kind === "hq");
+    const owned = this.session.snapshot.units.filter(unit => unit.owner === this.session.snapshot.me?.slot);
+    return owned.find(unit => unit.kind === "hq") ?? owned.find(isCompletedHub);
   }
 
   ownedSelection(): Entity[] {
@@ -152,7 +153,7 @@ export class Battlefield {
   }
 
   home(): void {
-    const hq = this.session.snapshot.units.find(unit => unit.owner === this.session.snapshot.me?.slot && unit.kind === "hq");
+    const hq = this.issuer();
     if (hq) { this.camera.zoom = Math.max(this.camera.zoom, 0.8); this.camera.x = hq.x; this.camera.y = hq.y; this.boundCamera(); }
   }
 
@@ -164,7 +165,7 @@ export class Battlefield {
 
   arm(kind: TargetMode): void {
     const allowed = kind === "rally"
-      ? this.session.snapshot.units.some(unit => unit.kind === "hq" && unit.owner === this.session.snapshot.me?.slot)
+      ? this.session.snapshot.units.some(unit => RALLIES.includes(unit.kind) && unit.owner === this.session.snapshot.me?.slot)
       : kind.startsWith("build_") ? !!this.issuer()
       : kind === "teleport" ? this.teleporters().length > 0
       : this.ownedSelection().some(unit => kind === "repair" ? isLabour(unit.kind) : fights(unit.kind));
@@ -290,8 +291,8 @@ export class Battlefield {
       this.onSelection();
       return;
     }
-    const headquarters = owned.find(unit => ["hq", "barracks", "factory", "lab"].includes(unit.kind)) ?? units.find(unit => unit.kind === "hq" && unit.owner === me?.slot);
-    if (headquarters && (this.targeting === "rally" || (!this.targeting && owned.length === 1 && ["hq", "barracks", "factory"].includes(owned[0].kind)))) {
+    const headquarters = owned.find(unit => RALLIES.includes(unit.kind)) ?? units.find(unit => unit.kind === "hq" && unit.owner === me?.slot);
+    if (headquarters && (this.targeting === "rally" || (!this.targeting && owned.length === 1 && ["hq", "outpost", "barracks", "factory"].includes(owned[0].kind)))) {
       void this.session.order([headquarters.id], { kind: node ? "rally_gather" : "rally_move", x: clampToMap(point.x), y: clampToMap(point.y), target: node?.id ?? 0 });
       this.targeting = undefined;
       this.onSelection();

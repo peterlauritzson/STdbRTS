@@ -68,6 +68,10 @@ pub struct Player {
     /// carried into the simulation at `start_match`. There is no lobby control
     /// for it yet; that is the client increment.
     pub faction: Faction,
+    /// Completed research (`research_*` kinds). Owned by the player rather
+    /// than the HQ, so it survives the HQ under primary-hub victory. Written
+    /// only by `save_world`; cleared with the other match history.
+    pub research: Vec<String>,
     pub ready: bool,
     pub online: bool,
     pub last_order_tick: u64,

@@ -470,3 +470,69 @@ does today. Probably a per-kind stat once units differ enough. A side effect to
 decide at the same time: there is no "move and ignore enemies" order (SC2's
 plain move), so a retreat still spends its shots and never breaks off for them.
 Belongs with the behaviour presets, whose retreat preset needs an answer.
+
+**Settled by the author (2026-09-25, later).** Firing on the move becomes a
+**per-kind stat**: some kinds stop to fire, others keep firing while moving.
+Which kinds do which is not yet decided. The `move` order keeps today's
+behaviour, which the author treats as SC2's attack-move: it fires at anything
+in range. A plain "only move and run" order that holds fire may come later,
+not yet.
+
+---
+
+## 2026-09-25 — Behaviour presets deferred to late in the plan
+
+**Decision (author).** Behaviour presets (hold / advance / retreat and the
+rest in [COMMANDS-AND-BEHAVIORS.md](COMMANDS-AND-BEHAVIORS.md)) move to one of
+the last things built. Players micro everything themselves for now.
+
+**Why.** Stated by the author: how presets are created, and how players set up
+their own strategies, needs more thought first. So the questions of which
+presets come first and whether they belong to units, groups or production
+buildings stay open until then.
+
+**What still holds.** The design's bounded, server-evaluated policy model is
+still the intended shape. Only the timing changed. The M1 "order delay and
+policy" experiment waits with it.
+
+---
+
+## 2026-09-25 — Primary-hub victory
+
+**Decision (author).** A player is eliminated once they have lost every
+**completed** hub: the HQ and every outpost, for all three factions, Organic
+included. A hub still under construction does not keep a player alive. If the
+last players all lose their last hub on the same tick, the match is a draw.
+Surrender is unchanged. This replaces the one-HQ rule
+([GAME-DESIGN.md](GAME-DESIGN.md), "Victory").
+
+**Follow-on (implementation default, not asked).** Research belongs to the
+player, not to the HQ unit, so a player who loses the HQ but keeps an outpost
+keeps their upgrades, as in SC2. Research is still done at the lab, and
+research in progress is lost with the lab. The HQ cannot be rebuilt.
+
+---
+
+## 2026-09-25 — Outposts are town halls; C&C-style training
+
+**Decision (author).** Outposts work like SC2 and Warcraft town halls: every
+faction's outpost trains that faction's labour (worker, drifter, harvester) and
+takes a rally. The HQ can stay special in other ways. Before this, only the
+Organic outpost trained anything, so a player who survived on outposts could
+never rebuild labour.
+
+**Decision (author).** Training works like Command & Conquer: a train button
+on the command card needs no building selected. "Much cleaner UX."
+
+**How the building is chosen (implementation default, the author invited a
+proposal).** Per click, on the client (`src/production.ts`, `trainingSite`):
+only finished buildings that can train the unit and still have queue room,
+counting `train_*` commands still inside the command delay. A harvester also
+needs stock left at that hub. If the player has any of those selected, only
+those are used, so selecting a building still means "train here". Otherwise
+the shortest queue wins, and ties go to the lowest id. So repeated clicks
+spread over parallel barracks. The server protocol is unchanged: the client
+still names one building per `train_*` order.
+
+**Would change it.** A "primary building" per kind (C&C's primary structure),
+or choosing by camera position, if players find shortest-queue surprising.

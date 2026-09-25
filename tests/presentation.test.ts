@@ -8,9 +8,10 @@ import { pickOpponent, PRACTICE_FIRST_PUSH_TICK } from "../src/practice";
 import { mapContentHash } from "../src/maphash";
 import skirmishMap from "../shared/maps/skirmish.json";
 import { clampToMap, WORLD_SIZE } from "../src/presentation";
-import { affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, MAP_HASH, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
+import { isCompletedHub, affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, MAP_HASH, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
 import { Faction, ResourceKind, type CreepPatch, type Entity, type Node } from "../src/bindings/types";
 import { creepGoneTick, creepSecondsLeft, lifetimeFraction, offCreep } from "../src/creep";
+import { MAX_QUEUE, scheduledTraining, trainingSite } from "../src/production";
 import { ARMY, armyBuilding, armyFaction, fights, isArmy, isTemporary, takesSupply, TEMPORARY_LIFETIME } from "../src/catalog";
 
 test("client renders the same map matches are actually played on", () => {
@@ -109,7 +110,7 @@ test("resource kinds map to the currency a deposit or a load actually holds", ()
 
 function unit(id: number, owner: number, kind: string, stock = 0): Entity {
   const hp = kind === "hq" ? 1200 : 60;
-  return { id, owner, kind, x: 220, y: 220, hp, maxHp: hp, shields: 0, maxShields: 0, damagedTick: 0n, warpTick: 0n, arriveTick: 0n, order: { kind: "stop", x: 0, y: 0, target: 0 }, queue: [], cargo: 0, cargoKind: ResourceKind.Material, returning: false, nextAttack: 0n, shotTick: 0n, shotX: 0, shotY: 0, production: [], constructionRemaining: 0n, research: [], stock, expiresTick: 0n };
+  return { id, owner, kind, x: 220, y: 220, hp, maxHp: hp, shields: 0, maxShields: 0, damagedTick: 0n, warpTick: 0n, arriveTick: 0n, order: { kind: "stop", x: 0, y: 0, target: 0 }, queue: [], cargo: 0, cargoKind: ResourceKind.Material, returning: false, nextAttack: 0n, shotTick: 0n, shotX: 0, shotY: 0, production: [], constructionRemaining: 0n, stock, expiresTick: 0n };
 }
 
 function deposit(id: number, x: number, y: number, amount: number, currency: Currency = "material"): Node {
@@ -232,8 +233,8 @@ test("bot buys catalyst-gated technology as soon as both currencies cover it", (
   const rich = chooseOrders(0, "industrial", purse(300, 50), units, [], new Set());
   assert.deepEqual(rich.map(decision => decision.order.kind), ["research_weapons", "train_worker"]);
   // A technology already owned is not bought twice.
-  const done = units.map(entity => entity.kind === "hq" ? { ...entity, research: ["research_weapons", "research_armor", "research_logistics"] } : entity);
-  assert.ok(!chooseOrders(0, "industrial", purse(300, 50), done, [], new Set()).some(decision => decision.order.kind.startsWith("research_")));
+  const done = { ...purse(300, 50), research: ["research_weapons", "research_armor", "research_logistics"] };
+  assert.ok(!chooseOrders(0, "industrial", done, units, [], new Set()).some(decision => decision.order.kind.startsWith("research_")));
 });
 
 // --- Factions and the three labour units ------------------------------------
@@ -302,11 +303,11 @@ test("each faction has exactly one labour unit and cannot see the other two", ()
   }
   // The named case from the server: no Industrial player may ever produce one.
   assert.ok(!canProduce("harvester", "hq", "industrial"));
-  // Stock is per hub, so an Organic outpost has its own harvester capacity —
-  // and an Industrial outpost still trains nothing at all.
+  // Every hub is a town hall: an outpost trains its own faction's labour.
   assert.ok(canProduce("harvester", "outpost", "organic"));
-  assert.ok(!canProduce("worker", "outpost", "industrial"));
-  assert.ok(!canProduce("drifter", "outpost", "network"));
+  assert.ok(canProduce("worker", "outpost", "industrial"));
+  assert.ok(canProduce("drifter", "outpost", "network"));
+  assert.ok(!canProduce("worker", "outpost", "network"));
   // Each faction trains its own army and nobody else's.
   for (const faction of FACTIONS) {
     const [fighter, raider, heavy] = ARMY[faction];
@@ -424,9 +425,9 @@ test("the bot spends harvester stock and stops when the hub is empty", () => {
   const expanded = [hubWith(1, 0, "hq", 0), hubWith(3, 0, "outpost", 2), unit(2, 0, "harvester")];
   const fromOutpost = chooseOrders(0, "organic", purse(250), expanded, deposits, new Set()).filter(decision => decision.order.kind === "train_harvester");
   assert.deepEqual(fromOutpost.map(decision => decision.units), [[3]]);
-  // An Industrial outpost is a drop-off and nothing else: it trains nobody.
+  // An Industrial outpost trains workers and nothing else.
   const industrial = [unit(1, 0, "hq"), unit(3, 0, "outpost"), unit(2, 0, "worker")];
-  assert.ok(chooseOrders(0, "industrial", purse(250), industrial, deposits, new Set()).every(decision => !decision.units.includes(3)));
+  assert.ok(chooseOrders(0, "industrial", purse(250), industrial, deposits, new Set()).filter(decision => decision.units.includes(3)).every(decision => decision.order.kind === "train_worker"));
 });
 
 test("every faction still builds, mines catalyst and attacks, so it plays as an opponent", () => {
@@ -453,6 +454,21 @@ test("every faction still builds, mines catalyst and attacks, so it plays as an 
     // Held, the same army stays home: practice holds the first push.
     assert.ok(!chooseOrders(0, faction, purse(50), army, [], new Set(), true).some(decision => decision.order.kind === "attack_move"), faction);
   }
+});
+
+test("primary-hub victory: the bot fights on from an outpost and attacks enemy hubs, not only the HQ", () => {
+  assert.ok(isCompletedHub(unit(1, 0, "outpost")));
+  assert.ok(!isCompletedHub({ ...unit(1, 0, "outpost"), constructionRemaining: 5n }));
+  assert.ok(!isCompletedHub(unit(1, 0, "barracks")));
+  // No HQ left, one finished outpost: the army still attacks, and the target
+  // is the enemy's outpost, the last thing keeping it in the match.
+  const army: Entity[] = [{ ...unit(1, 0, "outpost"), x: 300 }, ...[2, 3, 4, 5].map(id => unit(id, 0, "soldier")), { ...unit(9, 1, "outpost"), x: 1380, y: 1380 }];
+  const attack = chooseOrders(0, "industrial", purse(50), army, [], new Set()).find(decision => decision.order.kind === "attack_move");
+  assert.ok(attack, "a bot without its HQ never attacks");
+  assert.ok(Math.hypot(attack!.order.x - 1380, attack!.order.y - 1380) < 100);
+  // Only unfinished hubs left: nothing to play from.
+  const site: Entity[] = [{ ...unit(1, 0, "outpost"), constructionRemaining: 40n }, ...[2, 3, 4, 5].map(id => unit(id, 0, "soldier"))];
+  assert.deepEqual(chooseOrders(0, "industrial", purse(500), site, [], new Set()), []);
 });
 
 test("the practice opponent is the picked faction, or any of the three at random", () => {
@@ -487,8 +503,8 @@ test("the bot never asks a hub for an army unit, and a saturated hub orders noth
     }
     assert.ok(trained.some(decision => ARMY[faction].slice(0, 2).map(kind => `train_${kind}`).includes(decision.order.kind) && decision.units[0] === 20), faction);
     assert.ok(trained.some(decision => decision.order.kind === `train_${kind}` && decision.units[0] === 1), faction);
-    // Only an Organic outpost trains anything, and only its own labour.
-    assert.equal(trained.some(decision => decision.units[0] === 21), faction === "organic", faction);
+    // An outpost trains its own labour and never an army.
+    assert.ok(trained.filter(decision => decision.units[0] === 21).every(decision => decision.order.kind === `train_${kind}`), faction);
 
     // A saturated workforce: every hub goes quiet, the barracks does not.
     const saturated: Entity[] = [...grown, ...Array.from({ length: 20 }, (_, index) => gathering(100 + index, kind))];
@@ -852,4 +868,35 @@ test("the bot adds a second barracks once its factory is under way", () => {
   const base: Entity[] = [hubWith(1, 0, "hq", HUB_STOCK_CAP), ...[2, 3, 4, 5, 6, 7].map(id => unit(id, 0, "worker")), unit(8, 0, "barracks"), unit(9, 0, "factory"), ...[10, 11, 12].map(id => unit(id, 0, "soldier"))];
   const decisions = chooseOrders(0, "industrial", purse(400, 0), [...base, unit(13, 0, "outpost")], [deposit(1, 300, 300, 4000)], new Set());
   assert.ok(decisions.some(decision => decision.order.kind === "build_barracks"), JSON.stringify(decisions.map(decision => decision.order.kind)));
+});
+
+// --- C&C-style training -----------------------------------------------------
+
+test("training picks its own building: a selected one first, else the shortest queue", () => {
+  const busy = (entity: Entity, count: number): Entity => ({ ...entity, production: Array.from({ length: count }, () => ({ kind: "soldier", finishTick: 100n })) }) as Entity;
+  const owned: Entity[] = [unit(1, 0, "hq"), busy(unit(2, 0, "barracks"), 2), busy(unit(3, 0, "barracks"), 1), unit(4, 0, "outpost")];
+  const none = new Map();
+  // Nothing selected: the barracks with the shorter queue takes the soldier,
+  // and labour goes to the lower-id idle hub.
+  assert.equal(trainingSite("soldier", "industrial", owned, new Set(), none, [])?.id, 3);
+  assert.equal(trainingSite("worker", "industrial", owned, new Set(), none, [])?.id, 1);
+  // A scheduled order counts against its building before it lands.
+  assert.equal(trainingSite("soldier", "industrial", owned, new Set(), new Map([[3, { total: 2, harvesters: 0 }]]), [])?.id, 2);
+  // Selecting a building still means "train here", even with a longer queue.
+  assert.equal(trainingSite("soldier", "industrial", owned, new Set([2]), none, [])?.id, 2);
+  // A selection that cannot train the unit is ignored rather than refused.
+  assert.equal(trainingSite("worker", "industrial", owned, new Set([2]), none, [])?.id, 1);
+  // Full queues, unfinished buildings and missing buildings give no site.
+  assert.equal(trainingSite("soldier", "industrial", [busy(unit(2, 0, "barracks"), MAX_QUEUE)], new Set(), none, []), undefined);
+  assert.equal(trainingSite("soldier", "industrial", [{ ...unit(2, 0, "barracks"), constructionRemaining: 3n }], new Set(), none, []), undefined);
+  assert.equal(trainingSite("siege", "industrial", owned, new Set(), none, []), undefined);
+  // Harvesters go only where stock remains, net of harvesters already scheduled.
+  const hives: Entity[] = [hubWith(1, 0, "hq", 1), hubWith(4, 0, "outpost", 2)];
+  assert.equal(trainingSite("harvester", "organic", hives, new Set(), new Map([[1, { total: 1, harvesters: 1 }]]), [])?.id, 4);
+});
+
+test("scheduled training is counted per building from this player's scheduled commands", () => {
+  const row = (owner: number, status: string, units: number[], kind: string) => ({ owner, status, units, order: { kind } });
+  const counts = scheduledTraining([row(0, "scheduled", [5], "train_soldier"), row(0, "scheduled", [5], "train_harvester"), row(0, "executed", [5], "train_soldier"), row(1, "scheduled", [5], "train_soldier"), row(0, "scheduled", [5], "move")], 0);
+  assert.deepEqual(counts.get(5), { total: 2, harvesters: 1 });
 });

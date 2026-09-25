@@ -3,11 +3,12 @@ import { createIcons, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, Zo
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
 import { COLORS, countdown, VISUALS } from "./presentation";
-import { addCost, ARMY, armyFaction, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, type Cost, type FactionName } from "./catalog";
+import { addCost, isCompletedHub, ARMY, armyFaction, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, type Cost, type FactionName } from "./catalog";
 import { Practice, type PracticeOpponent } from "./practice";
 import { Feedback } from "./feedback";
 import { ScoreScreen, type ScorePlayer } from "./scorescreen";
-import { BUILDING_FACTION, canTrainAt, powered, type Field } from "./zones";
+import { BUILDING_FACTION, powered, type Field } from "./zones";
+import { scheduledTraining, trainingSite } from "./production";
 
 function element<Type extends HTMLElement = HTMLElement>(id: string): Type {
   const value = document.getElementById(id);
@@ -184,14 +185,8 @@ function myFaction(): FactionName {
   return me ? factionOf(me.faction) : "industrial";
 }
 
-/**
- * Which buildings can produce something for this faction. Organic gains the
- * outpost, because harvester stock is held per hub and an expansion therefore
- * has its own labour capacity to spend.
- */
-function producerKinds(faction = myFaction()): string[] {
-  return faction === "organic" ? ["hq", "barracks", "factory", "lab", "outpost"] : ["hq", "barracks", "factory", "lab"];
-}
+/** Buildings that produce something: every hub trains labour, and the rest their army or research. */
+const PRODUCER_KINDS = ["hq", "outpost", "barracks", "factory", "lab"];
 
 /**
  * A building that can produce something for this faction right now. Network
@@ -200,14 +195,22 @@ function producerKinds(faction = myFaction()): string[] {
  */
 function isProducer(unit: { kind: string; owner: number; x: number; y: number; constructionRemaining: bigint }, faction: FactionName, fields: readonly Field[]): boolean {
   if (!isBuilding(unit.kind) || unit.constructionRemaining !== 0n) return false;
-  return producerKinds(faction).includes(unit.kind) || (faction === "network" && powered(unit.owner, unit.x, unit.y, fields));
+  return PRODUCER_KINDS.includes(unit.kind) || (faction === "network" && powered(unit.owner, unit.x, unit.y, fields));
+}
+
+/** Where a unit bought from the command card will train, or nothing if no building can take it now. */
+function siteFor(kind: string) {
+  const me = session.snapshot.me;
+  if (!me) return undefined;
+  const owned = session.snapshot.units.filter(unit => unit.owner === me.slot);
+  return trainingSite(kind, myFaction(), owned, battlefield.selected, scheduledTraining(session.snapshot.commands, me.slot), battlefield.fields());
 }
 
 function productionBuilding() {
   const faction = myFaction();
   const fields = battlefield.fields();
   const owned = battlefield.ownedSelection().find(unit => isProducer(unit, faction, fields));
-  return owned ?? session.snapshot.units.find(unit => unit.owner === session.snapshot.me?.slot && unit.kind === "hq");
+  return owned ?? battlefield.issuer();
 }
 
 let warnedMapRoom: bigint | undefined;
@@ -292,9 +295,12 @@ for (const kind of Object.keys(TECHNOLOGIES)) element(`research-${kind}`).addEve
 document.querySelectorAll<HTMLInputElement>("input[name=mode]").forEach(input => input.addEventListener("change", () => {
   if (input.value === "select" || input.value === "order" || input.value === "pan") battlefield.mode = input.value;
 }));
+// C&C style: a train button needs no building selected. The site is picked
+// per click (see `trainingSite`), so repeated clicks spread over every
+// barracks instead of stacking on one.
 for (const kind of TRAINABLE) element(`train-${kind}`).addEventListener("click", () => {
-  const hq = productionBuilding();
-  if (hq) void session.order([hq.id], { kind: `train_${kind}`, x: 0, y: 0, target: 0 });
+  const site = siteFor(kind);
+  if (site) void session.order([site.id], { kind: `train_${kind}`, x: 0, y: 0, target: 0 });
 });
 
 function renderLobby(): void {
@@ -359,12 +365,13 @@ function renderMatch(): void {
   const { room, me, units, players } = session.snapshot;
   if (!room || !me) return;
   const owned = units.filter(unit => unit.owner === me.slot);
-  const hq = owned.find(unit => unit.kind === "hq");
+  // Primary-hub victory: a player acts while any completed hub survives.
+  const alive = owned.some(isCompletedHub);
   const producer = productionBuilding();
   const buildings = owned.filter(unit => isBuilding(unit.kind));
   const mobile = owned.filter(unit => takesSupply(unit.kind));
   const pending = owned.reduce((count, unit) => count + unit.production.filter(item => !item.kind.startsWith("research_")).length, 0);
-  const canOrder = session.ready && session.matchReady && room.state === "playing" && !!hq;
+  const canOrder = session.ready && session.matchReady && room.state === "playing" && alive;
   const balance: Cost = { material: me.material, catalyst: me.catalyst };
   const faction = myFaction();
   const labour = LABOUR[faction];
@@ -385,16 +392,19 @@ function renderMatch(): void {
   element("faction-readout").className = `readout faction ${faction}`;
   element("faction-readout").title = `You are playing ${FACTION_LABEL[faction]} / ${FACTION_ECONOMY[faction]}`;
   // Harvester stock is a real balance: free labour gated on an invisible
-  // counter would be unreadable, so the selected hub's stock reads next to
-  // material and catalyst — and only for Organic, where it means anything.
-  const stockHub = producer && isHub(producer.kind) ? producer : hq;
-  const stock = stockHub?.stock ?? 0;
+  // counter would be unreadable, so it reads next to material and catalyst,
+  // and only for Organic, where it means anything. Training picks its own hub
+  // now, so the readout is every finished hub's stock together, unless one
+  // hub is selected, in which case it is that hub's.
+  const selectedHub = producer && isHub(producer.kind) && battlefield.selected.has(producer.id) ? producer : undefined;
+  const stockHubs = selectedHub ? [selectedHub] : owned.filter(isCompletedHub);
+  const stock = stockHubs.reduce((total, hub) => total + hub.stock, 0);
   element("stock-readout").hidden = faction !== "organic";
-  element("stock").textContent = `${stock} / ${HUB_STOCK_CAP}`;
+  element("stock").textContent = `${stock} / ${HUB_STOCK_CAP * Math.max(1, stockHubs.length)}`;
   element("stock-readout").classList.toggle("empty", stock === 0);
-  element("stock-readout").title = stockHub
-    ? `Harvester stock at ${CATALOG[stockHub.kind].label} #${stockHub.id} / ${STOCK_REASON.slice(STOCK_REASON.indexOf("it regenerates"))}`
-    : STOCK_REASON;
+  element("stock-readout").title = selectedHub
+    ? `Harvester stock at ${CATALOG[selectedHub.kind].label} #${selectedHub.id} / ${STOCK_REASON.slice(STOCK_REASON.indexOf("it regenerates"))}`
+    : `Harvester stock across ${stockHubs.length} hub${stockHubs.length === 1 ? "" : "s"} / ${STOCK_REASON.slice(STOCK_REASON.indexOf("it regenerates"))}`;
   for (const kind of TRAINABLE) {
     const definition = CATALOG[kind];
     const button = element<HTMLButtonElement>(`train-${kind}`);
@@ -405,8 +415,10 @@ function renderMatch(): void {
     // A harvester is bought with hub stock and no currency at all, so its only
     // possible refusal is the stock one — quoted exactly as the server gives it.
     const stockless = kind === "harvester" && stock === 0;
-    const blocked = stockless || !canOrder || !producer || !canTrainAt(kind, producer, faction, fields) || producer.production.length >= 8 || mobile.length + pending >= 60;
-    affordability(button, definition.cost, balance, blocked, stockless ? `${definition.role} / ${STOCK_REASON}` : definition.role);
+    const site = siteFor(kind);
+    const blocked = stockless || !canOrder || !site || mobile.length + pending >= MAX_UNITS;
+    const where = site ? ` / Trains at ${CATALOG[site.kind].label} #${site.id}` : "";
+    affordability(button, definition.cost, balance, blocked, stockless ? `${definition.role} / ${STOCK_REASON}` : `${definition.role}${where}`);
   }
   const producers = buildings.filter(unit => isProducer(unit, faction, fields));
   const nextSignature = producers.map(unit => `${unit.id}:${unit.kind}`).join(",");
@@ -429,7 +441,7 @@ function renderMatch(): void {
   }
   element("building-count").textContent = `${buildings.length} / 16 structures`;
   for (const [kind, definition] of Object.entries(TECHNOLOGIES)) {
-    const researched = hq?.research.includes(`research_${kind}`);
+    const researched = me.research.includes(`research_${kind}`);
     const queued = owned.some(unit => unit.production.some(item => item.kind === `research_${kind}`));
     const button = element<HTMLButtonElement>(`research-${kind}`);
     const blocked = !canOrder || !!researched || queued || !buildings.some(unit => unit.kind === "lab" && unit.constructionRemaining === 0n && unit.production.length < 8);
@@ -439,7 +451,7 @@ function renderMatch(): void {
     affordability(button, cost, balance, blocked, `${definition.description}${researched ? " / Complete" : queued ? " / Researching" : " / Requires laboratory"}`);
     button.classList.toggle("completed", !!researched);
   }
-  element("research-status").textContent = hq?.research.length ? hq.research.map(kind => kind.slice(9)).join(" / ") : "No upgrades";
+  element("research-status").textContent = me.research.length ? me.research.map(kind => kind.slice(9)).join(" / ") : "No upgrades";
   const selection = units.filter(unit => battlefield.selected.has(unit.id));
   element("selection-title").textContent = selection.length === 1 ? VISUALS[selection[0].kind]?.label ?? selection[0].kind : selection.length ? `${selection.length} units` : "No selection";
   // Cargo is reported by the currency each carrier is actually carrying, since
@@ -493,7 +505,7 @@ function renderMatch(): void {
   element("targeting-state").hidden = !battlefield.targeting;
   element("targeting-state").textContent = targetLabel;
   for (const [id, kind] of [["attack-move", "attack_move"], ["repair", "repair"], ["set-rally", "rally"], ["teleport", "teleport"]]) element(id).setAttribute("aria-pressed", String(battlefield.targeting === kind));
-  const result = room.state === "finished" ? room.winner === -1 ? "Draw" : room.winner === me.slot ? "Victory" : "Defeat" : session.matchReady && !hq ? "HQ destroyed" : "";
+  const result = room.state === "finished" ? room.winner === -1 ? "Draw" : room.winner === me.slot ? "Victory" : "Defeat" : session.matchReady && !alive ? "Eliminated" : "";
   element("result").hidden = !result;
   element("result-title").textContent = result;
   const members = players.filter(player => player.matchId === room.id).sort((left, right) => left.slot - right.slot);
@@ -506,7 +518,7 @@ function renderMatch(): void {
       killed: { material: player.killedMaterial, catalyst: player.killedCatalyst },
     });
   }
-  // The score screen only ever replaces a *finished* match. "HQ destroyed"
+  // The score screen only ever replaces a *finished* match. "Eliminated"
   // arrives while the room is still playing and stays the small banner it was,
   // because there is still a match under it to look at.
   const finished = room.state === "finished";
@@ -538,8 +550,12 @@ function renderTimers(): void {
   const seconds = Number(room.tick / 20n);
   element("match-clock").textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
   const hq = productionBuilding();
-  element("production-queue").replaceChildren(...(hq?.production ?? []).map(item => text("span", `${item.kind} ${Math.max(0, Number(item.finishTick - room.tick) / 20).toFixed(1)}s`, "production-item")));
-  const technology = session.snapshot.units.find(unit => unit.owner === me.slot && unit.kind === "hq")?.research.map(kind => kind.slice(9)) ?? [];
+  // A selected building shows its own queue; otherwise everything in
+  // production, soonest first, because training no longer needs a selection.
+  const selectedProducer = hq && battlefield.selected.has(hq.id) ? hq : undefined;
+  const queued = selectedProducer ? selectedProducer.production : session.snapshot.units.filter(unit => unit.owner === me.slot).flatMap(unit => unit.production).filter(item => !item.kind.startsWith("research_")).sort((left, right) => Number(left.finishTick - right.finishTick));
+  element("production-queue").replaceChildren(...queued.map(item => text("span", `${item.kind} ${Math.max(0, Number(item.finishTick - room.tick) / 20).toFixed(1)}s`, "production-item")));
+  const technology = me.research.map(kind => kind.slice(9));
   const research = session.snapshot.units.filter(unit => unit.owner === me.slot).flatMap(unit => unit.production).filter(item => item.kind.startsWith("research_")).map(item => `${item.kind.slice(9)} ${Math.max(0, Number(item.finishTick - room.tick) / 20).toFixed(1)}s`);
   element("research-status").textContent = [...technology, ...research].join(" / ") || "No upgrades";
   const ours = commands.filter(command => command.owner === me.slot).sort((left, right) => left.id > right.id ? -1 : 1);

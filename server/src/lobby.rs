@@ -49,6 +49,7 @@ pub fn connected(ctx: &ReducerContext) {
             killed_material: 0,
             killed_catalyst: 0,
             faction: Faction::default(),
+            research: vec![],
             ready: false,
             online: true,
             last_order_tick: 0,
@@ -146,6 +147,7 @@ pub fn create_room(ctx: &ReducerContext, name: String, capacity: u8) -> Result<(
     player.lost_catalyst = 0;
     player.killed_material = 0;
     player.killed_catalyst = 0;
+    player.research.clear();
     player.last_order_tick = 0;
     player.orders_this_tick = 0;
     ctx.db.player().identity().update(player);
@@ -189,6 +191,7 @@ pub fn join_room(ctx: &ReducerContext, match_id: u64) -> Result<(), String> {
     player.lost_catalyst = 0;
     player.killed_material = 0;
     player.killed_catalyst = 0;
+    player.research.clear();
     player.last_order_tick = 0;
     player.orders_this_tick = 0;
     ctx.db.player().identity().update(player);

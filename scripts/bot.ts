@@ -43,7 +43,7 @@ const timer = setInterval(async () => {
     const pending = new Set([...connection.db.command.iter()].filter(command => command.matchId === room.id && command.owner === player.slot && command.status === "scheduled").flatMap(command => command.units));
     // The faction is read from the bot's own Player row — the server dealt it by
     // slot, and the bot has no more say in it than a human client does.
-    for (const decision of chooseOrders(player.slot, factionOf(player.faction), { material: player.material, catalyst: player.catalyst }, units, nodes, pending)) {
+    for (const decision of chooseOrders(player.slot, factionOf(player.faction), { material: player.material, catalyst: player.catalyst, research: player.research }, units, nodes, pending)) {
       try { await order(connection, decision.units, decision.order.kind, decision.order); }
       catch (error) { console.error(error instanceof Error ? error.message : String(error)); }
     }

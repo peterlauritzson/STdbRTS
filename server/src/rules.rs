@@ -8,7 +8,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 9;
+pub const RULESET_VERSION: u32 = 11;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -643,8 +643,11 @@ pub fn producer(kind: &str, building: &str, faction: Faction) -> bool {
         return faction == required
             && matches!(
                 (kind, building),
-                ("worker", "hq")
-                    | ("drifter", "hq")
+                // Every hub is a town hall, as in SC2 and Warcraft: an outpost
+                // trains its faction's labour, so a player who loses the HQ
+                // can still rebuild.
+                ("worker", "hq" | "outpost")
+                    | ("drifter", "hq" | "outpost")
                     // Stock is per hub, so every hub that accrues it can spend
                     // it: an Organic expansion multiplies harvester capacity.
                     | ("harvester", "hq" | "outpost")
@@ -2201,7 +2204,7 @@ mod tests {
         // armies: the roster is no longer shared. Bumped to 9 by command-card
         // construction (no builder, no cancel), shield shares by kind, and the
         // teleport cooldown.
-        assert_eq!(RULESET_VERSION, 9);
+        assert_eq!(RULESET_VERSION, 11);
         assert!(RULESET_VERSION > 0);
     }
 
@@ -2436,7 +2439,10 @@ mod tests {
         }
         // Stock is per hub and so is spending it.
         assert!(producer("harvester", "outpost", Faction::Organic));
-        assert!(!producer("worker", "outpost", Faction::Industrial));
+        // Every hub is a town hall: an outpost trains its faction's labour.
+        assert!(producer("worker", "outpost", Faction::Industrial));
+        assert!(producer("drifter", "outpost", Faction::Network));
+        assert!(!producer("worker", "outpost", Faction::Network));
         // There is no Organic builder unit: labour is the harvester alone.
         assert!(labour_faction("drone").is_none());
         assert!(stats("drone").is_none());

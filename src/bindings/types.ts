@@ -80,7 +80,6 @@ export const Entity = __t.object("Entity", {
     return __t.array(Production);
   },
   constructionRemaining: __t.u64(),
-  research: __t.array(__t.string()),
   stock: __t.u32(),
   expiresTick: __t.u64(),
   maxHp: __t.i32(),
@@ -154,6 +153,7 @@ export const Player = __t.object("Player", {
   get faction() {
     return Faction;
   },
+  research: __t.array(__t.string()),
   ready: __t.bool(),
   online: __t.bool(),
   lastOrderTick: __t.u64(),

@@ -30,6 +30,7 @@ export default __t.row({
   get faction() {
     return Faction;
   },
+  research: __t.array(__t.string()),
   ready: __t.bool(),
   online: __t.bool(),
   lastOrderTick: __t.u64().name("last_order_tick"),

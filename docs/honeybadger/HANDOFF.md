@@ -18,13 +18,17 @@ Latest: **shields and the Network power field (step 17)**, including the relay, 
 
 Latest after that: **faction armies (step 18)** and **practice opponent choice with a held first push (step 19)**, committed by the author as `2a5459b`.
 
-Latest: **command-card construction (step 20, Increment J)**, plus the unit cap at 120, a second barracks for the bot, a client-side map-hash check, the teleport cooldown, SC2-style shield shares by kind, and a fix for workers freezing behind their own hub. Committed. The build is on `stdbrts-j`.
+After that: **command-card construction (step 20, Increment J)**, plus the unit cap at 120, a second barracks for the bot, a client-side map-hash check, the teleport cooldown, SC2-style shield shares by kind, and a fix for workers freezing behind their own hub. Committed as `11602c1`. The build is on `stdbrts-j`.
+
+Latest: **primary-hub victory (step 21, Increment K)**. A player is out once every completed hub is gone, and research moved to the player row. This was a schema change, so the build is on the new database `stdbrts-hub`. Not committed.
+
+Then: **outposts as town halls and C&C-style training (step 22)**. Every outpost trains its faction's labour, and train buttons need no building selected. Same database, `RULESET_VERSION` 11. Not committed.
 
 **The next chunky steps, with the questions to ask the author first, are in [HANDOVER-2026-09-25.md](HANDOVER-2026-09-25.md).** In short:
 
 1. A person plays steps 18-20. The scripts are weak players and cannot judge the held push, drawing legibility or how construction feels.
-2. Behaviour presets (hold / advance / retreat), the reduced-micro pillar.
-3. Primary-hub victory.
+2. ~~Behaviour presets~~: deferred by the author to near the end (2026-09-25). Players micro for now. Firing on the move becomes a per-kind stat.
+3. ~~Primary-hub victory~~: done (step 21).
 4. First faction abilities.
 5. Movement and tick load at 120 units per player.
 6. Renderer pilot.
@@ -42,7 +46,7 @@ Smaller open items:
 - Every player opens with its labour **plus one fighter**: confirm that is intended.
 - Only buildings (barracks, factory, lab, turret, outpost) are shared between factions, apart from the sensor tower and the relay.
 
-Steps up to 20 are committed.
+Steps up to 20 are committed (`11602c1`). Steps 21 and 22 are not committed.
 
 ## Constraints
 
@@ -287,9 +291,62 @@ No code was changed as a result of these matches. Rerun afterwards against `stdb
 - Both scripted players lost at about 3:25-3:30 to the held push while keeping their army home.
 - **Played by a person:** not yet (author, asked 2026-09-25). The held push, drawing legibility at default zoom and how construction feels are still unjudged. The author chose to commit step 20 anyway and start behaviour presets.
 
+### Step 21: Primary-hub victory (implemented; played by script; not committed)
+
+- **Asked first (2026-09-25).** The author had not played steps 18-20. They chose to commit step 20 (`11602c1`) and deferred behaviour presets to near the end, so players micro everything for now. Settled at the same time: firing on the move becomes a per-kind stat (which kinds stop to fire is still open), and `move` keeps firing like SC2's attack-move. For victory, the author confirmed three things: only completed hubs count, a same-tick last-hub loss on both sides is a draw, and outposts count for every faction, Organic included. See [DECISIONS.md](DECISIONS.md).
+- **Server.** `World::survivors()` returns the owners of at least one completed hub. Both elimination (the cleanup of an eliminated player's units) and `resolve_outcome` use it. The old code counted HQ rows, not owners, which would have broken with several hubs. The refusal is now "You have no hubs left".
+- **Research moved to the player.** Before, it lived on the HQ entity, so losing the HQ would have wiped it. Now it is `World.research` and the `Player.research` column; `Entity.research` is removed. This is a schema change, so the database is new: `stdbrts-hub`. This was an implementation default, not asked: research survives the HQ, as in SC2. `RULESET_VERSION` 10.
+- **Client.** The in-match banner reads "Eliminated" instead of "HQ destroyed". Orders are allowed while any completed hub survives. Research status comes from the player row. The build issuer and Home fall back to a surviving completed hub.
+- **Bot.** It plays on from a completed outpost when its HQ is gone, reads research from its player row, and attacks the nearest enemy hub, not only HQs.
+- **Tests.**
+
+  | Suite | Result |
+  | --- | --- |
+  | Rust | 153 (4 new: an outpost keeps you alive and keeps research; an unfinished outpost does not; last outposts on the same tick draw; no hubs means every order is refused) |
+  | Client | 50 (1 new: the bot without an HQ attacks the enemy outpost; with only an unfinished hub it does nothing) |
+  | Integration (`stdbrts-hub`) | 12/12 (research now read from the player row) |
+  | Browser (`stdbrts-hub`) | 4/4 (checked against Playwright's `.last-run.json`) |
+  | Typecheck and build | clean |
+- **Played** by a Sonnet agent with a Playwright script through the UI, plus `spacetime sql` filtered by match; not by a person. Two practice matches, Industrial vs an Industrial bot. I checked the log, the final SQL and a screenshot myself.
+  - An outpost placed from the Build tab 490 east of the HQ finished ("Outpost complete").
+  - The bot's push killed the HQ at 03:18 (structures 2 → 1). The match continued: there was no banner, and SQL showed no HQ for slot 1 while its outpost (hp 650), two workers and a soldier remained. The notice switched to "Outpost under attack", and the outpost fell at 03:27. The result was "Defeat", with the score screen showing "Out 03:28", room `finished`, winner 0, and no rows left for slot 1. No console or page errors.
+  - The outpost stood on the bot's line of march, so the HQ-less window lasted only ~9 seconds. A longer life on an outpost was not observed.
+  - After the HQ fell, Train Worker was disabled: Industrial (and Network) labour trains only at the HQ. **Open for the author:** a player left with only outposts cannot rebuild labour, which makes surviving on an outpost nearly hollow. Should outposts of every faction train labour?
+  - The bot researched all three technologies, and they appear on its `player.research` row. The scripted player's lab never went down (first attempt: "Terrain obstructed"; second: no lab row, cause not diagnosed), so the client's research display was not exercised with a completed technology in play. The integration test covers it against the real server.
+  - Home after the HQ fell centred on the outpost, clamped by the map edge.
+
+### Step 22: Outposts train labour; C&C-style training (implemented; played by script; not committed)
+
+- **Asked by the author (2026-09-25)** after step 21's play showed that a player who keeps only outposts cannot rebuild labour. "Outposts should be like townhalls in sc and wc", and training should work like C&C, with no building selected. See [DECISIONS.md](DECISIONS.md).
+- **Server.** `rules::producer`: worker and drifter train at `hq | outpost`, as the harvester already did. Rally orders are accepted at outposts. `RULESET_VERSION` 11. No schema change; republished to `stdbrts-hub`.
+- **Client.** New `src/production.ts`:
+  - `trainingSite` picks the building per click. It uses only finished buildings that can train the unit and still have queue room, counting `train_*` commands still inside the delay; a harvester also needs stock at that hub. A selected eligible building wins; otherwise the shortest queue, and ties go to the lowest id.
+  - Train buttons are enabled whenever any building qualifies, and the tooltip names it ("Trains at Barracks #22").
+  - `#production-queue` lists all queued units, soonest first, when no producer is selected.
+  - The Organic stock readout sums every finished hub unless one is selected.
+  - Fixed: the train buttons blocked at 60 units instead of `MAX_UNITS` (120).
+- **Tests.**
+
+  | Suite | Result |
+  | --- | --- |
+  | Rust | 154 (1 new: an outpost trains a worker and takes a rally; the labour-producer test now pins outposts) |
+  | Client | 52 (2 new: `trainingSite` and `scheduledTraining`; the bot tests updated to "outposts train their own labour, never an army") |
+  | Integration (`stdbrts-hub`) | 12/12 |
+  | Browser (`stdbrts-hub`) | 4/4 twice, run by me on a quiet server |
+  | Typecheck and build | clean |
+
+  **Flake noted:** the agent's two runs of the browser suite failed "desktop and touch multiplayer flow" at its worker-purchase dip check (`game.spec.ts:330`, received 0 against >= 35) while other matches were running on the same server. The worker was trained (units 4 / 120 in the failure screenshot). A solo rerun and two full runs passed. So the material-dip assertion is load-sensitive; the product is not shown to be wrong.
+- **Played** by a Sonnet agent with a Playwright script through the UI, plus SQL, Industrial vs Industrial on `stdbrts-hub`; not by a person. I checked the claims below against its raw log.
+  - With nothing selected ("No selection"), the Worker tooltip read "... / Trains at Headquarters #5", and two clicks trained at the HQ.
+  - After the outpost was complete, 4 rapid Worker clicks split HQ 2 / outpost 1 (the 4th was refused: "Insufficient material: 50 needed, 39 available"). SQL showed outpost #9 with `production = (worker)`. The queue display read "worker 1.9s / worker 2.0s / worker 4.8s".
+  - The Soldier tooltip read "... / Trains at Barracks #22" with nothing selected. Selecting the barracks and clicking twice put both soldiers there.
+  - A rally set on the outpost showed "Rally 3184, 900", and SQL showed the outpost's order as `rally_move` to (3184, 900).
+  - Not observed: soldiers splitting across two barracks. The script's second barracks never went down; most likely a unit stood on the site at execution, but the rejection had been pruned. No console or page errors.
+- **Open:** whether shortest-queue feels right in a person's hands, or whether a C&C "primary building" per kind is wanted.
+
 ## Remaining Implementation
 
-Map/rules identity is now persisted per match, so that item is done. Still outstanding: map selection, variable map dimensions, client-side hash negotiation, dual currencies, supply subdivisions, refund eligibility, primary-hub victory, factions, secure fog, policies, new graphics, and every M1 experiment including the one in [EXPERIMENT-C-PRIVATE-STATE.md](EXPERIMENT-C-PRIVATE-STATE.md). M0's specification work — the rules that need deciding rather than coding — belongs in [DECISIONS.md](DECISIONS.md) before implementation. Do not mistake these increments for completed M0/M1.
+Map/rules identity is now persisted per match, so that item is done. Still outstanding: map selection, variable map dimensions, client-side hash negotiation, dual currencies, supply subdivisions, refund eligibility, factions, secure fog, policies, new graphics, and every M1 experiment including the one in [EXPERIMENT-C-PRIVATE-STATE.md](EXPERIMENT-C-PRIVATE-STATE.md). M0's specification work — the rules that need deciding rather than coding — belongs in [DECISIONS.md](DECISIONS.md) before implementation. Do not mistake these increments for completed M0/M1.
 
 ## Commands
 

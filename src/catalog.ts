@@ -175,6 +175,10 @@ export const canFight = (kind: string): boolean => kind !== "harvester";
 
 /** A building cargo is delivered to, and — for Organic — one that holds stock. */
 export const isHub = (kind: string): boolean => kind === "hq" || kind === "outpost";
+/** Buildings the server takes rally orders at: every producer. */
+export const RALLIES: readonly string[] = ["hq", "outpost", "barracks", "factory", "lab"];
+/** A finished HQ or outpost: what keeps a player in the match (primary-hub victory). */
+export const isCompletedHub = (unit: { kind: string; constructionRemaining: bigint }): boolean => isHub(unit.kind) && unit.constructionRemaining === 0n;
 /** Ticks between one Organic hub accruing one point of stock. */
 export const HUB_STOCK_INTERVAL_TICKS = 60;
 /** The most stock one Organic hub can hold. */
@@ -189,7 +193,8 @@ export const STOCK_REASON = `This hub has no harvester stock; it regenerates 1 e
  */
 export const canProduce = (kind: string, building: string, faction: FactionName): boolean => {
   const required = labourFaction(kind);
-  if (required) return faction === required && (kind === "harvester" ? isHub(building) : building === "hq");
+  // Every hub is a town hall: an outpost trains labour as the HQ does.
+  if (required) return faction === required && isHub(building);
   return armyFaction(kind) === faction && armyBuilding(kind) === building;
 };
 
