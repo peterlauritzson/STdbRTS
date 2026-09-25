@@ -8,7 +8,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 7;
+pub const RULESET_VERSION: u32 = 8;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -263,9 +263,9 @@ pub const ARMY_DEATH_REFUND_PERCENT: u32 = 50;
 /// of them.
 pub const CONSTRUCTION_CANCEL_REFUND_PERCENT: u32 = 75;
 
-/// Credit owed to the owner of a dying entity. Only `soldier`, `scout` and
-/// `siege` are eligible; every other kind — workers, buildings, unknown kinds —
-/// returns nothing.
+/// Credit owed to the owner of a dying entity. Only army kinds (see
+/// [`is_army`]) are eligible; every other kind — labour, buildings, temporary
+/// units, unknown kinds — returns nothing.
 pub fn death_refund(kind: &str) -> Cost {
     if !is_army(kind) {
         return Cost::ZERO;
@@ -398,7 +398,58 @@ pub fn building_faction(kind: &str) -> Option<Faction> {
 }
 
 pub fn is_army(kind: &str) -> bool {
-    matches!(kind, "soldier" | "scout" | "siege")
+    army_faction(kind).is_some()
+}
+
+// ---------------------------------------------------------------------------
+// The army: three units per faction, one role each
+// ---------------------------------------------------------------------------
+//
+// Every faction fields a basic fighter and a raider or support unit from its
+// barracks, and an anti-structure unit from its factory. The roles line up so
+// the command card reads the same for everyone; what differs is how each
+// faction fills them. Every number is **experimental**.
+//
+// * Industrial, the conventional baseline: soldier, scout, siege — unchanged.
+// * Network, "strong individual units": fewer and dearer, and every one is
+//   half shields, so it regenerates and teleports inside the field.
+// * Organic, "large counts": cheap, fast melee in numbers, and every army
+//   death on its own creep leaves a temporary unit behind.
+
+/// The faction an army unit belongs to, or `None` for anything that is not
+/// army. Nobody can train another faction's army.
+pub fn army_faction(kind: &str) -> Option<Faction> {
+    match kind {
+        "soldier" | "scout" | "siege" => Some(Faction::Industrial),
+        "sentinel" | "skimmer" | "lancer" => Some(Faction::Network),
+        "swarmer" | "spitter" | "crusher" => Some(Faction::Organic),
+        _ => None,
+    }
+}
+
+/// The faction any trainable unit belongs to: labour or army.
+pub fn unit_faction(kind: &str) -> Option<Faction> {
+    labour_faction(kind).or_else(|| army_faction(kind))
+}
+
+/// Each faction's basic fighter: the unit every slot opens the match with,
+/// beside its two labour units.
+pub const fn basic_fighter(faction: Faction) -> &'static str {
+    match faction {
+        Faction::Industrial => "soldier",
+        Faction::Network => "sentinel",
+        Faction::Organic => "swarmer",
+    }
+}
+
+/// The building an army kind is trained at: the factory for the three
+/// anti-structure units, the barracks for everything else.
+pub fn army_building(kind: &str) -> Option<&'static str> {
+    match kind {
+        "siege" | "lancer" | "crusher" => Some("factory"),
+        _ if is_army(kind) => Some("barracks"),
+        _ => None,
+    }
 }
 
 /// A hub: a building cargo can be delivered to, and — for Organic — a building
@@ -590,9 +641,9 @@ pub const HUB_STOCK_CAP: u32 = 7;
 
 /// Can `faction` train `kind` at `building`?
 ///
-/// Faction-aware for labour only: each faction trains exactly its own labour
-/// unit and no other's, so an Industrial player cannot train a harvester at any
-/// building. The army roster stays shared.
+/// Faction-aware for labour and army alike: each faction trains exactly its own
+/// units and no other's, so an Industrial player cannot train a harvester or a
+/// sentinel at any building.
 pub fn producer(kind: &str, building: &str, faction: Faction) -> bool {
     if let Some(required) = labour_faction(kind) {
         return faction == required
@@ -609,19 +660,24 @@ pub fn producer(kind: &str, building: &str, faction: Faction) -> bool {
     // makes it: no barracks, no soldiers. That is what gives a barracks a
     // reason to exist and what makes teching a real commitment rather than a
     // convenience, and it is why the opening is an economic decision.
-    matches!(
-        (kind, building),
-        ("soldier", "barracks") | ("scout", "barracks") | ("siege", "factory")
-    )
+    army_faction(kind) == Some(faction) && army_building(kind) == Some(building)
 }
 
+/// The factory units' multiplier against structures.
+pub const ANTI_STRUCTURE_MULTIPLIER: i32 = 3;
+
 pub fn attack_damage(kind: &str, target: &str, damage: i32) -> i32 {
-    if kind == "siege" && is_building(target) {
-        damage * 3
+    let fast_raider = matches!(target, "scout" | "skimmer");
+    if matches!(kind, "siege" | "lancer" | "crusher") && is_building(target) {
+        damage * ANTI_STRUCTURE_MULTIPLIER
     } else if kind == "siege" && target == "scout" {
         damage / 2
-    } else if kind == "soldier" && target == "scout" {
+    } else if kind == "soldier" && fast_raider {
+        // The basic fighter counters a raider, its own faction's or not.
         damage * 2
+    } else if kind == "skimmer" && is_labour(target) {
+        // The Network raider exists to hunt labour.
+        damage * 3
     } else {
         damage
     }
@@ -741,6 +797,71 @@ pub fn stats(kind: &str) -> Option<Stats> {
             cooldown: 0,
             cost: Cost::ZERO,
             training_ticks: 40,
+        }),
+        // Network. A sentinel is a soldier and a half: dearer, tougher,
+        // harder-hitting, and half of it is shields that come back.
+        "sentinel" => Some(Stats {
+            hp: 220,
+            speed: 100.0,
+            range: 115.0,
+            damage: 26,
+            cooldown: 13,
+            cost: Cost::material(150),
+            training_ticks: 130,
+        }),
+        // Network raider: the fastest unit in the game, fragile, and triple
+        // damage against labour. Pairs with teleport for hit-and-run.
+        "skimmer" => Some(Stats {
+            hp: 70,
+            speed: 200.0,
+            range: 75.0,
+            damage: 8,
+            cooldown: 8,
+            cost: Cost::material(90),
+            training_ticks: 70,
+        }),
+        // Network anti-structure: long range, slow, triple against buildings.
+        "lancer" => Some(Stats {
+            hp: 240,
+            speed: 75.0,
+            range: 250.0,
+            damage: 36,
+            cooldown: 40,
+            cost: Cost::new(175, 75),
+            training_ticks: 180,
+        }),
+        // Organic. A swarmer is cheap, fast melee meant to come in numbers.
+        // At exactly 50 it is the cheapest unit whose death on creep leaves a
+        // brood behind.
+        "swarmer" => Some(Stats {
+            hp: 60,
+            speed: 135.0,
+            range: 20.0,
+            damage: 7,
+            cooldown: 8,
+            cost: Cost::material(50),
+            training_ticks: 45,
+        }),
+        // Organic support: out-ranges every fighter, from behind the swarm.
+        "spitter" => Some(Stats {
+            hp: 85,
+            speed: 105.0,
+            range: 150.0,
+            damage: 15,
+            cooldown: 16,
+            cost: Cost::material(90),
+            training_ticks: 80,
+        }),
+        // Organic anti-structure: heavy melee, triple against buildings, and
+        // at 250 total cost it leaves a brute if it dies on its own creep.
+        "crusher" => Some(Stats {
+            hp: 420,
+            speed: 85.0,
+            range: 28.0,
+            damage: 30,
+            cooldown: 18,
+            cost: Cost::new(175, 75),
+            training_ticks: 180,
         }),
         "soldier" => Some(Stats {
             hp: 140,
@@ -2070,8 +2191,9 @@ mod tests {
         // Bumped to 6 by creep's effects: harvesters slowed off creep, and
         // temporary units spawned by deaths on it. Bumped to 7 by Network
         // shields and the power field: health split into two pools, and
-        // teleport and field-gated production.
-        assert_eq!(RULESET_VERSION, 7);
+        // teleport and field-gated production. Bumped to 8 by the faction
+        // armies: the roster is no longer shared.
+        assert_eq!(RULESET_VERSION, 8);
         assert!(RULESET_VERSION > 0);
     }
 
@@ -2313,17 +2435,56 @@ mod tests {
     }
 
     #[test]
-    fn the_army_roster_stays_shared_by_every_faction() {
-        for faction in FACTION_ROTATION {
-            assert!(producer("soldier", "barracks", faction));
-            assert!(producer("scout", "barracks", faction));
-            assert!(producer("siege", "factory", faction));
-            // A hub trains labour and nothing else: an army needs the building
-            // that makes it, for every faction alike.
-            assert!(!producer("soldier", "hq", faction));
-            assert!(!producer("scout", "hq", faction));
-            assert!(!producer("siege", "hq", faction));
+    fn each_faction_trains_its_own_army_and_nobody_elses() {
+        let rosters = [
+            (Faction::Industrial, ["soldier", "scout", "siege"]),
+            (Faction::Network, ["sentinel", "skimmer", "lancer"]),
+            (Faction::Organic, ["swarmer", "spitter", "crusher"]),
+        ];
+        for (faction, [fighter, raider, heavy]) in rosters {
+            assert_eq!(basic_fighter(faction), fighter);
+            assert!(producer(fighter, "barracks", faction), "{fighter}");
+            assert!(producer(raider, "barracks", faction), "{raider}");
+            assert!(producer(heavy, "factory", faction), "{heavy}");
+            assert!(!producer(heavy, "barracks", faction), "{heavy}");
+            for kind in [fighter, raider, heavy] {
+                assert!(is_army(kind), "{kind}");
+                assert_eq!(army_faction(kind), Some(faction));
+                // A hub trains labour and nothing else.
+                assert!(!producer(kind, "hq", faction), "{kind}");
+                // Nobody trains another faction's army.
+                for other in FACTION_ROTATION {
+                    if other != faction {
+                        assert!(!producer(kind, army_building(kind).unwrap(), other));
+                    }
+                }
+            }
+            assert!(stats(heavy).unwrap().cost.catalyst > 0, "{heavy} is catalyst-gated");
+            assert_eq!(attack_damage(heavy, "barracks", 10), 30, "{heavy} vs structures");
         }
+    }
+
+    #[test]
+    fn the_three_armies_lean_the_way_their_factions_do() {
+        let [sentinel, soldier, swarmer] = ["sentinel", "soldier", "swarmer"].map(|kind| stats(kind).unwrap());
+        // Network: fewer, stronger. Organic: cheaper, faster, weaker.
+        assert!(sentinel.cost.material > soldier.cost.material && sentinel.hp > soldier.hp);
+        assert!(swarmer.cost.material < soldier.cost.material && swarmer.speed > soldier.speed);
+        assert!(swarmer.hp < soldier.hp);
+        // The raiders: the skimmer is the fastest thing on the map and hunts labour.
+        let fastest = ["soldier", "scout", "siege", "sentinel", "lancer", "swarmer", "spitter", "crusher"]
+            .map(|kind| stats(kind).unwrap().speed)
+            .into_iter()
+            .fold(0.0, f32::max);
+        assert!(stats("skimmer").unwrap().speed > fastest);
+        assert_eq!(attack_damage("skimmer", "drifter", 8), 24);
+        assert_eq!(attack_damage("skimmer", "soldier", 8), 8);
+        assert_eq!(attack_damage("soldier", "skimmer", 18), 36, "a fighter counters a raider");
+        // Death on creep: a swarmer leaves a brood, a crusher a brute.
+        assert_eq!(death_spawn("swarmer"), Some(("brood", 1)));
+        assert_eq!(death_spawn("crusher"), Some(("brute", 1)));
+        // Every army unit refunds half, the new ones included.
+        assert_eq!(death_refund("lancer"), Cost::new(87, 37));
     }
 
     #[test]

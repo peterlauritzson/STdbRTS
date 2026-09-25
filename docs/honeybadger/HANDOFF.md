@@ -1,6 +1,6 @@
 # Implementation Handoff
 
-Updated: 2026-09-24. User authorized implementation and requested a handoff at every step.
+Updated: 2026-09-25. User authorized implementation and requested a handoff at every step.
 
 ## Resume Here
 
@@ -16,15 +16,18 @@ Since then: **the practice bot fields an army again (step 15)** and **Organic cr
 
 Latest: **shields and the Network power field (step 17)**, including the relay, drifter training at any powered structure, death restoration, teleport, and the Industrial sensor tower becoming buildable and visible on the client. All three factions' zones now exist in play. The playable build is on `stdbrts-shield`.
 
-Next action. The zone layer is complete, so this is ordered by what most changes how a faction plays:
+Latest after that: **faction armies (step 18)**. Each faction now trains only its own three-unit army. It passes every automated suite and was played through the scripted browser UI and in bot-vs-bot matches, but **not yet by a person, and it is not committed.** Then **step 19** added a practice opponent picker and a held first push. The build is on `stdbrts-army`.
 
-1. **Faction-specific army units.** Apart from labour and the two zone buildings, the rosters are still shared.
-2. **Network survival.** In every live run the practice bot's first push, led by a siege unit out-ranging the defenders, killed a Network HQ at 80-115s. That is balance and bot behaviour, not a shield bug, but Network needs a playtest by a person before any values move.
-3. The three open questions in [DECISIONS.md](DECISIONS.md) under shields: whether hubs should project power, whether teleport needs a cooldown or a cost, and whether the shield split should vary by kind.
+Next action:
+
+1. Step 18 was played through the scripted browser UI and in bot-vs-bot matches (see "Step 18 play observations"). No bugs were found. A person still has to play it. Commit is pending the author's go-ahead.
+2. **Network survival → step 19** (opponent picker and held first push; implemented, not committed). Waiting on the author's own playtest of the held push. Softening options are recorded under step 19.
+3. *(Previous note, kept for context)* **Network survival.** In every live run the practice bot's first push, led by a siege unit out-ranging the defenders, killed a Network HQ at 80-115s. The step 18 matches changed the picture: a scripted Industrial player died just as fast (91-97s), and the Network bot beat the Industrial bot (102s) and the Organic bot (156s). So the early death looks like the human side's opening against an always-Industrial bot, not Network weakness. Network needs a playtest by a person before any values move.
+4. The two remaining open questions in [DECISIONS.md](DECISIONS.md) under shields: whether teleport needs a cooldown or a cost, and whether the shield split should vary by kind. (Hubs projecting power was confirmed 2026-09-25.)
 
 **Increment F, the autonomous extractor, is explicitly deprioritised** — the author called it one of the least important mechanics. Do not pick it up because it looks cheap.
 
-Before **Increment J (command-card construction)**, three questions need answers that are not guessable: whether an unfinished building can be cancelled for a refund and on what terms, whether construction can be interrupted now that no worker is attached, and whether build radius still means anything when nothing walks to the site.
+**Increment J (command-card construction)** is unblocked. Settled 2026-09-25: no cancellation and no refund (remove `cancel_construction`, the 75% refund and the client button; the browser practice test currently cancels an outpost and must change); no interruption; build radius stays part of placement; no worker or builder unit takes part. C&C style. See [DECISIONS.md](DECISIONS.md), 2026-09-22.
 
 Also open: raise `MAX_UNITS` if wanted (120/player is measured-safe on the 1600 map, 240 is not; on crossfire 60 is 21.5ms p95 and 120 is over), and the **Increment C** private-state experiment — which the zone rewrite no longer blocks, since none of the three real zones obstructs sight.
 
@@ -37,10 +40,10 @@ Smaller open items:
 - Unit costs, stats and resource amounts are all still first-pass experimental values, including the sensor tower's 450 radius and 30% speed bonus.
 - The zone field is rebuilt every tick and cost +25% on p95 for one zone type with few sources. Creep's added tick cost could not be separated from noise on a busy machine; rerun `bench_load` on an idle one before quoting it. The `creep_patch` read (an index scan per tick) is unmeasured.
 - Practice-bot observations not acted on: Network was eliminated before 120s in both live three-way runs (balance or combat, not the bot); Industrial floats ~3.4k material at 180s, which a second barracks would fix; every player opens with its labour **plus one soldier** — confirm that is intended.
-- The rosters are still shared apart from the sensor tower and the relay. Faction-specific units beyond labour are not started.
+- Since step 18 every faction has its own army. Only buildings (barracks, factory, lab, turret, outpost) are still shared, apart from the sensor tower and the relay.
 - After placing a building, the builder stays selected, so placing a second building at once pulls the same labourer off the first site. Existing behaviour, found while playing step 17; press Escape between placements.
 
-Work up to step 16 is committed (`c43ed34`). Step 17 is not committed.
+Steps up to 17 are committed (`bb224a2`). Steps 18 and 19 are not committed; the author asked to wait.
 
 ## Constraints
 
@@ -222,6 +225,50 @@ The zone tests failed four times before passing, and every failure was the test,
 - Evidence: **144 Rust tests** (9 new, covering the split, absorption and spill-over, regeneration timing inside and outside a field, restoration reach, field-gated training including an unfinished relay, power ownership and concept participation, the teleport channel and arrival, refusals, damage cancelling a channel, and shields rising with construction); **client 45/45** (3 new); **integration 12/12** and **browser 4/4** against `stdbrts-shield`; typecheck, build and the WASM check pass.
 - **Played through the browser** in four Network practice matches, using the Build and Production tabs, map clicks, box select and the T hotkey. Observed: the HQ field drawn at match start; relay placed, built and selected, reading "150 HP / 150 shields"; the producer list offering the relay and Train Drifter enabled there; a drifter trained there and mining at once; the soldier channelling, then standing beside the relay. In a defended match, rows read straight from the database showed the HQ's shields falling 600 → 420 → 186 with hit points at 600/600; a rise from 186 to 251 in 107 ticks, which regeneration alone cannot give and which matches two nearby soldier deaths restoring 28 each; and hit points falling only once shields reached 0.
 - **Not verified**: a teleport with the enemy firing on the channel (covered by a unit test only); a relay killed mid-channel stranding a unit; the minimap field ring by eye; touch input for teleport; Network surviving past two minutes against the practice bot, which it never did. The bench was not rerun.
+
+### Step 18: Faction armies (implemented 2026-09-25; played through scripted browser UI, not yet by a person)
+
+- The army roster is no longer shared. `rules::army_faction`, `unit_faction`, `basic_fighter` and `army_building` define it, and `producer` is faction-aware for the army as it already was for labour. Refusals name the faction ("Only the organic faction can train a soldier; you are playing industrial").
+
+  | | Fighter (barracks) | Raider/support (barracks) | Anti-structure (factory) |
+  |---|---|---|---|
+  | Industrial | soldier (unchanged) | scout (unchanged) | siege (unchanged) |
+  | Network | **sentinel**: 150 mat, 220 health (110 + 110), range 115, dmg 26/13 ticks | **skimmer**: 90 mat, 70 health, speed 200 (fastest), dmg 8, **x3 vs labour** | **lancer**: 175 + 75, 240 health, range 250, dmg 36/40, **x3 vs buildings** |
+  | Organic | **swarmer**: 50 mat, 60 health, speed 135, melee, dmg 7/8 | **spitter**: 90 mat, 85 health, range 150, dmg 15/16 | **crusher**: 175 + 75, 420 health, melee, dmg 30/18, **x3 vs buildings** |
+
+- Also: the soldier's x2 counter now covers the skimmer as well as the scout. Every slot opens with its own faction's fighter instead of the shared soldier. The new kinds fall straight into the existing rules: refunds via `is_army`, creep death spawns by cost (a swarmer leaves a brood, a crusher a brute), and Network shields via `vitals`. The "fighting units" refusal text no longer lists unit names.
+- Client: `ARMY`, `armyFaction`, `armyBuilding` in `catalog.ts`; only your own faction's training buttons are shown; new silhouettes for all six units in `battlefield.ts`; the practice bot trains its faction's fighter, raider and heavy unit.
+- `RULESET_VERSION` 8. No schema change, so no binding regeneration. Published to the new database `stdbrts-army`.
+- Evidence: **146 Rust tests**, including a new roster test, a lean test (Network dearer and tougher, Organic cheaper and faster, the skimmer fastest) and an opening-fighter test; **client 46/46**; **browser 4/4** (the Network practice test now uses the lancer and skimmer buttons and checks that other factions' units are hidden); **integration 12/12, three consecutive runs**; typecheck and build pass.
+- **Two latent integration flakes fixed**, both exposed rather than caused by the new units:
+  1. The repair test never stilled the defender's auto-mining workers, so a load landing inside the measured window broke its material arithmetic. It passed only by timing luck, and the sentinel's slower walk shifted the timing. It now stops both workers first. I confirmed with a replay of the simulation that the HQ took no extra damage.
+  2. The production test's 150ms settle raced the room tick against the player's material. It is now a 500ms poll, and the check stays exact. When it failed it also took the rally test down with it.
+- **Not verified** at implementation time: any of it by hand; balance of any kind; whether 50-material swarmers plus free broods snowball on creep.
+
+#### Step 18 play observations (2026-09-25)
+
+How it was played: one practice match per faction through the browser UI on `stdbrts-army`, driven by a Playwright script (normal clicks and hotkeys, state checked with `spacetime sql`), **not by a person**. Two headless bot-vs-bot matches were also run with the repo's own `chooseOrders` policy (a scratch script, not committed), because practice mode cannot show a non-Industrial bot.
+
+Observed directly:
+
+- **The practice bot is always Industrial.** It keeps slot 0 and its dealt faction (`src/practice.ts`), so in a practice match you only ever meet soldier, scout and siege. In all three matches it fielded only Industrial kinds. This is existing design, not a step 18 bug, but it means **no player has faced a Network or Organic army.**
+- **Non-Industrial bots field their own army.** Network vs Organic (bot vs bot): Network built drifter, sentinel, skimmer and lancer; Organic built harvester, swarmer, spitter and crusher. No other faction's kinds appeared. Network vs Industrial: the same clean split.
+- **Creep death spawns work.** In the Network vs Organic match: 26 broods and 7 brutes, every brute right after a crusher death (for example, crusher #68 died at 82s and brute #82 spawned at the same moment), and the broods after swarmer and spitter deaths near the Organic HQ. Swarmers killed at 51-66s, before the fight reached the creep, left nothing, which is correct. In the Organic practice match a **spitter** (cost 90) left a brood. The rule is by cost, not by kind, as documented.
+- **Skimmer vs labour.** A worker lost exactly 24 in one hit (8 x 3) in Network vs Industrial. The other worker hits were 26 (sentinel). In the Network practice match, a 2-sentinel, 2-skimmer raid on the bot's worker line was killed before landing a hit.
+- **Drawings at default zoom (0.8)**: units are about 15px. Magnified crops of default-zoom screenshots show distinct silhouettes (skimmer dart, sentinel gem, drifter ring, harvester seed, swarmer dome). At native size, owner colour carries most of the reading and the kind is hard to tell at a glance. The lancer, spitter and crusher were not captured close enough to judge.
+- **UI**: each faction's production card shows only its own units (Network: Drifter/Sentinel/Skimmer/Lancer; Organic: Harvester/Swarmer/Spitter/Crusher). No console or page errors in any match. The score screen renders. A "Headquarters under attack" toast stays over the Organic score screen (cosmetic).
+- **Outcomes**: all three practice matches were lost to the bot's first push at 91-97s, with the scripted player's small opening (barracks, 2 fighters and 2 raiders), including the Industrial mirror. The scripted player never sent labour to catalyst, so it never reached a factory. That is a player-script limitation, not a game bug; the bots reach factories in every match. Bot vs bot: **Network beat Organic at 156s and Industrial at 102s.** One match each is not balance evidence, but it does not support "Network is weak" as a faction-level problem. The earlier early-death reading comes from weak human-side openings against the bot.
+
+No code was changed as a result of these matches. Rerun afterwards against `stdbrts-army`: Rust 146/146, client 46/46, integration 12/12, browser 4/4.
+
+### Step 19: Practice opponent choice and a held first push (in progress 2026-09-25; not committed)
+
+- The author chose "both" for Network survival: let practice meet every faction, and make the first push gentler.
+- **Opponent picker.** The lobby has an "Opponent" select (`#practice-opponent`: Random, Industrial, Network or Organic; default Random, remembered in `stdbrts:v1:practice-opponent`). The bot still takes slot 0 and sets the picked faction in the lobby with `set_faction`, as the human does. `pickOpponent` in `src/practice.ts`. No server change.
+- **Held first push.** `chooseOrders` takes `holdArmy`. While it is set, the army still trains and fights whatever comes into range, but is never sent across the map. Practice sets it until `PRACTICE_FIRST_PUSH_TICK` (180s). `scripts/bot.ts` does not use it.
+- Tests: client 47/47 (a hold assertion and an opponent test); browser 4/4 (the practice test now picks an Organic opponent and checks it); typecheck passes. Integration not rerun: no server or integration-facing change.
+- **Played** (Playwright through the UI, not a person): Network vs an Organic bot, and Industrial vs a Network bot. The lobby picker defaults to Random and survives a reload. Each bot's faction matched the pick and it fielded only its own kinds, up to crusher and lancer. No bot unit came near the human HQ before 3:00: first contact at 212s, and the HQs fell at 222s and 209s. No console or page errors.
+- **The hold alone does not make the push gentler.** At 3:00 the bot's army was 36 units (12 swarmer, 9 spitter, 15 crusher) and 29 units (9 sentinel, 8 skimmer, 12 lancer). The scripted player had 5 units and never reached a factory, so it is not a fair stand-in for a person. Still, three minutes of banking makes the first wave bigger, not smaller. The author chose to keep only the 3:00 hold for now and judge the wave by hand before softening it further (options offered: cap the army during the hold, send a partial first wave, or keep heavy units home for the first push).
 
 ## Remaining Implementation
 

@@ -1,10 +1,10 @@
 import "../styles.css";
-import { createIcons, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles } from "lucide";
+import { createIcons, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets } from "lucide";
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
 import { COLORS, countdown, VISUALS } from "./presentation";
-import { addCost, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, parseFaction, PRACTICE_SLOT, STOCK_REASON, type Cost, type FactionName } from "./catalog";
-import { Practice } from "./practice";
+import { addCost, ARMY, armyFaction, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, parseFaction, PRACTICE_SLOT, STOCK_REASON, type Cost, type FactionName } from "./catalog";
+import { Practice, type PracticeOpponent } from "./practice";
 import { Feedback } from "./feedback";
 import { ScoreScreen, type ScorePlayer } from "./scorescreen";
 import { BUILDING_FACTION, canTrainAt, powered, type Field } from "./zones";
@@ -68,11 +68,12 @@ function affordability(button: HTMLButtonElement, cost: Cost, balance: Cost, blo
  * could ever make them buildable and the server refuses them by name.
  */
 const LABOUR_KINDS = ["worker", "drifter", "harvester"];
-const TRAINABLE = [...LABOUR_KINDS, "soldier", "scout", "siege"];
+/** Each faction's labour and army; a player only ever sees their own. */
+const TRAINABLE = [...LABOUR_KINDS, ...FACTIONS.flatMap(faction => ARMY[faction])];
 for (const kind of TRAINABLE) {
   const definition = CATALOG[kind];
   const button = catalogButton(`train-${kind}`, definition.label, definition.cost, definition.seconds, definition.icon, definition.role);
-  if (LABOUR_KINDS.includes(kind)) button.hidden = true;
+  button.hidden = true;
   element("training-buttons").append(button);
 }
 /**
@@ -89,7 +90,7 @@ for (const kind of BUILDABLE) {
   element("building-buttons").append(button);
 }
 for (const [kind, definition] of Object.entries(TECHNOLOGIES)) element("research-buttons").append(catalogButton(`research-${kind}`, definition.label, RESEARCH_COST, RESEARCH_SECONDS, definition.icon, definition.description));
-createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles } });
+createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets } });
 const session = new Session();
 const practice = new Practice(session);
 const feedback = new Feedback(message => session.onNotice(message));
@@ -105,13 +106,14 @@ database.value = query.get("database") ?? import.meta.env.VITE_STDB_DATABASE ?? 
 callsign.value = localStorage.getItem("stdbrts:v2:callsign") ?? "Commander";
 const factionPicker = element<HTMLSelectElement>("faction");
 const practiceFaction = element<HTMLSelectElement>("practice-faction");
+const practiceOpponent = element<HTMLSelectElement>("practice-opponent");
 /**
  * Both pickers offer the same three options, each naming what the faction
  * actually does rather than only what it is called: the economy line is the
  * one the lobby brief and the match readout already use, so a player never
  * reads two descriptions of the same faction.
  */
-for (const select of [factionPicker, practiceFaction]) {
+for (const select of [factionPicker, practiceFaction, practiceOpponent]) {
   for (const faction of FACTIONS) {
     const option = document.createElement("option");
     option.value = faction;
@@ -136,6 +138,17 @@ practiceFaction.addEventListener("change", () => {
   const faction = chosen(practiceFaction, factionForSlot(PRACTICE_SLOT));
   paint(practiceFaction, faction);
   localStorage.setItem(PRACTICE_FACTION_KEY, faction);
+});
+// The bot plays whatever faction is picked here, so practice can meet all
+// three armies. Random is the default and, like the player's pick, is kept.
+const PRACTICE_OPPONENT_KEY = "stdbrts:v1:practice-opponent";
+const opponentChoice = (value: string | null): PracticeOpponent => value === "random" ? "random" : parseFaction(value) ?? "random";
+const paintOpponent = (opponent: PracticeOpponent) => { practiceOpponent.value = opponent; practiceOpponent.className = `faction-select ${opponent === "random" ? "" : opponent}`.trim(); };
+paintOpponent(opponentChoice(localStorage.getItem(PRACTICE_OPPONENT_KEY)));
+practiceOpponent.addEventListener("change", () => {
+  const opponent = opponentChoice(practiceOpponent.value);
+  paintOpponent(opponent);
+  localStorage.setItem(PRACTICE_OPPONENT_KEY, opponent);
 });
 factionPicker.addEventListener("change", () => {
   // The server is the only authority: the picker repaints from the row it
@@ -218,7 +231,7 @@ function connect(): void {
 }
 
 element("connection-form").addEventListener("submit", event => { event.preventDefault(); connect(); element<HTMLDetailsElement>("connection-settings").open = false; });
-element("practice").addEventListener("click", () => { void practice.start(host.value.trim(), database.value.trim(), callsign.value, chosen(practiceFaction, factionForSlot(PRACTICE_SLOT))); });
+element("practice").addEventListener("click", () => { void practice.start(host.value.trim(), database.value.trim(), callsign.value, chosen(practiceFaction, factionForSlot(PRACTICE_SLOT)), opponentChoice(practiceOpponent.value)); });
 element("name-form").addEventListener("submit", event => {
   event.preventDefault();
   localStorage.setItem("stdbrts:v2:callsign", callsign.value.trim());
@@ -381,9 +394,9 @@ function renderMatch(): void {
   for (const kind of TRAINABLE) {
     const definition = CATALOG[kind];
     const button = element<HTMLButtonElement>(`train-${kind}`);
-    // A faction never sees another faction's labour. There is no order that
-    // would make it buildable, so a disabled button would only be noise.
-    if (LABOUR_KINDS.includes(kind)) button.hidden = kind !== labour;
+    // A faction never sees another faction's labour or army. There is no order
+    // that would make it buildable, so a disabled button would only be noise.
+    button.hidden = LABOUR_KINDS.includes(kind) ? kind !== labour : armyFaction(kind) !== faction;
     if (button.hidden) continue;
     // A harvester is bought with hub stock and no currency at all, so its only
     // possible refusal is the stock one — quoted exactly as the server gives it.

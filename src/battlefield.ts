@@ -713,6 +713,37 @@ export class Battlefield {
       context.beginPath(); context.moveTo(-5, -11); context.lineTo(-8, -18); context.moveTo(5, -11); context.lineTo(8, -18); context.stroke();
       context.strokeStyle = color; context.lineWidth = 1.5;
       for (const offset of [-5, 0, 5]) { context.beginPath(); context.moveTo(offset - 3, -5); context.lineTo(offset + 3, -5); context.stroke(); }
+    } else if (unit.kind === "sentinel") {
+      // Network fighter: a tall kite with a pale core, the angular family of
+      // the soldier but narrower and taller, so "fewer, stronger" reads.
+      context.beginPath(); context.moveTo(0, -17); context.lineTo(11, -2); context.lineTo(6, 13); context.lineTo(-6, 13); context.lineTo(-11, -2); context.closePath(); context.fill(); context.stroke();
+      context.fillStyle = "#cfefff"; context.beginPath(); context.moveTo(0, -9); context.lineTo(4, -1); context.lineTo(0, 6); context.lineTo(-4, -1); context.closePath(); context.fill();
+    } else if (unit.kind === "skimmer") {
+      // Network raider: a flat swept wing.
+      context.beginPath(); context.moveTo(0, -8); context.lineTo(14, 8); context.lineTo(0, 3); context.lineTo(-14, 8); context.closePath(); context.fill(); context.stroke();
+      context.fillStyle = "#cfefff"; context.fillRect(-2, -4, 4, 6);
+    } else if (unit.kind === "lancer") {
+      // Network artillery: a ring on a long lance.
+      context.fillStyle = "#132622"; context.beginPath(); context.arc(0, 4, 12, 0, Math.PI * 2); context.fill();
+      context.strokeStyle = color; context.lineWidth = 3; context.stroke();
+      context.fillStyle = "#cfefff"; context.strokeStyle = "#172a26"; context.lineWidth = 2;
+      context.fillRect(-3, -26, 6, 28); context.strokeRect(-3, -26, 6, 28);
+    } else if (unit.kind === "swarmer") {
+      // Organic fighter: a low hooked crescent, smaller than any trained unit.
+      context.beginPath(); context.moveTo(-9, 5); context.quadraticCurveTo(0, -16, 9, 5); context.quadraticCurveTo(0, -3, -9, 5); context.closePath(); context.fill(); context.stroke();
+      context.fillStyle = "#e6d9f2"; context.beginPath(); context.arc(0, -4, 2, 0, Math.PI * 2); context.fill();
+    } else if (unit.kind === "spitter") {
+      // Organic support: a bulb with a raised spout.
+      context.beginPath(); context.ellipse(0, 3, 9, 8, 0, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.fillStyle = "#e6d9f2"; context.strokeStyle = "#172a26"; context.lineWidth = 2;
+      context.beginPath(); context.moveTo(-3, -3); context.lineTo(0, -16); context.lineTo(3, -3); context.closePath(); context.fill(); context.stroke();
+    } else if (unit.kind === "crusher") {
+      // Organic heavy: a broad plated shell with two tusks.
+      context.beginPath(); context.moveTo(-17, 9); context.bezierCurveTo(-19, -9, -8, -16, 0, -16); context.bezierCurveTo(8, -16, 19, -9, 17, 9); context.closePath(); context.fill(); context.stroke();
+      context.strokeStyle = "#e6d9f2"; context.lineWidth = 3;
+      context.beginPath(); context.moveTo(-7, -14); context.lineTo(-11, -23); context.moveTo(7, -14); context.lineTo(11, -23); context.stroke();
+      context.strokeStyle = "#172a26"; context.lineWidth = 2;
+      for (const offset of [-7, 0, 7]) { context.beginPath(); context.moveTo(offset, -10); context.lineTo(offset, 6); context.stroke(); }
     } else if (unit.kind === "scout") {
       context.beginPath(); context.moveTo(0, -18); context.lineTo(10, 12); context.lineTo(0, 6); context.lineTo(-10, 12); context.closePath(); context.fill(); context.stroke();
       context.fillStyle = "#e9eee0"; context.fillRect(-3, -6, 6, 9);

@@ -302,9 +302,10 @@ the building raises itself, as in the reference game — see
 
 This touches `construction_remaining`, the `construct` order, builder
 assignment, the placement UI and the practice bot, so it is its own increment
-rather than a rider on another. Settle the open questions in that decision
-first: cancellation and refund terms, whether construction can be interrupted,
-and whether build radius still means anything.
+rather than a rider on another. The open questions were settled 2026-09-25: no
+cancellation (remove `cancel_construction`, its refund and the client button),
+no interruption (an accepted placement builds until done or destroyed), and
+build radius stays part of placement.
 
 Status: **not started**.
 

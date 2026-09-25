@@ -4,11 +4,12 @@ import { clamp, COLORS, countdown, formation } from "../src/presentation";
 import { buildScoreboard, formatClock, formatValue, niceMax, SAMPLE_INTERVAL_TICKS, TICKS_PER_SECOND, type Sample, type Scoreboard } from "../src/scoreboard";
 import { DASHES, MARKERS } from "../src/scorescreen";
 import { chooseOrders } from "../scripts/bot-policy";
+import { pickOpponent, PRACTICE_FIRST_PUSH_TICK } from "../src/practice";
 import { clampToMap, WORLD_SIZE } from "../src/presentation";
 import { affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
 import { Faction, ResourceKind, type CreepPatch, type Entity, type Node } from "../src/bindings/types";
 import { creepGoneTick, creepSecondsLeft, lifetimeFraction, offCreep } from "../src/creep";
-import { fights, isArmy, isTemporary, takesSupply, TEMPORARY_LIFETIME } from "../src/catalog";
+import { ARMY, armyBuilding, armyFaction, fights, isArmy, isTemporary, takesSupply, TEMPORARY_LIFETIME } from "../src/catalog";
 
 test("client renders the same map matches are actually played on", () => {
   // The server freezes this id into every new room, so a mismatch here means
@@ -297,13 +298,15 @@ test("each faction has exactly one labour unit and cannot see the other two", ()
   assert.ok(canProduce("harvester", "outpost", "organic"));
   assert.ok(!canProduce("worker", "outpost", "industrial"));
   assert.ok(!canProduce("drifter", "outpost", "network"));
-  // The army roster stays shared by all three.
+  // Each faction trains its own army and nobody else's.
   for (const faction of FACTIONS) {
-    assert.ok(canProduce("soldier", "barracks", faction), faction);
-    assert.ok(canProduce("scout", "barracks", faction), faction);
-    assert.ok(canProduce("siege", "factory", faction), faction);
+    const [fighter, raider, heavy] = ARMY[faction];
+    assert.ok(canProduce(fighter, "barracks", faction), faction);
+    assert.ok(canProduce(raider, "barracks", faction), faction);
+    assert.ok(canProduce(heavy, "factory", faction) && !canProduce(heavy, "barracks", faction), faction);
+    for (const other of FACTIONS) if (other !== faction) assert.ok(!canProduce(ARMY[other][0], "barracks", faction), `${faction} trained ${ARMY[other][0]}`);
     // A hub trains labour and nothing else: no barracks, no army.
-    assert.ok(!canProduce("soldier", "hq", faction), faction);
+    assert.ok(!canProduce(fighter, "hq", faction), faction);
     assert.ok(!canProduce("scout", "hq", faction), faction);
     assert.ok(!canProduce("siege", "hq", faction), faction);
   }
@@ -433,12 +436,20 @@ test("every faction still builds, mines catalyst and attacks, so it plays as an 
     // factory, a laboratory, siege or any technology at all.
     const gathers = decisions.filter(decision => decision.order.kind === "gather");
     assert.equal(gathers.filter(decision => decision.order.target === catalyst.id).length, 2, faction);
-    // And it attacks with the shared army roster, never with labour.
+    // And it attacks with its army, never with labour.
     const army: Entity[] = [hubWith(1, 0, "hq", HUB_STOCK_CAP), ...[2, 3, 4, 5].map(id => unit(id, 0, "soldier")), { ...unit(9, 1, "hq"), x: 1380 }];
     const attack = chooseOrders(0, faction, purse(50), army, [], new Set()).find(decision => decision.order.kind === "attack_move");
     assert.ok(attack, `${faction} never attacks`);
     assert.deepEqual(attack!.units, [2, 3, 4, 5], faction);
+    // Held, the same army stays home: practice holds the first push.
+    assert.ok(!chooseOrders(0, faction, purse(50), army, [], new Set(), true).some(decision => decision.order.kind === "attack_move"), faction);
   }
+});
+
+test("the practice opponent is the picked faction, or any of the three at random", () => {
+  assert.equal(pickOpponent("organic", 0.99), "organic");
+  assert.deepEqual([0, 0.34, 0.67, 0.999999].map(roll => pickOpponent("random", roll)), ["industrial", "network", "organic", "organic"]);
+  assert.equal(PRACTICE_FIRST_PUSH_TICK, 3600n);
 });
 
 test("the bot never asks a hub for an army unit, and a saturated hub orders nothing", () => {
@@ -465,7 +476,7 @@ test("the bot never asks a hub for an army unit, and a saturated hub orders noth
       const producer = grown.find(entity => entity.id === decision.units[0])!;
       assert.ok(canProduce(decision.order.kind.slice("train_".length), producer.kind, faction), `${faction}: ${decision.order.kind} at ${producer.kind}`);
     }
-    assert.ok(trained.some(decision => decision.order.kind === "train_soldier" && decision.units[0] === 20), faction);
+    assert.ok(trained.some(decision => ARMY[faction].slice(0, 2).map(kind => `train_${kind}`).includes(decision.order.kind) && decision.units[0] === 20), faction);
     assert.ok(trained.some(decision => decision.order.kind === `train_${kind}` && decision.units[0] === 1), faction);
     // Only an Organic outpost trains anything, and only its own labour.
     assert.equal(trained.some(decision => decision.units[0] === 21), faction === "organic", faction);
@@ -474,7 +485,7 @@ test("the bot never asks a hub for an army unit, and a saturated hub orders noth
     const saturated: Entity[] = [...grown, ...Array.from({ length: 20 }, (_, index) => gathering(100 + index, kind))];
     const late = chooseOrders(0, faction, purse(600), saturated, deposits, new Set());
     assert.ok(!late.some(decision => decision.units.includes(1) || decision.units.includes(21)), `${faction} kept a saturated hub busy`);
-    assert.ok(late.some(decision => decision.order.kind === "train_soldier"), faction);
+    assert.ok(late.some(decision => ARMY[faction].slice(0, 2).map(kind => `train_${kind}`).includes(decision.order.kind)), faction);
   }
 });
 
@@ -755,7 +766,7 @@ test("the bot does not count brood toward its unit limit", () => {
   const brood = Array.from({ length: 6 }, (_, index) => ({ ...unit(200 + index, 0, "brood"), expiresTick: 500n }));
   const units = [unit(1, 0, "hq"), { ...unit(2, 0, "barracks"), x: 400 }, ...army, ...brood];
   const decisions = chooseOrders(0, "organic", purse(5000, 5000), units, [], new Set(army.map(soldier => soldier.id)));
-  assert.ok(decisions.some(decision => decision.order.kind === "train_soldier" || decision.order.kind === "train_scout"), JSON.stringify(decisions.map(decision => decision.order.kind)));
+  assert.ok(decisions.some(decision => decision.order.kind === "train_swarmer" || decision.order.kind === "train_spitter"), JSON.stringify(decisions.map(decision => decision.order.kind)));
 });
 
 // --- Power and sensor fields, shields, teleport -------------------------------
@@ -787,7 +798,7 @@ test("a drifter trains at any finished structure in its owner's field; nothing e
   assert.ok(!canTrainAt("drifter", units[2], "network", fields), "barracks outside every field");
   assert.ok(!canTrainAt("drifter", units[3], "network", fields), "unfinished");
   assert.ok(!canTrainAt("worker", units[1], "industrial", fields), "only the drifter trains in a field");
-  assert.ok(canTrainAt("soldier", units[1], "network", fields) && !canTrainAt("soldier", units[0], "network", fields), "the army table is untouched");
+  assert.ok(canTrainAt("sentinel", units[1], "network", fields) && !canTrainAt("sentinel", units[0], "network", fields), "the army table is untouched");
 });
 
 test("shield, channel and arrival state read off the unit row", () => {
@@ -804,4 +815,19 @@ test("shield, channel and arrival state read off the unit row", () => {
   assert.equal(channelFraction(soldier, 110n), undefined);
   assert.ok(arriving({ arriveTick: 140n }, 139n) && !arriving({ arriveTick: 140n }, 140n));
   assert.ok(canTeleport("soldier") && canTeleport("drifter") && !canTeleport("relay") && !canTeleport("hq"));
+});
+
+test("each faction's army is priced and bodied as the server lists it", () => {
+  // Mirrors rules::stats for the six faction units.
+  const expected: Record<string, [number, number, number]> = {
+    sentinel: [220, 150, 0], skimmer: [70, 90, 0], lancer: [240, 175, 75],
+    swarmer: [60, 50, 0], spitter: [85, 90, 0], crusher: [420, 175, 75],
+  };
+  for (const [kind, [hp, material, catalyst]] of Object.entries(expected)) {
+    assert.deepEqual([CATALOG[kind].hp, CATALOG[kind].cost.material, CATALOG[kind].cost.catalyst], [hp, material, catalyst], kind);
+    assert.ok(isArmy(kind) && fights(kind) && takesSupply(kind), kind);
+  }
+  assert.deepEqual(FACTIONS.map(faction => ARMY[faction][2]).map(armyBuilding), ["factory", "factory", "factory"]);
+  assert.equal(armyFaction("lancer"), "network");
+  assert.equal(armyFaction("brood"), undefined);
 });

@@ -298,7 +298,7 @@ impl World {
             world.spawn(*slot, "hq", x, y);
             world.spawn(*slot, labour[0], x + 55.0, y);
             world.spawn(*slot, labour[1], x, y + 55.0);
-            world.spawn(*slot, "soldier", x + 55.0, y + 55.0);
+            world.spawn(*slot, crate::basic_fighter(*faction), x + 55.0, y + 55.0);
         }
         // Organic HQs open on a full spread of creep. Every other patch starts
         // small when its building is finished and grows from there.
@@ -719,7 +719,7 @@ impl World {
                     }
                     if order.kind == "attack_move" && !fights(&unit.kind) {
                         return Err(
-                            "Only fighting units (soldiers, scouts, siege, brood, brutes) can attack-move"
+                            "Only fighting units can attack-move; labour and buildings cannot"
                                 .into(),
                         );
                     }
@@ -752,7 +752,7 @@ impl World {
                 "hold" => {
                     if !fights(&unit.kind) {
                         return Err(
-                            "Only fighting units (soldiers, scouts, siege, brood, brutes) can hold position"
+                            "Only fighting units can hold position; labour and buildings cannot"
                                 .into(),
                         );
                     }
@@ -760,7 +760,7 @@ impl World {
                 "attack" => {
                     if !fights(&unit.kind) {
                         return Err(
-                            "Only fighting units (soldiers, scouts, siege, brood, brutes) can attack"
+                            "Only fighting units can attack; labour and buildings cannot"
                                 .into(),
                         );
                     }
@@ -800,7 +800,8 @@ impl World {
                     }
                 }
                 "train_worker" | "train_drifter" | "train_harvester" | "train_soldier"
-                | "train_scout" | "train_siege" => {
+                | "train_scout" | "train_siege" | "train_sentinel" | "train_skimmer"
+                | "train_lancer" | "train_swarmer" | "train_spitter" | "train_crusher" => {
                     let trained = training.unwrap();
                     let faction = self.faction(unit.owner);
                     // A drifter can also be trained at any finished structure
@@ -812,10 +813,10 @@ impl World {
                             .as_ref()
                             .is_some_and(|field| field.powered(unit.owner, unit.x, unit.y));
                     if !producer(trained, &unit.kind, faction) && !in_field {
-                        // A faction asking for another faction's labour is a
+                        // A faction asking for another faction's unit is a
                         // different mistake from asking the wrong building for
                         // it, and is reported as one.
-                        if let Some(required) = labour_faction(trained) {
+                        if let Some(required) = crate::unit_faction(trained) {
                             if required != faction {
                                 return Err(format!(
                                     "Only the {required} faction can train a {trained}; you are playing {faction}"
@@ -2564,8 +2565,8 @@ mod tests {
             world.spawn_temporary(0, if index % 2 == 0 { "brood" } else { "brute" }, 700.0, 700.0);
         }
         assert_eq!(world.army_value(0), army, "spawns are not army value");
-        // 59 soldiers and 30 spawns: one more soldier still fits.
-        let train = command(1, 0, barracks, "train_soldier", 0);
+        // 59 soldiers and 30 spawns: one more fighter still fits.
+        let train = command(1, 0, barracks, "train_swarmer", 0);
         assert_eq!(world.validate(&train), Ok(()));
         world.spawn(0, "soldier", 700.0, 100.0);
         assert!(world.validate(&train).unwrap_err().contains("Unit limit"));
@@ -3906,8 +3907,19 @@ mod tests {
                     "{faction} was given {other} with: {refusal}"
                 );
             }
-            // The army roster is unchanged and shared by all three.
-            assert!(world.validate(&command(3, 0, barracks, "train_soldier", 0)).is_ok());
+            // Each faction trains its own fighter and is refused another's.
+            let fighter = crate::basic_fighter(faction);
+            assert!(world
+                .validate(&command(3, 0, barracks, &format!("train_{fighter}"), 0))
+                .is_ok());
+            for other in ["soldier", "sentinel", "swarmer"] {
+                if other != fighter {
+                    let refusal = world
+                        .validate(&command(3, 0, barracks, &format!("train_{other}"), 0))
+                        .unwrap_err();
+                    assert!(refusal.contains(faction.as_str()), "{refusal}");
+                }
+            }
         }
     }
 
@@ -4564,5 +4576,26 @@ mod tests {
         let relay = unit_of(&world, id);
         assert_eq!(relay.construction_remaining, 0, "the drifter built it");
         assert_eq!(relay.shields, relay.max_shields, "finished at full shields");
+    }
+
+    #[test]
+    fn every_faction_opens_with_its_own_basic_fighter() {
+        let world = factional(&[
+            (0, Faction::Industrial),
+            (1, Faction::Network),
+            (2, Faction::Organic),
+        ]);
+        for (slot, fighter) in [(0, "soldier"), (1, "sentinel"), (2, "swarmer")] {
+            let army: Vec<&str> = world
+                .units
+                .iter()
+                .filter(|unit| unit.owner == slot && is_army(&unit.kind))
+                .map(|unit| unit.kind.as_str())
+                .collect();
+            assert_eq!(army, vec![fighter], "slot {slot}");
+        }
+        // The Network fighter is half shields like everything else Network.
+        let sentinel = world.units.iter().find(|unit| unit.kind == "sentinel").unwrap();
+        assert_eq!((sentinel.hp, sentinel.shields), (110, 110));
     }
 }

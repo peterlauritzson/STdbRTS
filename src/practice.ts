@@ -1,6 +1,19 @@
 import { Session, setFactionOn } from "./network";
 import { chooseOrders } from "../scripts/bot-policy";
-import { currencyOf, factionForSlot, factionOf, isLabour, PRACTICE_SLOT, type FactionName } from "./catalog";
+import { currencyOf, factionForSlot, factionOf, FACTIONS, isLabour, PRACTICE_SLOT, type FactionName } from "./catalog";
+
+/**
+ * The bot keeps its army at home for this long (20 ticks a second) before the
+ * first push. Without it the practice bot's first push, led by units that
+ * out-range the defenders, killed every faction's HQ at 90-115s, before a new
+ * player had seen the opponent's army. Experimental.
+ */
+export const PRACTICE_FIRST_PUSH_TICK = 180n * 20n;
+
+/** The opponent the practice picker offers: one faction, or any of the three. */
+export type PracticeOpponent = FactionName | "random";
+export const pickOpponent = (opponent: PracticeOpponent, roll = Math.random()): FactionName =>
+  opponent === "random" ? FACTIONS[Math.min(FACTIONS.length - 1, Math.floor(roll * FACTIONS.length))] : opponent;
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
   const started = Date.now();
@@ -33,10 +46,11 @@ export class Practice {
    * One click from the lobby to a running match. `faction` is the only thing
    * the human chooses on the way, and it defaults to the faction the practice
    * slot deals, so a player who does not care still clicks exactly once and
-   * gets what they got before. The bot keeps slot 0 and its own faction: a
-   * mirror is a legitimate matchup, so no choice is refused here.
+   * gets what they got before. The bot keeps slot 0 and plays `opponent`,
+   * which it sets in the lobby exactly as the human sets theirs: a mirror is a
+   * legitimate matchup, so no choice is refused here.
    */
-  async start(host: string, database: string, callsign: string, faction: FactionName = factionForSlot(PRACTICE_SLOT)): Promise<void> {
+  async start(host: string, database: string, callsign: string, faction: FactionName = factionForSlot(PRACTICE_SLOT), opponent: PracticeOpponent = factionForSlot(0)): Promise<void> {
     if (this.starting || this.human.snapshot.room || !this.human.ready) return;
     this.starting = true; this.onChange();
     this.activeKey = `stdbrts:practice:${host}:${database}`;
@@ -48,6 +62,7 @@ export class Practice {
         if (this.bot.snapshot.me?.matchId !== 0n) await connection.reducers.leaveRoom({});
         await connection.reducers.setName({ name: "Automaton" });
         await connection.reducers.createRoom({ name: "Practice / Verdant Basin", capacity: 2 });
+        await setFactionOn(connection, pickOpponent(opponent));
         await connection.reducers.setReady({ ready: true });
       });
       if (!created) throw new Error("Could not create practice operation");
@@ -100,7 +115,7 @@ export class Practice {
       const decide = async () => {
         const busy = new Set(commands.filter(command => command.owner === me.slot && command.status === "scheduled").flatMap(command => command.units));
         for (const pending of this.bot.pending.values()) for (const id of pending.units) busy.add(id);
-        for (const decision of chooseOrders(me.slot, factionOf(me.faction), { material: me.material, catalyst: me.catalyst }, units, nodes, busy)) await this.bot.order(decision.units, decision.order);
+        for (const decision of chooseOrders(me.slot, factionOf(me.faction), { material: me.material, catalyst: me.catalyst }, units, nodes, busy, room.tick < PRACTICE_FIRST_PUSH_TICK)) await this.bot.order(decision.units, decision.order);
       };
       if (navigator.locks) await navigator.locks.request(`practice-ai:${this.activeKey}`, { ifAvailable: true }, async lock => { if (lock) await decide(); });
       else await decide();

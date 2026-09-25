@@ -96,7 +96,9 @@ Candidate increments, selected by evidence:
 - Research branches that alter economy/territory/mobility rather than only adding damage percentages. Preserve the reference's meaningful tech-versus-army choice.
 - Mobile relay fields, more nuanced living-territory propagation, specialized repair/smoke interactions, production morphs, and additional combined-arms roles.
 - Air/anti-air, transport, elevation, detection/cloak, and richer siege only with matching visibility/navigation/counterplay tests. Decide individually rather than inheriting the entire SC2 ruleset.
-- Map authoring tools and additional maps once two manually authored maps establish a stable format.
+- **Editors (the author wants both, 2026-09-25):**
+  - **Map editor**: an in-browser editor over the shared, versioned map JSON, using the existing map validator, plus additional maps. Start once two hand-authored maps have fixed the format.
+  - **Unit editor**: edit unit stats (and later abilities) as validated, versioned data instead of Rust constants in `rules::stats`. This needs unit definitions to become data that the server loads and hashes, as maps already are. Do not start it until the rosters settle through playtests.
 - Experiment with gameplay command caps only if command spam or planning density actually harms the design; keep abuse limits regardless.
 
 Exit per increment: a new strategic choice with understandable counterplay, bounded CPU/network cost, and no dominant mandatory scripting or repetitive micro. Reject features that add workload without advancing the pillars.

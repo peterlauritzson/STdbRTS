@@ -121,6 +121,11 @@ test("workers repair real combat damage through delayed reducers", { timeout: 60
     await attacker.reducers.setReady({ ready: true });
     await defender.reducers.startMatch({});
     const unit = (id: number) => defender.db.unit.id.find((matchId << 32n) | BigInt(id))!.data;
+    // Labour opens already mining. A delivery landing inside the measured
+    // window would credit a whole load and break the material arithmetic
+    // below, so the defender's workers are stilled first — exactly what the
+    // Rust tests' `idle_labour` does. It used to pass by timing luck.
+    await order(defender, [2, 3], "stop");
     await order(defender, [4], "move", { x: 1100, y: 600 });
     await order(attacker, [8], "attack", { target: 1 });
     // Cross-spawn on this map is 2000 units, about 18 seconds of walking.
@@ -214,12 +219,12 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       await assert.rejects(order(host, [2], "move", { x: -10 }), /outside/);
       await assert.rejects(order(host, [2], "move", { x: Number.NaN }), /coordinates/);
       await assert.rejects(order(host, [1], "move"), /HQ/);
-      await assert.rejects(order(host, [2], "attack", { target: 5 }), /soldiers/);
+      await assert.rejects(order(host, [2], "attack", { target: 5 }), /fighting units/);
       await assert.rejects(order(host, [2], "train_soldier"), /HQ/);
       await assert.rejects(order(host, [1], "train_hq"), /Unknown/);
       await assert.rejects(order(host, [2, 2], "move"), /Duplicate/);
-      await assert.rejects(order(host, [2], "hold"), /soldiers/);
-      await assert.rejects(order(host, [2], "attack_move"), /soldiers/);
+      await assert.rejects(order(host, [2], "hold"), /fighting units/);
+      await assert.rejects(order(host, [2], "attack_move"), /fighting units/);
       await assert.rejects(order(host, [2], "rally_move"), /HQ/);
       await assert.rejects(order(host, [1], "rally_move", { x: -10 }), /outside/);
       await assert.rejects(order(host, [1], "rally_gather", { target: 999 }), /depleted/);

@@ -1,5 +1,5 @@
 import type { Entity, Node, Order } from "../src/bindings/types";
-import { affords, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isHub, isLabour, LABOUR, placementError, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, type Cost, type FactionName } from "../src/catalog";
+import { affords, ARMY, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isHub, isLabour, LABOUR, placementError, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, type Cost, type FactionName } from "../src/catalog";
 
 export interface Decision { units: number[]; order: Order }
 
@@ -60,7 +60,7 @@ function buildSite(kind: string, hq: Entity, owner: number, units: Entity[], nod
  * is paid for in hub stock, which is checked here so the bot never spends a
  * pass on orders the server would refuse.
  */
-export function chooseOrders(owner: number, faction: FactionName, balance: Cost, units: Entity[], nodes: Node[], busy: Set<number>): Decision[] {
+export function chooseOrders(owner: number, faction: FactionName, balance: Cost, units: Entity[], nodes: Node[], busy: Set<number>, holdArmy = false): Decision[] {
   const owned = units.filter(unit => unit.owner === owner);
   const hq = owned.find(unit => unit.kind === "hq");
   if (!hq) return [];
@@ -156,7 +156,10 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost,
   // hub in one pass would see the second refused. It is tracked locally here
   // exactly as currency is.
   const stockLeft = new Map(owned.filter(unit => isHub(unit.kind)).map(unit => [unit.id, unit.stock]));
-  const scouts = soldiers.filter(unit => unit.kind === "scout").length;
+  // The bot fields its own faction's army: a fighter, some raiders, and the
+  // factory's heavy unit.
+  const [fighter, raider, heavy] = ARMY[faction];
+  const scouts = soldiers.filter(unit => unit.kind === raider).length;
   // What each building would make this pass, or nothing. Every answer is
   // checked against `canProduce`, the mirror of `rules::producer`, so the bot
   // never spends an order on something the server refuses: a hub trains only
@@ -164,8 +167,8 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost,
   // one not at all), a barracks soldiers and scouts, a factory siege.
   const wantedFrom = (building: string): string | undefined => {
     const kind = isHub(building) ? (labourCount < labourTarget ? labour : undefined)
-      : building === "barracks" ? (scouts < soldiers.length / 4 ? "scout" : "soldier")
-      : building === "factory" ? "siege" : undefined;
+      : building === "barracks" ? (scouts < soldiers.length / 4 ? raider : fighter)
+      : building === "factory" ? heavy : undefined;
     return kind && canProduce(kind, building, faction) ? kind : undefined;
   };
   for (const producer of owned.filter(unit => unit.constructionRemaining === 0n && isBuilding(unit.kind) && !assigned.has(unit.id))) {
@@ -189,7 +192,10 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost,
   }
   const targets = units.filter(unit => unit.owner !== owner && unit.kind === "hq").sort((left, right) => Math.hypot(left.x - hq.x, left.y - hq.y) - Math.hypot(right.x - hq.x, right.y - hq.y));
   const idle = soldiers.filter(unit => unit.order.kind === "stop" && !busy.has(unit.id));
-  if (soldiers.length >= 4 && targets.length && idle.length) {
+  // `holdArmy` keeps the army at home: it still trains and still fights what
+  // walks into range, but it is not sent across the map. Practice sets it for
+  // the opening minutes so a new player sees an opponent before its first push.
+  if (!holdArmy && soldiers.length >= 4 && targets.length && idle.length) {
     const target = targets[0];
     const gap = Math.hypot(hq.x - target.x, hq.y - target.y);
     decisions.push({ units: idle.map(unit => unit.id), order: { kind: "attack_move", x: target.x + (hq.x - target.x) / gap * 90, y: target.y + (hq.y - target.y) / gap * 90, target: 0 } });

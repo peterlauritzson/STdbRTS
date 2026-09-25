@@ -35,6 +35,14 @@ export const CATALOG: Record<string, Definition> = {
   soldier: { label: "Soldier", hp: 140, radius: 12, cost: price(100), seconds: 5, building: false, icon: "swords", role: "Infantry / counters scouts" },
   scout: { label: "Scout", hp: 80, radius: 11, cost: price(80), seconds: 3.5, building: false, icon: "radar", role: "Fast raider / vulnerable to infantry" },
   siege: { label: "Siege", hp: 220, radius: 17, cost: price(150, 50), seconds: 8, building: false, icon: "crosshair", role: "Long range / triple damage to buildings" },
+  // Network army: fewer, stronger, half shields. Mirrors `rules::stats`.
+  sentinel: { label: "Sentinel", hp: 220, radius: 13, cost: price(150), seconds: 6.5, building: false, icon: "shield-half", role: "Network fighter / tough, hard-hitting, counters nothing in particular" },
+  skimmer: { label: "Skimmer", hp: 70, radius: 10, cost: price(90), seconds: 3.5, building: false, icon: "wind", role: "Network raider / fastest unit, triple damage to labour" },
+  lancer: { label: "Lancer", hp: 240, radius: 16, cost: price(175, 75), seconds: 9, building: false, icon: "zap", role: "Network artillery / 250 range, triple damage to buildings" },
+  // Organic army: cheap, fast, in numbers.
+  swarmer: { label: "Swarmer", hp: 60, radius: 9, cost: price(50), seconds: 2.25, building: false, icon: "bug", role: "Organic fighter / cheap fast melee, leaves a brood if it dies on your creep" },
+  spitter: { label: "Spitter", hp: 85, radius: 11, cost: price(90), seconds: 4, building: false, icon: "droplets", role: "Organic support / 150 range, fires over the swarm" },
+  crusher: { label: "Crusher", hp: 420, radius: 18, cost: price(175, 75), seconds: 9, building: false, icon: "hammer", role: "Organic heavy / melee, triple damage to buildings, leaves a brute on your creep" },
   barracks: { label: "Barracks", hp: 700, radius: 34, cost: price(150), seconds: 8, building: true, icon: "tent", role: "Soldier and scout production" },
   factory: { label: "Factory", hp: 900, radius: 34, cost: price(200, 50), seconds: 12, building: true, icon: "factory", role: "Siege production / requires barracks" },
   turret: { label: "Turret", hp: 500, radius: 30, cost: price(125), seconds: 7, building: true, icon: "shield", role: "Automatic defense / 210 range" },
@@ -57,7 +65,22 @@ export const TECHNOLOGIES = {
   logistics: { label: "Logistics", description: "40 cargo / 7 per extraction", icon: "warehouse" },
 };
 export const isBuilding = (kind: string): boolean => CATALOG[kind]?.building ?? false;
-export const isArmy = (kind: string): boolean => ["soldier", "scout", "siege"].includes(kind);
+/**
+ * Each faction's army, in command-card order: fighter and raider or support
+ * from the barracks, anti-structure from the factory. Mirrors
+ * `rules::army_faction` and `rules::army_building`.
+ */
+export const ARMY: Readonly<Record<"industrial" | "network" | "organic", readonly [string, string, string]>> = {
+  industrial: ["soldier", "scout", "siege"],
+  network: ["sentinel", "skimmer", "lancer"],
+  organic: ["swarmer", "spitter", "crusher"],
+};
+export const armyFaction = (kind: string): "industrial" | "network" | "organic" | undefined =>
+  (Object.keys(ARMY) as ("industrial" | "network" | "organic")[]).find(faction => ARMY[faction].includes(kind));
+export const isArmy = (kind: string): boolean => !!armyFaction(kind);
+/** The factory trains the third unit of each roster; the barracks trains the rest. */
+export const armyBuilding = (kind: string): string | undefined =>
+  !isArmy(kind) ? undefined : ARMY[armyFaction(kind)!][2] === kind ? "factory" : "barracks";
 
 /**
  * How long a temporary unit lives, in ticks, mirroring
@@ -155,17 +178,14 @@ export const HUB_STOCK_CAP = 7;
 export const STOCK_REASON = `This hub has no harvester stock; it regenerates 1 every ${HUB_STOCK_INTERVAL_TICKS} ticks up to ${HUB_STOCK_CAP}`;
 
 /**
- * Can `faction` train `kind` at `building`? Faction-aware for labour only —
- * mirrors `rules::producer`. The army roster is shared by all three factions,
- * so `faction` only ever decides the labour row of the command card.
+ * Can `faction` train `kind` at `building`? Mirrors `rules::producer`: each
+ * faction trains only its own labour and its own army, and an army needs the
+ * building that makes it — no barracks, no fighters.
  */
 export const canProduce = (kind: string, building: string, faction: FactionName): boolean => {
   const required = labourFaction(kind);
   if (required) return faction === required && (kind === "harvester" ? isHub(building) : building === "hq");
-  // Mirrors rules::producer: a hub trains labour only, so an army needs the
-  // building that makes it. No barracks, no soldiers.
-  if (kind === "soldier" || kind === "scout") return building === "barracks";
-  return kind === "siege" && building === "factory";
+  return armyFaction(kind) === faction && armyBuilding(kind) === building;
 };
 
 /** Which currency a deposit holds, or a worker carries, as a plain string. */

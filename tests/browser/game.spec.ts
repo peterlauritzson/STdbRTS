@@ -82,6 +82,10 @@ test("one-click practice, construction, scouts and persistent base management", 
   // practice slot deals, so the button below is still a single click for a
   // player who does not care which economy they get.
   await expect(page.locator("#practice-faction")).toHaveValue("network");
+  // The opponent is a random faction unless one is picked. Picking Organic
+  // means the bot fields an army other than Industrial's.
+  await expect(page.locator("#practice-opponent")).toHaveValue("random");
+  await page.locator("#practice-opponent").selectOption("organic");
   await page.getByRole("button", { name: "Practice vs AI", exact: true }).click();
   await expect(page.locator("#match")).toBeVisible({ timeout: 20000 });
   await expect(page.locator("#battle-players")).toContainText("Automaton");
@@ -104,8 +108,9 @@ test("one-click practice, construction, scouts and persistent base management", 
   // never covered by a score screen.
   await expect(page.locator("#scoreboard")).toBeHidden();
   await expect(page.locator("#result")).not.toHaveClass(/final/);
-  // Opponent factions are public: the bot took slot 0 and is Industrial.
-  await expect(page.locator("#battle-players")).toContainText("Industrial");
+  // Opponent factions are public: the bot took slot 0 and plays the Organic
+  // faction picked above, not the Industrial one slot 0 would be dealt.
+  await expect(page.locator("#battle-players")).toContainText("Organic");
   await expect(page.locator("#battle-players")).toContainText("Network");
   // The two currencies are reported separately and never summed: the opening
   // is 250 material and no catalyst at all.
@@ -115,9 +120,12 @@ test("one-click practice, construction, scouts and persistent base management", 
   expect(Number(await page.locator("#material").innerText())).toBeGreaterThanOrEqual(250);
   // A two-currency cost is quoted in full, and the button says which currency
   // it is short of rather than simply going grey.
-  const siege = page.getByRole("button", { name: "Siege 150 material + 50 catalyst / 8s", exact: true });
-  await expect(siege).toBeDisabled();
-  await expect(siege).toHaveAttribute("data-shortfall", "catalyst");
+  // Network trains its own army. The other factions' units are hidden.
+  const lancer = page.getByRole("button", { name: "Lancer 175 material + 75 catalyst / 9s", exact: true });
+  await expect(lancer).toBeDisabled();
+  await expect(lancer).toHaveAttribute("data-shortfall", "catalyst");
+  await expect(page.getByRole("button", { name: /^Soldier/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Swarmer/ })).toHaveCount(0);
   await page.getByRole("tab", { name: "Build", exact: true }).click();
   await page.getByRole("button", { name: "Barracks 150 material / 8s", exact: true }).click();
   await expect(page.locator("#targeting-state")).toHaveText("Place Barracks");
@@ -130,7 +138,7 @@ test("one-click practice, construction, scouts and persistent base management", 
   const barracks = await page.locator("#producer-select option").filter({ hasText: "Barracks" }).getAttribute("value");
   await page.getByLabel("Production building", { exact: true }).selectOption(barracks!);
   await expect(page.locator("#selection-title")).toHaveText("Barracks");
-  await page.getByRole("button", { name: "Scout 80 material / 3.5s", exact: true }).click();
+  await page.getByRole("button", { name: "Skimmer 90 material / 3.5s", exact: true }).click();
   await expect(page.locator("#unit-count")).toHaveText("4 / 60", { timeout: 15000 });
   await page.getByRole("button", { name: "Set rally destination", exact: true }).click();
   await worldClick(page, 2484, 419);

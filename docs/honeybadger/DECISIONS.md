@@ -245,10 +245,19 @@ goes away is *who* must be there. Construction time stays a real cost, so
 buildings are still committed in advance rather than appearing instantly, and a
 site under construction is still destructible.
 
-**Open, to settle before implementing.** Whether an unfinished building can be
-cancelled for a refund and on what terms, whether construction can be sped up or
-interrupted now that no worker is attached, and whether build radius still makes
-sense when nothing has to walk to the site.
+**Settled by the author (2026-09-25).**
+
+- **No cancellation.** Once placed, a building cannot be cancelled and nothing
+  is refunded. The current `cancel_construction` order, its 75% refund
+  (`CONSTRUCTION_CANCEL_REFUND_PERCENT`) and the client's "Cancel construction"
+  button are removed in Increment J.
+- **No interruption.** Construction cannot be paused, sped up or stopped. If the
+  placement was accepted, the building keeps building until it finishes or is
+  destroyed. This is Command & Conquer style, not StarCraft style.
+- **Build radius stays**, as part of whether a placement is acceptable. The
+  placement check is the only gate on construction.
+- No worker ever builds anything, including a builder unit: Organic labour does
+  not combine into builders.
 
 **Would overturn it.** Nothing foreseeable; this is the author's account of the
 game being converted, not a balance preference.
@@ -364,9 +373,11 @@ follows the reference game's recall, and without it a teleport would be a free
 exit from every fight inside a field. The arrival window replaces a cooldown as
 the price of the move.
 
+**Confirmed by the author (2026-09-25):** hubs and relays both project power,
+as above (not the relays-only pylon reading).
+
 **Open for the author.**
 
-- Whether all Network hubs should project, or only relays (the pylon reading).
 - Whether teleport needs a cooldown or a cost, such as the reference game's
   shield-funded recall.
 - Whether the split should vary by kind (the reference game's worker was
@@ -375,3 +386,31 @@ the price of the move.
 **Would overturn it.** Playtest evidence that teleport without a cooldown lets
 an army dodge every fight in its own base, or that 6/s regeneration makes
 Network bases untakeable. Either changes values, not the model.
+
+---
+
+## 2026-09-25 — Faction armies: three units each, one per role
+
+**Decision.** Each faction trains only its own army: a fighter and a raider or
+support unit from the barracks, and an anti-structure unit from the factory.
+Industrial keeps soldier, scout and siege unchanged. Network gets sentinel,
+skimmer and lancer: fewer, dearer, tougher, and half shields. Organic gets
+swarmer, spitter and crusher: cheap, fast, massed, and feeding creep's death
+spawns. Every slot opens with its own fighter. Stats are in `rules::stats` and
+the step 18 table in [HANDOFF.md](HANDOFF.md). All experimental. `RULESET_VERSION` 8.
+
+**Why.** GAME-DESIGN.md asks for a fighter and a specialist per faction, plus
+an anti-structure role, using original designs rather than SC2 copies. Its
+themes set the lean: Network has "strong individual units", Organic has
+"large counts", and Industrial is the conventional baseline. Giving every
+faction the same three roles keeps the command card, and the bot, uniform.
+
+**Confirmed by the author (2026-09-25):** the unit names and roles as listed.
+
+**Settled by the author (2026-09-25).** Organic labour does **not** combine into
+builders: construction comes from the command card for every faction (see
+2026-09-22). Units **will** get abilities, but in a later increment. For now
+they differ by stats only.
+
+**Would overturn it.** Play showing one faction's roster dominating, or a role
+that no faction's player ever builds.
