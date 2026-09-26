@@ -104,10 +104,10 @@ test("a tall desktop window is unchanged by the short-height rule", async ({ pag
   await page.getByRole("button", { name: "Practice vs AI", exact: true }).click();
   await expect(page.locator("#match")).toBeVisible({ timeout: 20000 });
 
-  // 1000 - 64 masthead - 50 bar - 310 deck = 576, the height the playtest
-  // recorded as comfortable. The max-height rule must not reach this window.
+  // 1000 - 44 bar - 214 deck = 742: the masthead is hidden in a match, and
+  // the battlefield keeps the height the max-height rule would take from it.
   const battlefield = (await page.locator("#battlefield").boundingBox())!;
-  expect(battlefield.height).toBe(576);
+  expect(battlefield.height).toBe(742);
   // The deck keeps its full-size minimap: the compact rule would shrink the
   // 164px declaration to 128px. It renders at 160px here because max-width
   // clamps it to the column, which is pre-existing and unrelated to the rule.

@@ -8,7 +8,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 11;
+pub const RULESET_VERSION: u32 = 12;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -972,6 +972,77 @@ pub fn can_teleport(kind: &str) -> bool {
     !is_building(kind) && stats(kind).is_some_and(|definition| definition.speed > 0.0)
 }
 
+// ---------------------------------------------------------------------------
+// Abilities: energy and cooldowns
+// ---------------------------------------------------------------------------
+//
+// SC2's model, by the author's decision (2026-09-25): a caster carries energy
+// that regenerates on its own, and each ability spends some and then recharges
+// on a cooldown. The casters are hubs: Network and Organic hubs carry energy,
+// Industrial hubs carry none because Industrial has no ability yet. Every value
+// is **experimental**.
+
+/// Energy a caster holds at most.
+pub const HUB_MAX_ENERGY: i32 = 200;
+/// Energy a hub starts with, as an SC2 caster does.
+pub const HUB_START_ENERGY: i32 = 50;
+/// One energy point every this many ticks: 0.8 per second, about SC2's 0.7875.
+pub const ENERGY_REGEN_INTERVAL_TICKS: u64 = 25;
+
+/// The most energy `kind` can hold for an owner playing `faction`, or 0 for
+/// anything that casts nothing.
+pub fn max_energy(kind: &str, faction: Faction) -> i32 {
+    if is_hub(kind) && faction != Faction::Industrial {
+        HUB_MAX_ENERGY
+    } else {
+        0
+    }
+}
+
+/// One castable ability, keyed by its order kind.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ability {
+    pub kind: &'static str,
+    pub label: &'static str,
+    pub faction: Faction,
+    pub energy: i32,
+    /// Ticks from the cast before the same caster can cast again.
+    pub cooldown_ticks: u64,
+    /// Ticks between the cast and its effect; 0 takes effect at once.
+    pub channel_ticks: u64,
+}
+
+/// Network: pull every mobile unit of yours near a point back to the casting
+/// hub. The reference game's recall, funded by shields.
+pub const RECALL: Ability = Ability {
+    kind: "recall",
+    label: "Recall",
+    faction: Faction::Network,
+    energy: 50,
+    cooldown_ticks: 1200,
+    channel_ticks: 60,
+};
+/// Units within this distance of the recall point are recalled.
+pub const RECALL_RADIUS: f32 = 200.0;
+
+/// Organic: grow a temporary patch of creep anywhere on your own creep.
+pub const BLOOM: Ability = Ability {
+    kind: "bloom",
+    label: "Bloom",
+    faction: Faction::Organic,
+    energy: 25,
+    cooldown_ticks: 200,
+    channel_ticks: 0,
+};
+/// The radius a bloom grows to.
+pub const BLOOM_RADIUS: u16 = 200;
+/// Ticks a bloom lives before it starts to recede, like a lost hub's patch.
+pub const BLOOM_LIFETIME_TICKS: u64 = 1200;
+
+pub fn ability(kind: &str) -> Option<Ability> {
+    [RECALL, BLOOM].into_iter().find(|ability| ability.kind == kind)
+}
+
 /// Can `kind` be trained at *any* finished structure standing in its owner's
 /// power field, rather than only at the buildings [`producer`] names? The
 /// drifter, and only the drifter: a Network economy expands by projecting
@@ -1360,6 +1431,11 @@ pub struct CreepPatch {
     /// Tick 0 is the bootstrap state and no simulated tick is 0, so the
     /// sentinel can never collide with a real loss.
     pub lost_tick: u64,
+    /// For a bloom, the tick it stops counting as live and starts to recede;
+    /// **0 for a patch projected by a building**, whose life is its source's.
+    /// A bloom's `source` is an id taken from the entity counter that no
+    /// entity ever has, so it can never collide with a building's patch.
+    pub expires_tick: u64,
 }
 
 impl CreepPatch {
@@ -1374,6 +1450,16 @@ impl CreepPatch {
             radius: CREEP_RATES.start.min(max_radius),
             max_radius,
             lost_tick: 0,
+            expires_tick: 0,
+        }
+    }
+
+    /// An Organic bloom: a sourceless patch that grows like any other while
+    /// `tick < expires_tick`, then lingers and recedes as a lost hub's does.
+    pub fn bloom(source: u32, owner: u8, x: f32, y: f32, expires_tick: u64) -> Self {
+        Self {
+            expires_tick,
+            ..Self::sprouting(source, owner, x, y, BLOOM_RADIUS)
         }
     }
 
@@ -2203,8 +2289,9 @@ mod tests {
         // teleport and field-gated production. Bumped to 8 by the faction
         // armies: the roster is no longer shared. Bumped to 9 by command-card
         // construction (no builder, no cancel), shield shares by kind, and the
-        // teleport cooldown.
-        assert_eq!(RULESET_VERSION, 11);
+        // teleport cooldown. 10: primary-hub victory. 11: outposts train
+        // labour. 12: hub energy, Network recall and Organic bloom.
+        assert_eq!(RULESET_VERSION, 12);
         assert!(RULESET_VERSION > 0);
     }
 

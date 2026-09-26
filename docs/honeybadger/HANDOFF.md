@@ -24,6 +24,8 @@ Latest: **primary-hub victory (step 21, Increment K)**. A player is out once eve
 
 Then: **outposts as town halls and C&C-style training (step 22)**. Every outpost trains its faction's labour, and train buttons need no building selected. Same database, `RULESET_VERSION` 11. Not committed.
 
+Latest: **controls and layout (step 24)**: full-height battlefield, hotkeys on every button, control groups, edge scroll, minimap orders, and the map painted at its real size. Client only; the build is on `stdbrts-ux`. Not committed.
+
 **The next chunky steps, with the questions to ask the author first, are in [HANDOVER-2026-09-25.md](HANDOVER-2026-09-25.md).** In short:
 
 1. A person plays steps 18-20. The scripts are weak players and cannot judge the held push, drawing legibility or how construction feels.
@@ -343,6 +345,51 @@ No code was changed as a result of these matches. Rerun afterwards against `stdb
   - A rally set on the outpost showed "Rally 3184, 900", and SQL showed the outpost's order as `rally_move` to (3184, 900).
   - Not observed: soldiers splitting across two barracks. The script's second barracks never went down; most likely a unit stood on the site at execution, but the rejection had been pruned. No console or page errors.
 - **Open:** whether shortest-queue feels right in a person's hands, or whether a C&C "primary building" per kind is wanted.
+
+### Step 23: First abilities, recall and bloom (implemented; played by script; not committed)
+
+- **Asked first (2026-09-25).** The author chose SC2-style energy plus cooldowns, Network recall and Organic temporary creep, and **no Industrial ability for now** (smoke, retreat and outpost suppression were turned down as leftovers of earlier Honey Badger versions). The caster, the costs and the shield price of recall are implementation defaults; see [DECISIONS.md](DECISIONS.md).
+- **Server.** `rules::Ability` with `RECALL` (50 energy, 60s cooldown, 3s channel, radius 200) and `BLOOM` (25 energy, 10s cooldown, instant, radius 200, 60s life); `max_energy` (Network and Organic hubs, 200, start 50, +1 per 25 ticks). `Entity` gains `energy`, `ability_ready_tick` and `cast: Option<Cast>`, kept apart from `order` so a rally survives a cast. `CreepPatch` gains `expires_tick`; a bloom is a sourceless patch whose id comes from the entity counter. `resolve_casts` runs after commands, before the creep advance: recalled units land in a spiral around the hub, inactive for `TELEPORT_ARRIVAL_TICKS`, shields 0. Abilities cannot be queued. `RULESET_VERSION` 12. Schema change: new database `stdbrts-cast`.
+- **Client.** `src/abilities.ts` (the rules mirror, `castingHub`, `castRefusal`, `onCreep`, `recallable`). Recall and Bloom buttons in the selection tool row, hotkey C, no selection needed; the tooltip names the casting hub or the reason none can cast. Targeting preview circle; a recall channel is drawn for every player (arc, dashed circle, line to the hub, countdown). A violet energy bar on hubs.
+- **Bot.** Organic blooms just inside its creep edge on the line to the nearest enemy hub. Network recalls when three or more army units are under 35% of total health and over 700 from home. The headless bot now subscribes to `creep_patch`.
+- **Tests.**
+
+  | Suite | Result |
+  | --- | --- |
+  | Rust | 159 (5 new: hub energy by faction and its cap; recall channel, landing, shields and cooldown, with the rally kept; recall refusals; a hub destroyed mid-channel; bloom placement, growth, chaining and recession) |
+  | Client | 55 (3 new: caster choice and refusals; the bot's bloom and recall decisions; creep and recall targeting) |
+  | Integration (`stdbrts-cast`) | 12/12 |
+  | Browser (`stdbrts-cast`) | 4/4 |
+  | Typecheck and build | clean |
+- **Played** by a Sonnet agent with a Playwright script through the UI, plus `spacetime sql`; not by a person. I checked one channel screenshot myself.
+  - Organic vs Industrial: the Bloom tooltip read "... / Casts from Headquarters #5 (51 energy)" with nothing selected. A click off creep showed "Bloom must be placed on your own creep" and sent no command. A bloom about 350 from the HQ created a `creep_patch` row with `expires_tick` 1265 and `max_radius` 200; it grew 70 → 100 → 140 → 170 → 200 within about 12s. HQ energy 51 → 28. The button then read "Bloom is recharging: 9s left".
+  - Network vs an Organic bot: the starting sentinel was walked 867 from the HQ; Recall with nothing selected, clicked on it. During the channel the screenshot shows the circle, "RECALL 2.6s" and the line to the HQ. Afterwards the sentinel stood 60 from the HQ with shields 72 → 0 and `arrive_tick` set; HQ energy 59 → 13; the button read "Recall is recharging: 56s left".
+  - The Organic practice bot bloomed on its own: two bot-owned patches with `expires_tick` set, cast from two different hubs.
+  - No console or page errors. The energy bar is visible on hubs.
+  - Not observed: a bloom receding (covered by the Rust test), a cast from an outpost, or the Network bot recalling.
+- **Open for the author:** what Industrial gets instead of an ability; whether recall should spend all shields; whether chained blooms need a cap.
+
+### Step 24: Controls and layout (implemented; played by script; not committed)
+
+Client only: no server, schema or balance change. Build on the new database `stdbrts-ux` (same module as step 23).
+
+- **Layout.** The site masthead is hidden in a match (`body.in-match`), and the deck is 214px (196 compact). The battlefield is **642px at 1440x900 (was ~475) and 414px at 990x650 (was 302)**, with no page overflow. Select/Order/Pan shows only on touch devices (`navigator.maxTouchPoints`). The CSS `pointer: fine` version hid it from Playwright's emulated phone and broke the multiplayer test.
+- **Map painting was still the 1600 map.** Ground tiles covered one quarter, the pads sat at the old starts, and the lobby said 1600. The terrain is now painted from the map (`starts` exported from `catalog.ts`).
+- **Clutter.** Health and shield bars show only when a unit is hurt, selected, hovered or under construction; hub energy bars always show. Deposit amounts show on hover or at zoom >= 1.4. There is a hover ring, and the cursor previews the right-click (attack, gather). Default zoom is 1.0.
+- **Keys** ([src/hotkeys.ts](../../src/hotkeys.ts), printed on each button):
+  - Q W E R train labour/fighter/raider/heavy, with no selection needed. B opens the build card, then Q..U. The keys belong to whichever card is open.
+  - A, S, **H hold** (was D), **F repair** (was R), G return, T teleport, C ability, Y rally, **Backspace home** (was H), F1 or . for idle labour, F2 for the army, ? for help.
+  - A disabled button's key shows its refusal as a notice.
+- **Groups 0-9:** Ctrl or Alt sets a group (Chrome keeps Ctrl+1..9 for switching tabs), Shift adds, and a double tap centres the camera. Chips over the battlefield show them.
+- **Other controls:**
+  - Edge scrolling at the **battlefield's** edges (12px band), not the window's. The author found the window version scrolled up and down only at the top of the page and under the deck (fixed 2026-09-26).
+  - Minimap: left-drag moves the camera, right-click gives an order.
+  - Double-click or Ctrl+click selects every unit of that kind **on screen** (it used to be the whole map).
+  - Wireframe tiles for a selection of two or more units.
+  - Red minimap pings for damage to your units off-screen.
+- **Tests:** client 58 (3 new: group chords, edge direction, no key collisions), browser 4/4 on `stdbrts-ux` (the tall-window height pin moved 576 → 742), typecheck and build clean.
+- **Played** by a Sonnet agent through real mouse and keyboard in Playwright: 13/13 control checks passed, with no page or console errors. Its one real bug was fixed: a disabled train key now says "Needs a finished barracks/factory/hub", not the unit blurb. Not played by a person. Not tested: Shift+group add in the browser, and the enemy-hover cursor.
+- **Open for the author:** whether the key changes (H, F, Backspace) suit you; map growth, which the author says is needed but deferred to the engine-optimisation work (2026-09-26); and the playtest's note that first-barracks placement near the HQ is often refused by terrain.
 
 ## Remaining Implementation
 

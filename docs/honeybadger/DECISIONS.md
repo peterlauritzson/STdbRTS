@@ -536,3 +536,40 @@ still names one building per `train_*` order.
 
 **Would change it.** A "primary building" per kind (C&C's primary structure),
 or choosing by camera position, if players find shortest-queue surprising.
+
+---
+
+## 2026-09-25 — First abilities: recall and bloom, paid in energy
+
+**Decision (author).** Abilities use SC2's model: **energy and a cooldown**.
+The first two are Network **recall** and Organic **temporary creep** (built
+as "bloom"). **Industrial gets no ability for now**: smoke, retreat and outpost
+suppression were all offered and turned down as leftovers of earlier Honey
+Badger versions. What Industrial gets instead is open.
+
+**How it is built (implementation defaults, not asked).**
+
+- The casters are **hubs** (HQ and outposts), like SC2's nexus. A Network or
+  Organic hub starts with 50 energy, holds up to 200 and gains 1 every 25 ticks
+  (0.8/s). Industrial hubs hold none. Casting needs no selection: the client
+  uses a selected hub that can cast, otherwise the ready hub with the most
+  energy, as C&C-style training does.
+- **Recall**: 50 energy, 60s cooldown, a 3s channel shown to everyone (circle
+  and a line to the hub). At the end, the caster's mobile units within 200 of
+  the point land around the hub, inactive for 2s like a teleport arrival,
+  with **shields spent to 0**. That is the reference game's "shield-funded"
+  recall. A hub destroyed during the channel recalls nobody. Units in the area
+  are not interrupted by damage; only the hub matters.
+- **Bloom**: 25 energy, 10s cooldown, instant. Placed anywhere on your own
+  creep, it adds a patch that grows like a hub's to radius 200, lives 60s, then
+  lingers and recedes like a dead hub's patch. Blooms chain: a bloom's creep
+  takes the next one. There is no entity to kill; the timer is the counterplay.
+  It is creep in every respect, so death spawns and the harvester slow follow
+  it.
+- `RULESET_VERSION` 12. Schema change (energy, cooldown and a pending cast on
+  every entity; an expiry on creep patches): new database `stdbrts-cast`.
+
+**Would change it.** Recall wiping shields may be too harsh or too cheap once
+played. Blooms may need a limit per hub if chained creep crosses the map too
+quickly. Casting from hubs keeps the command card uniform, but a unit caster
+(SC2's queen) is the obvious alternative for Organic.

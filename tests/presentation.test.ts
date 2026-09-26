@@ -6,12 +6,14 @@ import { DASHES, MARKERS } from "../src/scorescreen";
 import { chooseOrders } from "../scripts/bot-policy";
 import { pickOpponent, PRACTICE_FIRST_PUSH_TICK } from "../src/practice";
 import { mapContentHash } from "../src/maphash";
+import { BUILD_KEYS, edgeDirection, groupAction, TRAIN_KEYS, UNIT_KEYS } from "../src/hotkeys";
 import skirmishMap from "../shared/maps/skirmish.json";
 import { clampToMap, WORLD_SIZE } from "../src/presentation";
 import { isCompletedHub, affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, MAP_HASH, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
 import { Faction, ResourceKind, type CreepPatch, type Entity, type Node } from "../src/bindings/types";
 import { creepGoneTick, creepSecondsLeft, lifetimeFraction, offCreep } from "../src/creep";
 import { MAX_QUEUE, scheduledTraining, trainingSite } from "../src/production";
+import { ABILITIES, abilityOf, castingHub, castRefusal, HUB_MAX_ENERGY, maxEnergy, onCreep, recallable } from "../src/abilities";
 import { ARMY, armyBuilding, armyFaction, fights, isArmy, isTemporary, takesSupply, TEMPORARY_LIFETIME } from "../src/catalog";
 
 test("client renders the same map matches are actually played on", () => {
@@ -110,7 +112,7 @@ test("resource kinds map to the currency a deposit or a load actually holds", ()
 
 function unit(id: number, owner: number, kind: string, stock = 0): Entity {
   const hp = kind === "hq" ? 1200 : 60;
-  return { id, owner, kind, x: 220, y: 220, hp, maxHp: hp, shields: 0, maxShields: 0, damagedTick: 0n, warpTick: 0n, arriveTick: 0n, order: { kind: "stop", x: 0, y: 0, target: 0 }, queue: [], cargo: 0, cargoKind: ResourceKind.Material, returning: false, nextAttack: 0n, shotTick: 0n, shotX: 0, shotY: 0, production: [], constructionRemaining: 0n, stock, expiresTick: 0n };
+  return { id, owner, kind, x: 220, y: 220, hp, maxHp: hp, shields: 0, maxShields: 0, damagedTick: 0n, warpTick: 0n, arriveTick: 0n, order: { kind: "stop", x: 0, y: 0, target: 0 }, queue: [], cargo: 0, cargoKind: ResourceKind.Material, returning: false, nextAttack: 0n, shotTick: 0n, shotX: 0, shotY: 0, production: [], constructionRemaining: 0n, stock, expiresTick: 0n, energy: 0, abilityReadyTick: 0n, cast: undefined };
 }
 
 function deposit(id: number, x: number, y: number, amount: number, currency: Currency = "material"): Node {
@@ -713,7 +715,7 @@ test("a commander's line is told apart by more than its colour", () => {
 // --- Organic creep and the temporary units it spawns ------------------------
 
 const patch = (owner: number, x: number, y: number, radius: number, lostTick = 0n): CreepPatch =>
-  ({ source: 1, owner, x, y, radius, maxRadius: 360, lostTick });
+  ({ source: 1, owner, x, y, radius, maxRadius: 360, lostTick, expiresTick: 0n });
 
 test("only an owner's own harvester, standing on none of its owner's creep, is off creep", () => {
   const creep = [patch(0, 220, 220, 100), patch(1, 900, 900, 300)];
@@ -899,4 +901,90 @@ test("scheduled training is counted per building from this player's scheduled co
   const row = (owner: number, status: string, units: number[], kind: string) => ({ owner, status, units, order: { kind } });
   const counts = scheduledTraining([row(0, "scheduled", [5], "train_soldier"), row(0, "scheduled", [5], "train_harvester"), row(0, "executed", [5], "train_soldier"), row(1, "scheduled", [5], "train_soldier"), row(0, "scheduled", [5], "move")], 0);
   assert.deepEqual(counts.get(5), { total: 2, harvesters: 1 });
+});
+
+// --- Hub abilities: recall and bloom ------------------------------------------
+
+test("a cast picks a selected ready hub, else the ready hub with the most energy", () => {
+  const hub = (id: number, kind: string, energy: number, extra: Partial<Entity> = {}): Entity => ({ ...unit(id, 0, kind), energy, ...extra });
+  const hubs = [hub(1, "hq", 60), hub(2, "outpost", 120), hub(3, "outpost", 200, { abilityReadyTick: 500n }), hub(4, "outpost", 30), { ...hub(5, "outpost", 200), constructionRemaining: 10n }];
+  const recall = ABILITIES.recall;
+  assert.equal(castingHub(hubs, 0, recall, 100n, new Set())?.id, 2, "most energy among the ready");
+  assert.equal(castingHub(hubs, 0, recall, 100n, new Set([1]))?.id, 1, "a selected hub wins");
+  assert.equal(castingHub(hubs, 0, recall, 100n, new Set([4]))?.id, 2, "a selected hub that cannot cast is passed over");
+  assert.equal(castingHub(hubs, 0, recall, 600n, new Set())?.id, 3, "ready once the cooldown ends");
+  assert.equal(castingHub(hubs, 0, recall, 100n, new Set(), new Set([2]))?.id, 1, "a hub with a cast in flight is skipped");
+  assert.equal(castingHub(hubs, 1, recall, 100n, new Set()), undefined, "only your own hubs");
+  assert.match(castRefusal(hubs[3], recall, 100n)!, /Not enough energy: 50 needed, 30 available/);
+  assert.match(castRefusal(hubs[2], recall, 100n)!, /recharging: 20s left/);
+  assert.equal(castRefusal(hubs[1], recall, 100n), undefined);
+  assert.equal(maxEnergy("hq", "network"), HUB_MAX_ENERGY);
+  assert.equal(maxEnergy("outpost", "organic"), HUB_MAX_ENERGY);
+  assert.equal(maxEnergy("hq", "industrial"), 0, "Industrial has no ability yet");
+  assert.equal(maxEnergy("barracks", "network"), 0);
+  assert.equal(abilityOf("network")?.kind, "recall");
+  assert.equal(abilityOf("organic")?.kind, "bloom");
+  assert.equal(abilityOf("industrial"), undefined);
+});
+
+test("the bot blooms at the edge of its creep towards the enemy, and recalls wounded units far from home", () => {
+  const organicHq = { ...unit(1, 0, "hq"), x: 300, y: 300, energy: 50 };
+  const enemyHq = { ...unit(2, 1, "hq"), x: 1300, y: 300 };
+  const creep: CreepPatch[] = [{ source: 1, owner: 0, x: 300, y: 300, radius: 360, maxRadius: 360, lostTick: 0n, expiresTick: 0n }];
+  const bloom = chooseOrders(0, "organic", purse(0), [organicHq, enemyHq], [], new Set(), false, { tick: 100n, creep })[0];
+  assert.equal(bloom?.order.kind, "bloom");
+  assert.deepEqual(bloom.units, [1]);
+  assert.ok(bloom.order.x > 600 && bloom.order.x <= 660 && bloom.order.y === 300, `at the east edge, got ${bloom.order.x}`);
+  // No view, no cast; and no energy, no cast.
+  assert.ok(!chooseOrders(0, "organic", purse(0), [organicHq, enemyHq], [], new Set()).some(decision => decision.order.kind === "bloom"));
+  assert.ok(!chooseOrders(0, "organic", purse(0), [{ ...organicHq, energy: 10 }, enemyHq], [], new Set(), false, { tick: 100n, creep }).some(decision => decision.order.kind === "bloom"));
+
+  const networkHq = { ...unit(1, 0, "hq"), x: 300, y: 300, energy: 80 };
+  const hurt = (id: number, x: number) => ({ ...unit(id, 0, "sentinel"), x, y: 900, hp: 10, maxHp: 148, shields: 0, maxShields: 72, order: { kind: "attack_move", x: 0, y: 0, target: 0 } });
+  const army = [hurt(10, 1100), hurt(11, 1120), hurt(12, 1140)];
+  const recall = chooseOrders(0, "network", purse(0), [networkHq, enemyHq, ...army], [], new Set(), false, { tick: 100n, creep: [] })[0];
+  assert.equal(recall?.order.kind, "recall");
+  assert.deepEqual([recall.order.x, recall.order.y], [1120, 900]);
+  const healthy = army.map(soldier => ({ ...soldier, hp: 148 }));
+  assert.ok(!chooseOrders(0, "network", purse(0), [networkHq, enemyHq, ...healthy], [], new Set(), false, { tick: 100n, creep: [] }).some(decision => decision.order.kind === "recall"));
+});
+
+test("bloom needs your own creep and recall needs your own units near the point", () => {
+  const creep: CreepPatch[] = [{ source: 1, owner: 0, x: 300, y: 300, radius: 200, maxRadius: 360, lostTick: 0n, expiresTick: 0n }];
+  assert.ok(onCreep(0, 480, 300, creep));
+  assert.ok(!onCreep(0, 520, 300, creep));
+  assert.ok(!onCreep(1, 300, 300, creep), "someone else's creep is not yours");
+  const units = [{ ...unit(1, 0, "sentinel"), x: 500, y: 500 }, { ...unit(2, 0, "relay"), x: 510, y: 500 }, { ...unit(3, 1, "sentinel"), x: 500, y: 500 }];
+  assert.equal(recallable(units, 0, 600, 500, kind => !CATALOG[kind].building), 1, "own mobile units only");
+  assert.equal(recallable(units, 0, 900, 500, kind => !CATALOG[kind].building), 0);
+});
+
+test("control group chords: Ctrl or Alt sets, Shift adds, a bare digit recalls, by physical key", () => {
+  const key = (code: string, mods: Partial<Record<"ctrlKey" | "altKey" | "shiftKey" | "metaKey", boolean>> = {}) =>
+    groupAction({ key: "?", code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
+  assert.deepEqual(key("Digit3"), { kind: "recall", group: "3" });
+  assert.deepEqual(key("Digit3", { ctrlKey: true }), { kind: "set", group: "3" });
+  // Chrome keeps Ctrl+1..9 for switching tabs, so Alt sets a group as well.
+  assert.deepEqual(key("Digit0", { altKey: true }), { kind: "set", group: "0" });
+  // Shift+1 types "!" on most layouts; the group is read from `code`.
+  assert.deepEqual(key("Digit1", { shiftKey: true }), { kind: "add", group: "1" });
+  assert.equal(key("KeyQ"), undefined);
+  assert.equal(key("Numpad1"), undefined);
+});
+
+test("edge scrolling moves only inside the battlefield and only at its edges", () => {
+  assert.deepEqual(edgeDirection(undefined, 1000, 800), { x: 0, y: 0 });
+  assert.deepEqual(edgeDirection({ x: 500, y: 400 }, 1000, 800), { x: 0, y: 0 });
+  assert.deepEqual(edgeDirection({ x: 0, y: 400 }, 1000, 800), { x: -1, y: 0 });
+  assert.deepEqual(edgeDirection({ x: 999, y: 799 }, 1000, 800), { x: 1, y: 1 });
+  assert.deepEqual(edgeDirection({ x: -5, y: 400 }, 1000, 800), { x: 0, y: 0 });
+});
+
+test("no command-card key collides with a unit command key", () => {
+  const unit = new Set<string>(Object.values(UNIT_KEYS));
+  assert.equal(new Set(Object.values(UNIT_KEYS)).size, Object.values(UNIT_KEYS).length);
+  for (const key of TRAIN_KEYS) assert.ok(!unit.has(key), `train key ${key} is also a unit command`);
+  // The build card owns its keys only while it is open, so T and Y may repeat
+  // teleport and rally there; it must never take attack, stop or hold.
+  for (const key of BUILD_KEYS) assert.ok(![UNIT_KEYS.attackMove, UNIT_KEYS.stop, UNIT_KEYS.hold].includes(key as never));
 });

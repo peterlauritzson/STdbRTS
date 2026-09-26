@@ -327,6 +327,24 @@ hubs left". `RULESET_VERSION` 10.
 
 Status: **implemented 2026-09-25** (HANDOFF step 21). Followed by step 22: every outpost trains its labour, and training is C&C style (no selection needed).
 
+## Increment L: first abilities
+
+The ability primitive and one ability for each of two factions, settled by the
+author 2026-09-25 (see [DECISIONS.md](DECISIONS.md)): SC2-style energy and
+cooldowns, Network **recall**, Organic **bloom** (temporary creep), and no
+Industrial ability yet.
+
+- **Server**: `rules::Ability`, `max_energy`, `RECALL`, `BLOOM`; per-entity
+  `energy`, `ability_ready_tick` and `cast`; `CreepPatch::expires_tick`;
+  `World::validate_cast`, `cast`, `resolve_casts`. Abilities cannot be queued.
+- **Client**: `src/abilities.ts` mirrors the rules and picks the casting hub;
+  Recall and Bloom buttons (hotkey C) with a targeting preview, the recall
+  telegraph for every player, and an energy bar on hubs.
+- **Bot**: Organic blooms at its creep edge towards the nearest enemy hub;
+  Network recalls three or more badly hurt army units far from home.
+
+Status: **implemented 2026-09-25** (HANDOFF step 23).
+
 ## Increment M: match history and the score screen
 
 A post-match screen with graphs. [ARCHITECTURE-AND-UX.md](ARCHITECTURE-AND-UX.md)

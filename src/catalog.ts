@@ -4,6 +4,8 @@ import { Faction } from "./bindings/types";
 import type { Entity, Node, ResourceKind } from "./bindings/types";
 
 export const terrain = mapDefinition.terrain;
+/** Each slot's start position on the bundled map, where its HQ is placed. */
+export const starts = mapDefinition.starts as [number, number][];
 // The battlefield extent comes from the map, not a constant: the server
 // validates positions against the simulated map's size, so a client that
 // assumed 1600 would clamp the camera and previews to a quarter of the map.

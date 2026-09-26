@@ -10,6 +10,14 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const Cast = __t.object("Cast", {
+  kind: __t.string(),
+  x: __t.f32(),
+  y: __t.f32(),
+  completeTick: __t.u64(),
+});
+export type Cast = __Infer<typeof Cast>;
+
 export const Command = __t.object("Command", {
   id: __t.u64(),
   matchId: __t.u64(),
@@ -42,6 +50,7 @@ export const CreepPatch = __t.object("CreepPatch", {
   radius: __t.u16(),
   maxRadius: __t.u16(),
   lostTick: __t.u64(),
+  expiresTick: __t.u64(),
 });
 export type CreepPatch = __Infer<typeof CreepPatch>;
 
@@ -88,6 +97,11 @@ export const Entity = __t.object("Entity", {
   damagedTick: __t.u64(),
   warpTick: __t.u64(),
   arriveTick: __t.u64(),
+  energy: __t.i32(),
+  abilityReadyTick: __t.u64(),
+  get cast() {
+    return __t.option(Cast);
+  },
 });
 export type Entity = __Infer<typeof Entity>;
 

@@ -1,14 +1,16 @@
 import type { CreepPatch, Entity, Order } from "./bindings/types";
 import { Session } from "./network";
 import { clamp, clampToMap, COLORS, countdown, VISUALS, WORLD_SIZE } from "./presentation";
-import { cargoCapacity, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isCompletedHub, RALLIES, isLabour, isTemporary, placementError, terrain } from "./catalog";
+import { cargoCapacity, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isCompletedHub, RALLIES, isLabour, isTemporary, mapIdentity, placementError, starts, terrain, type FactionName } from "./catalog";
+import { DOUBLE_TAP_MS, edgeDirection, groupAction, UNIT_KEYS } from "./hotkeys";
 import { creepGoneTick, lifetimeFraction, offCreep } from "./creep";
+import { ABILITIES, abilityOf, castingHub, maxEnergy, onCreep, recallable, scheduledCasts, type AbilityKind } from "./abilities";
 import { arriving, canTeleport, channelFraction, fieldsOf, powered, POWER_FIELD_RADIUS, recharging, SENSOR_FIELD_RADIUS, shieldsRegenerating, type Field } from "./zones";
 
 interface Point { x: number; y: number }
 interface Motion { from: Point; to: Point; at: number }
 type InputMode = "select" | "order" | "pan";
-type TargetMode = "attack_move" | "repair" | "rally" | "teleport" | `build_${string}`;
+type TargetMode = "attack_move" | "repair" | "rally" | "teleport" | AbilityKind | `build_${string}`;
 
 export class Battlefield {
   selected = new Set<number>();
@@ -18,7 +20,7 @@ export class Battlefield {
   onSelection: () => void = () => {};
   private context: CanvasRenderingContext2D;
   private miniContext: CanvasRenderingContext2D;
-  private camera = { x: WORLD_SIZE / 2, y: WORLD_SIZE / 2, zoom: 0.8 };
+  private camera = { x: WORLD_SIZE / 2, y: WORLD_SIZE / 2, zoom: 1 };
   private width = 1;
   private height = 1;
   private motions = new Map<number, Motion>();
@@ -26,6 +28,21 @@ export class Battlefield {
   private drag: { start: Point; end: Point; pan: boolean; pointer: number } | undefined;
   private keys = new Set<string>();
   private groups = new Map<string, Set<number>>();
+  private lastGroupTap: { group: string; at: number } | undefined;
+  /** The pointer in window coordinates, for edge scrolling; undefined once it leaves the window. */
+  private screenPointer: Point | undefined;
+  private minimapDrag: number | undefined;
+  /** Last seen health per unit, to notice your own units being hurt. */
+  private health = new Map<number, number>();
+  /** Where your units were recently hurt, pinged on the minimap for a few seconds. */
+  private alerts: { x: number; y: number; at: number }[] = [];
+  /** The unit under the pointer, drawn with a hover ring and its bars. */
+  hovered: number | undefined;
+  /**
+   * Offered every key before the battlefield's own bindings, so the command
+   * card (train, build) can claim its keys. Returns true when it used the key.
+   */
+  onKey: (event: KeyboardEvent) => boolean = () => false;
   private terrain = document.createElement("canvas");
   private lastFrame = performance.now();
 
@@ -42,7 +59,7 @@ export class Battlefield {
     canvas.addEventListener("dblclick", event => {
       const point = this.world(this.local(event));
       const hit = this.session.snapshot.units.find(unit => unit.owner === this.session.snapshot.me?.slot && Math.hypot(unit.x - point.x, unit.y - point.y) < VISUALS[unit.kind].radius + 8);
-      if (hit) { this.selected = new Set(this.session.snapshot.units.filter(unit => unit.owner === hit.owner && unit.kind === hit.kind).map(unit => unit.id)); this.onSelection(); }
+      if (hit) this.selectKindOnScreen(hit);
     });
     canvas.addEventListener("wheel", event => {
       event.preventDefault();
@@ -54,33 +71,52 @@ export class Battlefield {
       this.camera.y += before.y - after.y;
       this.boundCamera();
     }, { passive: false });
+    // The minimap is a second battlefield: left drags the camera, right
+    // issues the same context order a right-click on the ground would.
+    minimap.addEventListener("contextmenu", event => event.preventDefault());
     minimap.addEventListener("pointerdown", event => {
-      const bounds = minimap.getBoundingClientRect();
-      this.camera.x = (event.clientX - bounds.left) / bounds.width * WORLD_SIZE;
-      this.camera.y = (event.clientY - bounds.top) / bounds.height * WORLD_SIZE;
-      this.boundCamera();
+      if (event.button === 2 || (event.button === 0 && this.targeting)) {
+        if (this.session.matchReady) this.contextOrder(this.minimapPoint(event), event.shiftKey);
+        return;
+      }
+      if (event.button !== 0) return;
+      minimap.setPointerCapture(event.pointerId);
+      this.minimapDrag = event.pointerId;
+      this.centreOn(this.minimapPoint(event));
     });
+    minimap.addEventListener("pointermove", event => { if (this.minimapDrag === event.pointerId) this.centreOn(this.minimapPoint(event)); });
+    const endMinimapDrag = (event: PointerEvent) => { if (this.minimapDrag === event.pointerId) this.minimapDrag = undefined; };
+    minimap.addEventListener("pointerup", endMinimapDrag);
+    minimap.addEventListener("pointercancel", endMinimapDrag);
+    window.addEventListener("pointermove", event => { this.screenPointer = event.pointerType === "mouse" ? { x: event.clientX, y: event.clientY } : undefined; });
+    document.documentElement.addEventListener("pointerleave", () => { this.screenPointer = undefined; });
     window.addEventListener("keydown", event => {
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || !this.session.snapshot.room || this.session.snapshot.room.state === "lobby") return;
-      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(event.key)) event.preventDefault();
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement || document.querySelector("dialog[open]")) return;
+      if (!this.session.snapshot.room || this.session.snapshot.room.state === "lobby") return;
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Backspace", "F1", "F2"].includes(event.key)) event.preventDefault();
       this.keys.add(event.key);
       if (event.repeat) return;
-      if (event.key.toLowerCase() === "h") this.home();
-      if (event.key.toLowerCase() === "s") this.issue("stop");
-      if (event.key.toLowerCase() === "a") this.arm("attack_move");
-      if (event.key.toLowerCase() === "r") this.arm("repair");
-      if (event.key.toLowerCase() === "d") this.issue("hold");
-      if (event.key.toLowerCase() === "t") this.arm("teleport");
-      if (event.key === ".") this.selectIdleWorker();
-      if (event.key === "Escape") {
+      const group = groupAction(event);
+      if (group) { event.preventDefault(); this.controlGroup(group.kind, group.group); return; }
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (this.onKey(event)) { event.preventDefault(); return; }
+      const key = event.key.toLowerCase();
+      if (event.key === "Backspace" || event.key === "Home") this.home();
+      else if (key === UNIT_KEYS.stop) this.issue("stop");
+      else if (key === UNIT_KEYS.attackMove) this.arm("attack_move");
+      else if (key === UNIT_KEYS.repair) this.arm("repair");
+      else if (key === UNIT_KEYS.hold) this.issue("hold");
+      else if (key === UNIT_KEYS.returnCargo) this.issue("return");
+      else if (key === UNIT_KEYS.teleport) this.arm("teleport");
+      else if (key === UNIT_KEYS.rally) this.arm("rally");
+      else if (key === UNIT_KEYS.ability) { const rule = abilityOf(this.factionAt(this.session.snapshot.me?.slot ?? -1)); if (rule) this.arm(rule.kind); }
+      else if (event.key === "." || event.key === "F1") this.selectIdleWorker();
+      else if (event.key === "F2") this.selectArmy();
+      else if (event.key === "Escape") {
         if (this.targeting) this.targeting = undefined;
         else this.selected.clear();
         this.onSelection();
-      }
-      if (/^[1-5]$/.test(event.key)) {
-        event.preventDefault();
-        if (event.ctrlKey) this.groups.set(event.key, new Set(this.selected));
-        else { this.selected = new Set(this.groups.get(event.key) ?? []); this.pruneSelection(); this.onSelection(); }
       }
     });
     window.addEventListener("keyup", event => this.keys.delete(event.key));
@@ -96,7 +132,10 @@ export class Battlefield {
       this.targeting = undefined;
       this.groups.clear();
       this.motions.clear();
+      this.health.clear();
+      this.alerts = [];
     }
+    this.noticeDamage(units);
     const initial = this.motions.size === 0 && units.length > 0;
     const now = performance.now();
     for (const unit of units) {
@@ -111,16 +150,51 @@ export class Battlefield {
   }
 
   /**
+   * Records an alert where one of your units lost health. One alert covers a
+   * 300-unit area for 4 seconds, so a long fight pings once, not every tick,
+   * and a fight in view of the camera pings nothing: you are already looking.
+   */
+  private noticeDamage(units: readonly Entity[]): void {
+    const me = this.session.snapshot.me?.slot;
+    const now = performance.now();
+    this.alerts = this.alerts.filter(alert => now - alert.at < 4000);
+    const halfWidth = this.width / this.camera.zoom / 2;
+    const halfHeight = this.height / this.camera.zoom / 2;
+    for (const unit of units) {
+      const before = this.health.get(unit.id);
+      this.health.set(unit.id, unit.hp + unit.shields);
+      if (unit.owner !== me || before === undefined || unit.hp + unit.shields >= before) continue;
+      if (Math.abs(unit.x - this.camera.x) <= halfWidth && Math.abs(unit.y - this.camera.y) <= halfHeight) continue;
+      if (this.alerts.some(alert => Math.hypot(alert.x - unit.x, alert.y - unit.y) < 300)) continue;
+      this.alerts.push({ x: unit.x, y: unit.y, at: now });
+    }
+    if (this.health.size > units.length * 2) {
+      const alive = new Set(units.map(unit => unit.id));
+      for (const id of this.health.keys()) if (!alive.has(id)) this.health.delete(id);
+    }
+  }
+
+  /**
    * Every power and sensor field on the map, derived from the unit rows exactly
    * as the server derives them each tick. A slot's faction comes from its
    * player row; a slot with no row projects no power field.
    */
   fields(): Field[] {
-    const { units, players, room } = this.session.snapshot;
-    return fieldsOf(units, slot => {
-      const player = players.find(player => player.matchId === room?.id && player.slot === slot);
-      return player ? factionOf(player.faction) : undefined;
-    });
+    return fieldsOf(this.session.snapshot.units, slot => this.factionAt(slot));
+  }
+
+  /** The faction a slot in this match plays, from its player row. */
+  factionAt(slot: number): FactionName | undefined {
+    const { players, room } = this.session.snapshot;
+    const player = players.find(player => player.matchId === room?.id && player.slot === slot);
+    return player ? factionOf(player.faction) : undefined;
+  }
+
+  /** The hub that would cast `kind` for you right now, C&C style: see `castingHub`. */
+  caster(kind: AbilityKind): Entity | undefined {
+    const { units, commands, room, me } = this.session.snapshot;
+    if (!me || this.factionAt(me.slot) !== ABILITIES[kind].faction) return undefined;
+    return castingHub(units, me.slot, ABILITIES[kind], room?.tick ?? 0n, this.selected, scheduledCasts(commands, me.slot));
   }
 
   /** Selected units that could start a teleport right now: mobile, powered, not arriving or recharging. */
@@ -140,6 +214,48 @@ export class Battlefield {
     return this.session.snapshot.units.filter(unit => this.selected.has(unit.id) && unit.owner === this.session.snapshot.me?.slot);
   }
 
+  /** Every owned unit of `unit`'s kind currently on screen, SC2's double-click. */
+  selectKindOnScreen(unit: Entity, add = false): void {
+    const { units, me } = this.session.snapshot;
+    if (unit.owner !== me?.slot) { this.selected = new Set([unit.id]); this.onSelection(); return; }
+    const halfWidth = this.width / this.camera.zoom / 2;
+    const halfHeight = this.height / this.camera.zoom / 2;
+    const onScreen = units.filter(other => other.owner === unit.owner && other.kind === unit.kind
+      && Math.abs(other.x - this.camera.x) <= halfWidth && Math.abs(other.y - this.camera.y) <= halfHeight);
+    this.selected = new Set([...(add ? this.selected : []), ...onScreen.map(other => other.id)]);
+    this.onSelection();
+  }
+
+  /** Units a control group holds that still exist. */
+  group(key: string): Entity[] {
+    const ids = this.groups.get(key);
+    return ids ? this.session.snapshot.units.filter(unit => ids.has(unit.id)) : [];
+  }
+
+  /** Every control group that holds a living unit, in key order. */
+  groupKeys(): string[] {
+    return [..."1234567890"].filter(key => this.group(key).length);
+  }
+
+  controlGroup(kind: "set" | "add" | "recall", key: string): void {
+    const owned = this.ownedSelection().map(unit => unit.id);
+    if (kind === "set") { this.groups.set(key, new Set(owned)); this.onSelection(); return; }
+    if (kind === "add") { this.groups.set(key, new Set([...(this.groups.get(key) ?? []), ...owned])); this.onSelection(); return; }
+    const members = this.group(key);
+    const now = performance.now();
+    // A second press inside the window jumps the camera to the group, as in SC2.
+    if (members.length && this.lastGroupTap?.group === key && now - this.lastGroupTap.at < DOUBLE_TAP_MS) {
+      this.centreOn({ x: members.reduce((sum, unit) => sum + unit.x, 0) / members.length, y: members.reduce((sum, unit) => sum + unit.y, 0) / members.length });
+    }
+    this.lastGroupTap = { group: key, at: now };
+    this.selected = new Set(members.map(unit => unit.id));
+    this.onSelection();
+  }
+
+  centreOn(point: Point): void {
+    this.camera.x = point.x; this.camera.y = point.y; this.boundCamera();
+  }
+
   selectArmy(): void {
     this.selected = new Set(this.session.snapshot.units.filter(unit => unit.owner === this.session.snapshot.me?.slot && isArmy(unit.kind)).map(unit => unit.id));
     this.onSelection();
@@ -154,7 +270,7 @@ export class Battlefield {
 
   home(): void {
     const hq = this.issuer();
-    if (hq) { this.camera.zoom = Math.max(this.camera.zoom, 0.8); this.camera.x = hq.x; this.camera.y = hq.y; this.boundCamera(); }
+    if (hq) { this.camera.zoom = Math.max(this.camera.zoom, 1); this.camera.x = hq.x; this.camera.y = hq.y; this.boundCamera(); }
   }
 
   fit(): void {
@@ -168,6 +284,7 @@ export class Battlefield {
       ? this.session.snapshot.units.some(unit => RALLIES.includes(unit.kind) && unit.owner === this.session.snapshot.me?.slot)
       : kind.startsWith("build_") ? !!this.issuer()
       : kind === "teleport" ? this.teleporters().length > 0
+      : kind in ABILITIES ? !!this.caster(kind as AbilityKind)
       : this.ownedSelection().some(unit => kind === "repair" ? isLabour(unit.kind) : fights(unit.kind));
     if (!allowed) return;
     this.targeting = this.targeting === kind ? undefined : kind;
@@ -214,6 +331,33 @@ export class Battlefield {
     return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
   }
 
+  private minimapPoint(event: MouseEvent): Point {
+    const bounds = this.minimap.getBoundingClientRect();
+    return { x: clampToMap((event.clientX - bounds.left) / bounds.width * WORLD_SIZE), y: clampToMap((event.clientY - bounds.top) / bounds.height * WORLD_SIZE) };
+  }
+
+  /** The topmost unit under a world point, with the same slop a click gets. */
+  private unitAt(point: Point): Entity | undefined {
+    return [...this.session.snapshot.units].reverse().find(unit => Math.hypot(unit.x - point.x, unit.y - point.y) <= (VISUALS[unit.kind]?.radius ?? 12) + 6 / this.camera.zoom);
+  }
+
+  /**
+   * The cursor says what a right-click would do before it is pressed: attack
+   * over an enemy with fighters selected, gather over a deposit with labour.
+   */
+  private updateCursor(): void {
+    const { units, nodes, me } = this.session.snapshot;
+    const hovered = units.find(unit => unit.id === this.hovered);
+    const owned = this.ownedSelection();
+    let cursor = "default";
+    if (this.targeting || this.mode === "order") cursor = "crosshair";
+    else if (this.drag?.pan || this.mode === "pan") cursor = "grab";
+    else if (hovered && hovered.owner !== me?.slot && owned.some(unit => fights(unit.kind))) cursor = "crosshair";
+    else if (hovered) cursor = "pointer";
+    else if (this.pointer && owned.some(unit => isLabour(unit.kind)) && nodes.some(node => node.amount > 0 && Math.hypot(this.pointer!.x - node.x, this.pointer!.y - node.y) < 35)) cursor = "cell";
+    if (this.canvas.style.cursor !== cursor) this.canvas.style.cursor = cursor;
+  }
+
   private world(point: Point): Point {
     return { x: (point.x - this.width / 2) / this.camera.zoom + this.camera.x, y: (point.y - this.height / 2) / this.camera.zoom + this.camera.y };
   }
@@ -229,6 +373,7 @@ export class Battlefield {
 
   private pointerMove(event: PointerEvent): void {
     this.pointer = this.world(this.local(event));
+    this.hovered = this.unitAt(this.pointer)?.id;
     if (!this.drag || this.drag.pointer !== event.pointerId) return;
     const point = this.local(event);
     if (this.drag.pan) {
@@ -249,7 +394,9 @@ export class Battlefield {
     const units = this.session.snapshot.units;
     if (!event.shiftKey) this.selected.clear();
     if (Math.hypot(drag.start.x - drag.end.x, drag.start.y - drag.end.y) < 6) {
-      const hit = [...units].reverse().find(unit => Math.hypot(unit.x - end.x, unit.y - end.y) <= (VISUALS[unit.kind]?.radius ?? 12) + 6 / this.camera.zoom);
+      const hit = this.unitAt(end);
+      // Ctrl+click is double-click: every unit of that kind on screen.
+      if (hit && event.ctrlKey) { this.selectKindOnScreen(hit, event.shiftKey); return; }
       if (hit) {
         if (event.shiftKey && this.selected.has(hit.id)) this.selected.delete(hit.id);
         else this.selected.add(hit.id);
@@ -291,6 +438,19 @@ export class Battlefield {
       this.onSelection();
       return;
     }
+    if ((this.targeting === "recall" || this.targeting === "bloom") && me) {
+      const kind = this.targeting;
+      const refusal = kind === "bloom"
+        ? onCreep(me.slot, point.x, point.y, this.session.snapshot.creep) ? undefined : "Bloom must be placed on your own creep"
+        : recallable(units, me.slot, point.x, point.y, canTeleport) ? undefined : "None of your units are near that point to recall";
+      if (refusal) { this.session.onNotice(refusal); return; }
+      const hub = this.caster(kind);
+      if (!hub) { this.session.onNotice(`No hub can cast ${ABILITIES[kind].label} right now`); return; }
+      void this.session.order([hub.id], { kind, x: clampToMap(point.x), y: clampToMap(point.y), target: 0 });
+      this.targeting = undefined;
+      this.onSelection();
+      return;
+    }
     const headquarters = owned.find(unit => RALLIES.includes(unit.kind)) ?? units.find(unit => unit.kind === "hq" && unit.owner === me?.slot);
     if (headquarters && (this.targeting === "rally" || (!this.targeting && owned.length === 1 && ["hq", "outpost", "barracks", "factory"].includes(owned[0].kind)))) {
       void this.session.order([headquarters.id], { kind: node ? "rally_gather" : "rally_move", x: clampToMap(point.x), y: clampToMap(point.y), target: node?.id ?? 0 });
@@ -324,13 +484,20 @@ export class Battlefield {
     else this.session.onNotice(enemy ? "Select fighting units to attack" : "Select labour units for this order");
   }
 
+  /**
+   * The ground, painted once for the whole map. Everything here comes from the
+   * map definition: the start pads sit on the map's own starts, and the tiles
+   * cover its full extent. This used to paint the 1600 map's four pads and
+   * only its quarter of tiles, so crossfire's ground looked empty and wrong.
+   */
   private paintTerrain(): void {
     this.terrain.width = WORLD_SIZE;
     this.terrain.height = WORLD_SIZE;
     const context = this.terrain.getContext("2d")!;
     context.fillStyle = "#283c37";
     context.fillRect(0, 0, WORLD_SIZE, WORLD_SIZE);
-    for (let row = 0; row < 40; row++) for (let column = 0; column < 40; column++) {
+    const cells = Math.ceil(WORLD_SIZE / 40);
+    for (let row = 0; row < cells; row++) for (let column = 0; column < cells; column++) {
       const seed = ((row * 73856093) ^ (column * 19349663)) >>> 0;
       context.fillStyle = ["#2c403a", "#293e38", "#30433c", "#263b36"][seed % 4];
       context.fillRect(column * 40, row * 40, 40, 40);
@@ -345,7 +512,7 @@ export class Battlefield {
       context.beginPath(); context.moveTo(line, 0); context.lineTo(line, WORLD_SIZE); context.stroke();
       context.beginPath(); context.moveTo(0, line); context.lineTo(WORLD_SIZE, line); context.stroke();
     }
-    for (const [x, y] of [[220, 220], [1380, 1380], [1380, 220], [220, 1380]]) {
+    for (const [x, y] of starts) {
       context.fillStyle = "#43524b"; context.fillRect(x - 65, y - 65, 130, 130);
       context.strokeStyle = "#87928366"; context.strokeRect(x - 75, y - 75, 150, 150);
       context.setLineDash([8, 8]); context.strokeRect(x - 94, y - 94, 188, 188); context.setLineDash([]);
@@ -355,7 +522,7 @@ export class Battlefield {
     const mid = WORLD_SIZE / 2;
     context.beginPath(); context.moveTo(mid, mid - 100); context.lineTo(mid + 100, mid); context.lineTo(mid, mid + 100); context.lineTo(mid - 100, mid); context.closePath(); context.stroke();
     context.font = "18px 'IBM Plex Mono'"; context.textAlign = "center"; context.fillStyle = "#a8b8a877";
-    context.fillText("BASIN / 07", mid, mid + 7);
+    context.fillText(mapIdentity.id.toUpperCase(), mid, mid + 7);
     for (const [x, y, width, height] of terrain) {
       context.fillStyle = "#122b2c"; context.fillRect(x + 8, y + 10, width, height);
       context.fillStyle = "#748480"; context.fillRect(x, y, width, height);
@@ -376,7 +543,20 @@ export class Battlefield {
       if (this.keys.has("ArrowRight")) this.camera.x += speed;
       if (this.keys.has("ArrowUp")) this.camera.y -= speed;
       if (this.keys.has("ArrowDown")) this.camera.y += speed;
+      // Edge scrolling, only while the match is live and this window has focus,
+      // so a pointer parked on the taskbar does not drift the camera.
+      if (this.session.snapshot.room && this.session.snapshot.room.state !== "lobby" && document.hasFocus() && this.drag?.pan !== true) {
+        // The edges are the battlefield's, not the window's: its top sits under
+        // the match bar and its bottom on the command deck, and the pointer is
+        // there, not at the window edge, when a player pushes the view.
+        const bounds = this.canvas.getBoundingClientRect();
+        const local = this.screenPointer && { x: this.screenPointer.x - bounds.left, y: this.screenPointer.y - bounds.top };
+        const edge = edgeDirection(local, bounds.width, bounds.height);
+        this.camera.x += edge.x * speed * 1.4;
+        this.camera.y += edge.y * speed * 1.4;
+      }
       this.boundCamera();
+      this.updateCursor();
       this.draw(now);
       this.drawMinimap();
     }
@@ -423,10 +603,16 @@ export class Battlefield {
           context.beginPath(); context.moveTo(x, y - 16); context.lineTo(x + 9, y - 2); context.lineTo(x + 6, y + 13); context.lineTo(x - 8, y + 8); context.closePath(); context.fill(); context.stroke();
         }
       }
-      // The kind is written out as well as drawn: colour is never the only cue.
-      context.font = "11px 'IBM Plex Mono'"; context.textAlign = "center";
-      context.fillStyle = currency === "catalyst" ? "#e0c9ff" : "#f3e8bd";
-      context.fillText(`${node.amount} ${currency === "catalyst" ? "CAT" : "MAT"}`, 0, 42); context.restore();
+      // The amount is written out when it is asked for: zoomed in, or under the
+      // pointer. At every other zoom 150 labels are only noise; the shape and
+      // colour already say which currency a deposit holds.
+      const hovered = this.pointer && Math.hypot(this.pointer.x - node.x, this.pointer.y - node.y) < 35;
+      if (hovered || this.camera.zoom >= 1.4) {
+        context.font = "11px 'IBM Plex Mono'"; context.textAlign = "center";
+        context.fillStyle = currency === "catalyst" ? "#e0c9ff" : "#f3e8bd";
+        context.fillText(`${node.amount} ${currency === "catalyst" ? "CAT" : "MAT"}`, 0, 42);
+      }
+      context.restore();
     }
     for (const unit of units) {
       if (this.selected.has(unit.id) || (unit.kind === "hq" && unit.owner === this.session.snapshot.me?.slot)) {
@@ -471,6 +657,34 @@ export class Battlefield {
       context.beginPath(); context.arc(this.pointer.x, this.pointer.y, 22, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
       context.fillStyle = ok ? "#cfefff" : "#ed7c8b"; context.textAlign = "center"; context.font = `${12 / this.camera.zoom}px 'IBM Plex Mono'`;
       context.fillText(ok ? "TELEPORT HERE" : "OUTSIDE YOUR FIELD", this.pointer.x, this.pointer.y - 30);
+    }
+    if ((this.targeting === "recall" || this.targeting === "bloom") && this.pointer && this.session.snapshot.me) {
+      const slot = this.session.snapshot.me.slot;
+      const { x, y } = this.pointer;
+      const count = recallable(units, slot, x, y, canTeleport);
+      const ok = this.targeting === "bloom" ? onCreep(slot, x, y, this.session.snapshot.creep) : count > 0;
+      const label = this.targeting === "bloom" ? ok ? "BLOOM HERE" : "NOT ON YOUR CREEP" : ok ? `RECALL ${count}` : "NOTHING TO RECALL";
+      context.strokeStyle = ok ? "#c9b2ff" : "#ed7c8b"; context.lineWidth = 2 / this.camera.zoom;
+      context.setLineDash([8 / this.camera.zoom, 6 / this.camera.zoom]);
+      context.beginPath(); context.arc(x, y, ABILITIES[this.targeting].radius, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
+      context.fillStyle = ok ? "#e6d9ff" : "#ed7c8b"; context.textAlign = "center"; context.font = `${12 / this.camera.zoom}px 'IBM Plex Mono'`;
+      context.fillText(label, x, y - 12 / this.camera.zoom);
+    }
+    // A recall channelling, for everyone to see: the area that is about to
+    // leave, closing in as the channel completes, and a line to the hub it
+    // lands at. The opponent sees exactly what the caster does.
+    const castTick = room?.tick ?? 0n;
+    for (const hub of units) {
+      if (!hub.cast) continue;
+      const left = Math.max(0, Number(hub.cast.completeTick - castTick) - (now - this.session.tickReceivedAt) / 50);
+      const progress = 1 - Math.min(1, left / Number(ABILITIES.recall.channelTicks));
+      context.strokeStyle = COLORS[hub.owner]; context.lineWidth = 2.5 / this.camera.zoom;
+      context.beginPath(); context.arc(hub.cast.x, hub.cast.y, ABILITIES.recall.radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress); context.stroke();
+      context.setLineDash([6 / this.camera.zoom, 6 / this.camera.zoom]); context.lineWidth = 1.5 / this.camera.zoom;
+      context.beginPath(); context.arc(hub.cast.x, hub.cast.y, ABILITIES.recall.radius, 0, Math.PI * 2); context.stroke();
+      context.beginPath(); context.moveTo(hub.cast.x, hub.cast.y); context.lineTo(hub.x, hub.y); context.stroke(); context.setLineDash([]);
+      context.fillStyle = "#e6d9ff"; context.textAlign = "center"; context.font = `${13 / this.camera.zoom}px 'IBM Plex Mono'`;
+      context.fillText(`RECALL ${(left / 20).toFixed(1)}s`, hub.cast.x, hub.cast.y - ABILITIES.recall.radius - 8 / this.camera.zoom);
     }
     context.restore();
     if (this.drag && !this.drag.pan) {
@@ -569,7 +783,7 @@ export class Battlefield {
 
   private orderTarget(order: Order): Point | undefined {
     if (order.kind.startsWith("build_")) return order;
-    if (["move", "attack_move", "rally_move", "teleport"].includes(order.kind)) return order;
+    if (["move", "attack_move", "rally_move", "teleport", "recall", "bloom"].includes(order.kind)) return order;
     if (["gather", "rally_gather"].includes(order.kind)) return this.session.snapshot.nodes.find(node => node.id === order.target);
     if (["attack", "repair"].includes(order.kind)) return this.session.snapshot.units.find(unit => unit.id === order.target);
     return undefined;
@@ -615,8 +829,11 @@ export class Battlefield {
     context.save(); context.translate(point.x, point.y);
     if (unit.constructionRemaining > 0n) context.globalAlpha = 0.6;
     context.fillStyle = "#101c1980"; context.beginPath(); context.ellipse(3, radius * 0.6, radius * 1.2, radius * 0.55, 0, 0, Math.PI * 2); context.fill();
-    if (this.selected.has(unit.id)) {
-      context.strokeStyle = "#efffea"; context.lineWidth = 2 / this.camera.zoom;
+    const selected = this.selected.has(unit.id);
+    const hovered = this.hovered === unit.id;
+    if (selected || hovered) {
+      context.strokeStyle = selected ? "#efffea" : unit.owner === this.session.snapshot.me?.slot ? "#efffea70" : "#ff9ba290";
+      context.lineWidth = (selected ? 2 : 1.5) / this.camera.zoom;
       context.beginPath(); context.arc(0, 0, radius + 7, 0, Math.PI * 2); context.stroke();
     }
     context.fillStyle = color; context.strokeStyle = "#172a26"; context.lineWidth = 2.5;
@@ -766,12 +983,18 @@ export class Battlefield {
     }
     const tick = this.session.snapshot.room?.tick ?? 0n;
     const health = unit.hp / Math.max(1, unit.maxHp);
-    context.fillStyle = "#12201f"; context.fillRect(-radius, -radius - 15, radius * 2, 4);
-    context.fillStyle = health > 0.3 ? color : "#ff8178";
-    context.fillRect(-radius, -radius - 15, radius * 2 * clamp(health, 0, 1), 4);
+    // Bars only where they say something, as in SC2: hurt, selected, hovered
+    // or still being raised. A full-health army of 60 drawing 60 full bars is
+    // clutter that hides the one bar that matters.
+    const bars = selected || hovered || unit.hp < unit.maxHp || unit.shields < unit.maxShields || unit.constructionRemaining > 0n;
+    if (bars) {
+      context.fillStyle = "#12201f"; context.fillRect(-radius, -radius - 15, radius * 2, 4);
+      context.fillStyle = health > 0.3 ? color : "#ff8178";
+      context.fillRect(-radius, -radius - 15, radius * 2 * clamp(health, 0, 1), 4);
+    }
     // Shields: a second, pale-blue bar directly above health, for Network only.
     // It brightens while regenerating so "coming back" reads without numbers.
-    if (unit.maxShields > 0) {
+    if (bars && unit.maxShields > 0) {
       const regenerating = shieldsRegenerating(unit, tick);
       context.fillStyle = "#12201f"; context.fillRect(-radius, -radius - 20, radius * 2, 4);
       context.fillStyle = regenerating ? "#c8f0ff" : "#6fc3ef";
@@ -786,6 +1009,13 @@ export class Battlefield {
       context.strokeStyle = "#8fd8ff"; context.lineWidth = 1.5; context.globalAlpha = 0.4 + 0.3 * Math.sin(now / 90);
       context.setLineDash([3, 3]); context.beginPath(); context.arc(0, 0, radius + 6, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
       context.globalAlpha = 1;
+    }
+    // Energy: a violet bar where a temporary unit's lifetime would go, on the
+    // hubs of a faction with an ability. Hubs are never temporary.
+    const energyCap = maxEnergy(unit.kind, this.factionAt(unit.owner));
+    if (energyCap > 0 && unit.constructionRemaining === 0n) {
+      context.fillStyle = "#12201f"; context.fillRect(-radius, -radius - 10, radius * 2, 3);
+      context.fillStyle = "#b98cff"; context.fillRect(-radius, -radius - 10, radius * 2 * clamp(unit.energy / energyCap, 0, 1), 3);
     }
     // A temporary unit also shows how long it has left, in its own colour,
     // directly under its health: it expires whether or not it is hurt.
@@ -865,6 +1095,14 @@ export class Battlefield {
       context.fillStyle = COLORS[unit.owner];
       const radius = isBuilding(unit.kind) ? 4 : 2;
       context.fillRect(unit.x * scale - radius, unit.y * scale - radius, radius * 2, radius * 2);
+    }
+    // Attack pings: a red ring that shrinks onto the spot, three pulses.
+    const now = performance.now();
+    for (const alert of this.alerts) {
+      const age = (now - alert.at) / 1000;
+      const pulse = (age % 1.3) / 1.3;
+      context.strokeStyle = `rgba(255, 110, 110, ${1 - age / 4})`; context.lineWidth = 2;
+      context.beginPath(); context.arc(alert.x * scale, alert.y * scale, 4 + 14 * (1 - pulse), 0, Math.PI * 2); context.stroke();
     }
     context.strokeStyle = "#eff8ec"; context.lineWidth = 1;
     context.strokeRect((this.camera.x - this.width / this.camera.zoom / 2) * scale, (this.camera.y - this.height / this.camera.zoom / 2) * scale, this.width / this.camera.zoom * scale, this.height / this.camera.zoom * scale);

@@ -1,14 +1,16 @@
 import "../styles.css";
-import { createIcons, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets } from "lucide";
+import { createElement, createIcons, Keyboard, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, type IconNode } from "lucide";
+import { ABILITIES, castRefusal, scheduledCasts, type AbilityKind } from "./abilities";
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
 import { COLORS, countdown, VISUALS } from "./presentation";
-import { addCost, isCompletedHub, ARMY, armyFaction, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, type Cost, type FactionName } from "./catalog";
+import { addCost, isCompletedHub, ARMY, armyFaction, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
 import { Practice, type PracticeOpponent } from "./practice";
 import { Feedback } from "./feedback";
 import { ScoreScreen, type ScorePlayer } from "./scorescreen";
 import { BUILDING_FACTION, powered, type Field } from "./zones";
 import { scheduledTraining, trainingSite } from "./production";
+import { BUILD_KEYS, BUILD_MENU_KEY, keyLabel, TRAIN_KEYS, UNIT_KEYS } from "./hotkeys";
 
 function element<Type extends HTMLElement = HTMLElement>(id: string): Type {
   const value = document.getElementById(id);
@@ -91,7 +93,38 @@ for (const kind of BUILDABLE) {
   element("building-buttons").append(button);
 }
 for (const [kind, definition] of Object.entries(TECHNOLOGIES)) element("research-buttons").append(catalogButton(`research-${kind}`, definition.label, RESEARCH_COST, RESEARCH_SECONDS, definition.icon, definition.description));
-createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets } });
+createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, Keyboard } });
+/** Catalogue icon names to icon nodes, for portraits built after `createIcons` has run. */
+const ICON_NODES: Record<string, IconNode> = {
+  house: House, hammer: Hammer, radio: Radio, sprout: Sprout, swords: Swords, radar: Radar, crosshair: Crosshair,
+  "shield-half": ShieldHalf, wind: Wind, zap: Zap, bug: Bug, droplets: Droplets, tent: Tent, factory: Factory,
+  shield: Shield, warehouse: Warehouse, "flask-conical": FlaskConical, "satellite-dish": SatelliteDish,
+};
+function icon(name: string): SVGElement {
+  return createElement(ICON_NODES[name] ?? Square);
+}
+
+/**
+ * Prints a key on a button, in the corner, hidden from the accessibility tree
+ * so the button's name stays exactly what it was ("Drifter 40 material / 2.5s").
+ * An empty key removes the badge.
+ */
+function badge(button: HTMLElement, key: string | undefined): void {
+  let node = button.querySelector<HTMLElement>(":scope > kbd.key");
+  if (!key) { node?.remove(); return; }
+  if (!node) { node = document.createElement("kbd"); node.className = "key"; node.setAttribute("aria-hidden", "true"); button.append(node); }
+  const label = keyLabel(key);
+  if (node.textContent !== label) node.textContent = label;
+}
+for (const [id, key] of [["stop", UNIT_KEYS.stop], ["attack-move", UNIT_KEYS.attackMove], ["hold", UNIT_KEYS.hold], ["repair", UNIT_KEYS.repair], ["return", UNIT_KEYS.returnCargo], ["teleport", UNIT_KEYS.teleport], ["recall", UNIT_KEYS.ability], ["bloom", UNIT_KEYS.ability], ["set-rally", UNIT_KEYS.rally], ["idle-worker", "F1"], ["select-army", "F2"]] as const) {
+  const button = element(id);
+  badge(button, key);
+  button.title = `${button.title} (${keyLabel(key)})`;
+}
+// Select / Order / Pan exists for touch, where there is no right button.
+document.body.classList.toggle("no-touch", navigator.maxTouchPoints === 0);
+element("map-size").textContent = `${worldSize} x ${worldSize}`;
+element("map-coordinate").textContent = `N / ${worldSize}`;
 const session = new Session();
 const practice = new Practice(session);
 const feedback = new Feedback(message => session.onNotice(message));
@@ -271,6 +304,7 @@ element("hold").addEventListener("click", () => battlefield.issue("hold"));
 element("attack-move").addEventListener("click", () => battlefield.arm("attack_move"));
 element("repair").addEventListener("click", () => battlefield.arm("repair"));
 element("teleport").addEventListener("click", () => battlefield.arm("teleport"));
+for (const kind of ["recall", "bloom"] as const) element(kind).addEventListener("click", () => battlefield.arm(kind));
 element("set-rally").addEventListener("click", () => battlefield.arm("rally"));
 for (const [id, kind] of [["clear-rally", "clear_rally"], ["cancel-production", "cancel_production"]]) element(id).addEventListener("click", () => {
   const hq = productionBuilding();
@@ -281,12 +315,51 @@ element("idle-worker").addEventListener("click", () => battlefield.selectIdleWor
 element<HTMLSelectElement>("producer-select").addEventListener("change", event => {
   battlefield.selected = new Set([Number((event.target as HTMLSelectElement).value)]); renderMatch();
 });
-for (const name of ["production", "build", "research"]) element(`tab-${name}`).addEventListener("click", () => {
-  for (const other of ["production", "build", "research"]) {
+type CardTab = "production" | "build" | "research";
+const CARD_TABS: readonly CardTab[] = ["production", "build", "research"];
+function showTab(name: CardTab): void {
+  for (const other of CARD_TABS) {
     element(`tab-${other}`).setAttribute("aria-selected", String(name === other));
     element(`${other}-pane`).hidden = name !== other;
   }
-});
+}
+function visibleTab(): CardTab {
+  return CARD_TABS.find(name => !element(`${name}-pane`).hidden) ?? "production";
+}
+/** The buttons a tab's keys press, in key order: only those a player can see. */
+function cardButtons(tab: CardTab): HTMLButtonElement[] {
+  const pane = tab === "production" ? "training-buttons" : tab === "build" ? "building-buttons" : "research-buttons";
+  return [...element(pane).querySelectorAll<HTMLButtonElement>(":scope > button")].filter(button => !button.hidden);
+}
+for (const name of CARD_TABS) element(`tab-${name}`).addEventListener("click", () => showTab(name));
+
+/**
+ * The command card's keys: the visible tab's buttons take Q W E R (and on,
+ * for buildings), B opens and closes the build card, Escape backs out of it.
+ * A disabled button answers with its own reason rather than doing nothing.
+ */
+battlefield.onKey = event => {
+  const key = event.key.toLowerCase();
+  if (event.key === "?") { toggleHelp(); return true; }
+  if (key === BUILD_MENU_KEY) { showTab(visibleTab() === "build" ? "production" : "build"); return true; }
+  const tab = visibleTab();
+  if (event.key === "Escape" && tab !== "production" && !battlefield.targeting) { showTab("production"); return true; }
+  const keys: readonly string[] = tab === "build" ? BUILD_KEYS : TRAIN_KEYS;
+  const button = cardButtons(tab)[keys.indexOf(key)];
+  if (!button) return false;
+  if (button.disabled) { session.onNotice(button.title); return true; }
+  button.click();
+  // Placement is armed; the card goes back to production, as SC2's does.
+  if (tab === "build") showTab("production");
+  return true;
+};
+
+function toggleHelp(): void {
+  const help = element("help");
+  help.hidden = !help.hidden;
+  element("help-toggle").setAttribute("aria-expanded", String(!help.hidden));
+}
+element("help-toggle").addEventListener("click", toggleHelp);
 for (const kind of BUILDABLE) element(`build-${kind}`).addEventListener("click", () => battlefield.arm(`build_${kind}`));
 for (const kind of Object.keys(TECHNOLOGIES)) element(`research-${kind}`).addEventListener("click", () => {
   const lab = battlefield.ownedSelection().find(unit => unit.kind === "lab" && unit.constructionRemaining === 0n) ?? session.snapshot.units.find(unit => unit.owner === session.snapshot.me?.slot && unit.kind === "lab" && unit.constructionRemaining === 0n);
@@ -417,8 +490,11 @@ function renderMatch(): void {
     const stockless = kind === "harvester" && stock === 0;
     const site = siteFor(kind);
     const blocked = stockless || !canOrder || !site || mobile.length + pending >= MAX_UNITS;
-    const where = site ? ` / Trains at ${CATALOG[site.kind].label} #${site.id}` : "";
-    affordability(button, definition.cost, balance, blocked, stockless ? `${definition.role} / ${STOCK_REASON}` : `${definition.role}${where}`);
+    // The tooltip, and the notice a hotkey shows, says why a button is off:
+    // the first refusal that applies, in the order a player can fix them.
+    const needs = LABOUR_KINDS.includes(kind) ? "a finished hub" : kind === ARMY[faction][2] ? "a finished factory" : "a finished barracks";
+    const why = !canOrder ? "Orders are closed" : !site ? `Needs ${needs}` : mobile.length + pending >= MAX_UNITS ? `Unit cap ${MAX_UNITS} reached` : `Trains at ${CATALOG[site.kind].label} #${site.id}`;
+    affordability(button, definition.cost, balance, blocked, stockless ? `${definition.role} / ${STOCK_REASON}` : `${definition.role} / ${why}`);
   }
   const producers = buildings.filter(unit => isProducer(unit, faction, fields));
   const nextSignature = producers.map(unit => `${unit.id}:${unit.kind}`).join(",");
@@ -452,6 +528,12 @@ function renderMatch(): void {
     button.classList.toggle("completed", !!researched);
   }
   element("research-status").textContent = me.research.length ? me.research.map(kind => kind.slice(9)).join(" / ") : "No upgrades";
+  for (const tab of CARD_TABS) {
+    const keys: readonly string[] = tab === "build" ? BUILD_KEYS : TRAIN_KEYS;
+    cardButtons(tab).forEach((button, index) => badge(button, keys[index]));
+  }
+  renderSelectionGrid();
+  renderGroupBar();
   const selection = units.filter(unit => battlefield.selected.has(unit.id));
   element("selection-title").textContent = selection.length === 1 ? VISUALS[selection[0].kind]?.label ?? selection[0].kind : selection.length ? `${selection.length} units` : "No selection";
   // Cargo is reported by the currency each carrier is actually carrying, since
@@ -479,6 +561,22 @@ function renderMatch(): void {
   // Teleport is Network's alone, and only for units already inside the field.
   element("teleport").hidden = faction !== "network";
   element<HTMLButtonElement>("teleport").disabled = !canOrder || !battlefield.teleporters().length;
+  // Hub abilities, C&C style: no hub needs to be selected. The tooltip names
+  // the hub that will cast, or the best hub's reason it cannot.
+  for (const kind of ["recall", "bloom"] as AbilityKind[]) {
+    const rule = ABILITIES[kind];
+    const button = element<HTMLButtonElement>(kind);
+    button.hidden = faction !== rule.faction;
+    if (button.hidden) continue;
+    const hub = battlefield.caster(kind);
+    const hubs = owned.filter(unit => unit.kind === "hq" || unit.kind === "outpost").sort((left, right) => right.energy - left.energy || left.id - right.id);
+    const reason = hubs.length ? castRefusal(hubs[0], rule, room.tick, scheduledCasts(session.snapshot.commands, me.slot)) : "No hub to cast from";
+    const summary = kind === "recall"
+      ? `Recall (C) / ${rule.energy} energy, ${Number(rule.channelTicks) / 20}s channel, ${Number(rule.cooldownTicks) / 20}s cooldown / your units within ${rule.radius} return to the hub, shields spent`
+      : `Bloom (C) / ${rule.energy} energy, ${Number(rule.cooldownTicks) / 20}s cooldown / grows creep of ${rule.radius} on your own creep for 60s`;
+    button.disabled = !canOrder || !hub;
+    button.title = `${summary} / ${hub ? `Casts from ${CATALOG[hub.kind].label} #${hub.id} (${hub.energy} energy)` : reason ?? "Not ready"}`;
+  }
   element<HTMLButtonElement>("set-rally").disabled = !canOrder;
   element<HTMLButtonElement>("clear-rally").disabled = !canOrder || !producer?.order.kind.startsWith("rally_");
   // An Organic outpost queues harvesters but is not a production *control*:
@@ -501,10 +599,10 @@ function renderMatch(): void {
   element("rally-status").textContent = producer?.order.kind === "rally_move" ? `Rally ${Math.round(producer.order.x)}, ${Math.round(producer.order.y)}`
     : producer?.order.kind === "rally_gather" ? `${rallyNode ? CURRENCY_LABEL[currencyOf(rallyNode.kind)] : "Deposit"} rally #${producer.order.target}` : "Rally unset";
   element("selection-order").textContent = selection.length === 1 ? selection[0].constructionRemaining > 0n ? `Constructing / ${(Number(selection[0].constructionRemaining) / 20).toFixed(1)}s left` : selection[0].order.kind.split("_").join(" ") : "";
-  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : "Rally target";
+  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : battlefield.targeting === "recall" ? "Recall area / your units near it return home" : battlefield.targeting === "bloom" ? "Bloom site / on your own creep" : battlefield.targeting === "rally" ? "Rally target" : "";
   element("targeting-state").hidden = !battlefield.targeting;
   element("targeting-state").textContent = targetLabel;
-  for (const [id, kind] of [["attack-move", "attack_move"], ["repair", "repair"], ["set-rally", "rally"], ["teleport", "teleport"]]) element(id).setAttribute("aria-pressed", String(battlefield.targeting === kind));
+  for (const [id, kind] of [["attack-move", "attack_move"], ["repair", "repair"], ["set-rally", "rally"], ["teleport", "teleport"], ["recall", "recall"], ["bloom", "bloom"]]) element(id).setAttribute("aria-pressed", String(battlefield.targeting === kind));
   const result = room.state === "finished" ? room.winner === -1 ? "Draw" : room.winner === me.slot ? "Victory" : "Defeat" : session.matchReady && !alive ? "Eliminated" : "";
   element("result").hidden = !result;
   element("result-title").textContent = result;
@@ -542,6 +640,70 @@ function renderMatch(): void {
       row.style.borderColor = COLORS[player.slot]; return row;
     }));
   }
+}
+
+let selectionSignature = "";
+/**
+ * One tile per selected unit, SC2's wireframe panel: its icon, owner edge and
+ * health. Click keeps only that unit, Shift+click drops it, Ctrl+click keeps
+ * every selected unit of its kind. A single unit is described by the title
+ * and details lines instead, so the grid is only shown for two or more.
+ */
+function renderSelectionGrid(): void {
+  const grid = element("selection-grid");
+  const selection = session.snapshot.units.filter(unit => battlefield.selected.has(unit.id))
+    .sort((left, right) => left.kind.localeCompare(right.kind) || left.id - right.id);
+  const shown = selection.length > 1 ? selection.slice(0, 32) : [];
+  const signature = shown.map(unit => `${unit.id}:${Math.ceil(unit.hp / Math.max(1, unit.maxHp) * 10)}:${Math.ceil(unit.shields / Math.max(1, unit.maxShields) * 10)}`).join(",") + `/${selection.length}`;
+  if (signature === selectionSignature) return;
+  selectionSignature = signature;
+  grid.hidden = !shown.length;
+  grid.replaceChildren(...shown.map(unit => {
+    const tile = text("button", "", "unit-tile") as HTMLButtonElement;
+    const health = unit.hp / Math.max(1, unit.maxHp);
+    tile.title = `${CATALOG[unit.kind]?.label ?? unit.kind} #${unit.id} / ${unit.hp} of ${unit.maxHp} HP`;
+    tile.setAttribute("aria-label", tile.title);
+    tile.style.borderColor = COLORS[unit.owner];
+    tile.append(icon(CATALOG[unit.kind]?.icon ?? ""));
+    const bar = text("span", "", "unit-tile-health");
+    bar.style.width = `${Math.round(health * 100)}%`;
+    bar.classList.toggle("low", health <= 0.3);
+    tile.append(bar);
+    tile.addEventListener("click", event => {
+      if (event.shiftKey) battlefield.selected.delete(unit.id);
+      else if (event.ctrlKey) battlefield.selected = new Set(selection.filter(other => other.kind === unit.kind).map(other => other.id));
+      else battlefield.selected = new Set([unit.id]);
+      renderMatch();
+    });
+    return tile;
+  }));
+  if (selection.length > shown.length && shown.length) grid.append(text("span", `+${selection.length - shown.length}`, "unit-tile-more mono"));
+}
+
+let groupSignature = "";
+/** The control groups in use, over the battlefield: key, size and main kind. Click selects, double-click centres. */
+function renderGroupBar(): void {
+  const keys = battlefield.groupKeys();
+  const groups = keys.map(key => {
+    const members = battlefield.group(key);
+    const counts = new Map<string, number>();
+    for (const unit of members) counts.set(unit.kind, (counts.get(unit.kind) ?? 0) + 1);
+    const main = [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? "";
+    const active = members.length > 0 && members.every(unit => battlefield.selected.has(unit.id));
+    return { key, count: members.length, main, active };
+  });
+  const signature = JSON.stringify(groups);
+  if (signature === groupSignature) return;
+  groupSignature = signature;
+  element("group-bar").replaceChildren(...groups.map(group => {
+    const button = text("button", "", `group-chip${group.active ? " active" : ""}`) as HTMLButtonElement;
+    button.title = `Control group ${group.key} / ${group.count} unit${group.count === 1 ? "" : "s"} / press ${group.key} twice to centre`;
+    button.setAttribute("aria-label", button.title);
+    button.append(text("b", group.key), icon(CATALOG[group.main]?.icon ?? ""), text("span", String(group.count)));
+    button.addEventListener("click", () => battlefield.controlGroup("recall", group.key));
+    button.addEventListener("dblclick", () => battlefield.controlGroup("recall", group.key));
+    return button;
+  }));
 }
 
 function renderTimers(): void {
@@ -587,6 +749,8 @@ function render(): void {
   const playing = !!session.snapshot.room && session.snapshot.room.state !== "lobby";
   element("lobby").hidden = playing;
   element("match").hidden = !playing;
+  // In a match the site masthead goes: every pixel of height is battlefield.
+  document.body.classList.toggle("in-match", playing);
   element("status").textContent = session.status;
   element("connection-dot").classList.toggle("online", session.ready);
   battlefield.sync();

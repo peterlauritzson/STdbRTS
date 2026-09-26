@@ -24,7 +24,7 @@ export function connectClient(token?: string): Promise<{ connection: DbConnectio
         connection.subscriptionBuilder()
           .onApplied(() => { clearTimeout(timeout); resolve({ connection, token }); })
           .onError(context => { clearTimeout(timeout); connection.disconnect(); reject(context.event ?? new Error("Subscription failed")); })
-          .subscribe([tables.player, tables.room, tables.unit, tables.resource_node, tables.command]);
+          .subscribe([tables.player, tables.room, tables.unit, tables.resource_node, tables.command, tables.creep_patch]);
       })
       .onConnectError((_context, error) => { clearTimeout(timeout); reject(error); })
       .build();

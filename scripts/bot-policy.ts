@@ -1,7 +1,47 @@
-import type { Entity, Node, Order } from "../src/bindings/types";
+import type { CreepPatch, Entity, Node, Order } from "../src/bindings/types";
+import { abilityOf, castingHub, onCreep, recallable } from "../src/abilities";
 import { affords, ARMY, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isCompletedHub, isHub, isLabour, LABOUR, MAX_UNITS, placementError, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, type Cost, type FactionName } from "../src/catalog";
 
 export interface Decision { units: number[]; order: Order }
+
+/** What the bot needs to cast hub abilities; without it, it casts nothing. */
+export interface AbilityView { tick: bigint; creep: readonly CreepPatch[] }
+
+/** A recall is worth casting once this many units far from home are this badly hurt. */
+const RECALL_WOUNDED = 3;
+const RECALL_HEALTH = 0.35;
+const RECALL_AWAY = 700;
+
+/**
+ * The bot's one ability cast this pass, if any. Organic blooms at the edge of
+ * its creep on the line to the nearest enemy hub, so creep (and its death
+ * spawns) creeps towards the fight. Network recalls a group of wounded units
+ * that are far from home, which the shields it spends would not have saved.
+ */
+function castAbility(owner: number, faction: FactionName, owned: Entity[], units: Entity[], busy: Set<number>, view: AbilityView): Decision | undefined {
+  const rule = abilityOf(faction);
+  if (!rule) return;
+  const hub = castingHub(owned.filter(unit => !busy.has(unit.id)), owner, rule, view.tick, new Set());
+  if (!hub) return;
+  const home = owned.find(unit => unit.kind === "hq") ?? hub;
+  if (rule.kind === "bloom") {
+    const target = units.filter(unit => unit.owner !== owner && isHub(unit.kind)).sort((left, right) => Math.hypot(left.x - home.x, left.y - home.y) - Math.hypot(right.x - home.x, right.y - home.y))[0];
+    if (!target) return;
+    const gap = Math.max(1, Math.hypot(target.x - home.x, target.y - home.y));
+    let reach = 0;
+    // Walk out along the line in 20-unit steps while still on this player's
+    // creep; the bloom goes just inside the far edge.
+    while (reach + 20 < gap && onCreep(owner, home.x + (target.x - home.x) / gap * (reach + 20), home.y + (target.y - home.y) / gap * (reach + 20), view.creep)) reach += 20;
+    if (reach < 40) return;
+    return { units: [hub.id], order: { kind: "bloom", x: Math.round(home.x + (target.x - home.x) / gap * reach), y: Math.round(home.y + (target.y - home.y) / gap * reach), target: 0 } };
+  }
+  const wounded = owned.filter(unit => isArmy(unit.kind) && (unit.hp + unit.shields) < (unit.maxHp + unit.maxShields) * RECALL_HEALTH && Math.hypot(unit.x - home.x, unit.y - home.y) > RECALL_AWAY);
+  if (wounded.length < RECALL_WOUNDED) return;
+  const x = wounded.reduce((sum, unit) => sum + unit.x, 0) / wounded.length;
+  const y = wounded.reduce((sum, unit) => sum + unit.y, 0) / wounded.length;
+  if (!recallable(owned, owner, x, y, kind => !isBuilding(kind))) return;
+  return { units: [hub.id], order: { kind: "recall", x: Math.round(x), y: Math.round(y), target: 0 } };
+}
 
 /** Material held back so a repair pulse is always payable. */
 const REPAIR_RESERVE = 20;
@@ -60,7 +100,7 @@ function buildSite(kind: string, hq: Entity, owner: number, units: Entity[], nod
  * is paid for in hub stock, which is checked here so the bot never spends a
  * pass on orders the server would refuse.
  */
-export function chooseOrders(owner: number, faction: FactionName, balance: Cost & { research?: readonly string[] }, units: Entity[], nodes: Node[], busy: Set<number>, holdArmy = false): Decision[] {
+export function chooseOrders(owner: number, faction: FactionName, balance: Cost & { research?: readonly string[] }, units: Entity[], nodes: Node[], busy: Set<number>, holdArmy = false, abilities?: AbilityView): Decision[] {
   const owned = units.filter(unit => unit.owner === owner);
   // Primary-hub victory: after the HQ falls the bot plays on from any
   // completed outpost, which then anchors building, repair and the attack.
@@ -68,6 +108,9 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
   const researched = balance.research ?? [];
   if (!hq) return [];
   const decisions: Decision[] = [];
+  // First, so the per-pass order cap never drops it.
+  const cast = abilities && castAbility(owner, faction, owned, units, busy, abilities);
+  if (cast) decisions.push(cast);
   const labour = LABOUR[faction];
   // Its own labour is all a faction can ever have, but filtering on `isLabour`
   // keeps the rest of this policy true of whatever labour it is holding.

@@ -6,7 +6,8 @@ use crate::{
     advance_patch, creep_max_radius, creep_zone, death_spawn, fights, is_temporary, mining_yield,
     producer, stats, stipend_payment, temporary_lifetime, validate_position, zone_template,
     can_teleport, power_field, projects_power, shield_regen, trains_in_field, vitals, Balance,
-    TELEPORT_COOLDOWN_TICKS,
+    TELEPORT_COOLDOWN_TICKS, ability, max_energy, Ability, BLOOM, BLOOM_LIFETIME_TICKS,
+    ENERGY_REGEN_INTERVAL_TICKS, HUB_START_ENERGY, RECALL, RECALL_RADIUS,
     Cost, CreepPatch, Faction, ResourceKind, Zone, ZoneField,
     HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, MAX_BUILDINGS, MAX_QUEUE, MAX_UNITS,
     MINING_PULSE_TICKS, POWER_RESTORE_RADIUS, REPAIR_COST, SHIELD_REGEN_DELAY_TICKS,
@@ -101,6 +102,14 @@ pub fn movement_speed(unit: &Entity, zones: &ZoneField) -> f32 {
     base * zones.movement_multiplier(unit.owner, &unit.kind, unit.x, unit.y)
 }
 
+/// Would a recall by `owner` at `(x, y)` take `unit`? The owner's mobile
+/// units within `RECALL_RADIUS`.
+fn recallable(unit: &Entity, owner: u8, x: f32, y: f32) -> bool {
+    unit.owner == owner
+        && can_teleport(&unit.kind)
+        && distance(unit.x, unit.y, x, y) <= RECALL_RADIUS
+}
+
 #[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Order {
@@ -126,6 +135,19 @@ impl Order {
 pub struct Production {
     pub kind: String,
     pub finish_tick: u64,
+}
+
+/// An ability a caster has started and not yet resolved: today only a
+/// Network recall channelling. Kept apart from `order` so a hub's rally
+/// survives the cast.
+#[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cast {
+    pub kind: String,
+    pub x: f32,
+    pub y: f32,
+    /// The tick the effect happens on.
+    pub complete_tick: u64,
 }
 
 #[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
@@ -178,6 +200,13 @@ pub struct Entity {
     /// The tick a teleported unit becomes active again, or 0. Until then it
     /// neither moves, shoots nor gathers, but it can be shot.
     pub arrive_tick: u64,
+    /// Ability energy, up to `max_energy` for the kind and faction. Always 0
+    /// on anything that casts nothing.
+    pub energy: i32,
+    /// The first tick this caster may cast again, or 0.
+    pub ability_ready_tick: u64,
+    /// A cast channelling towards its effect, if any.
+    pub cast: Option<Cast>,
 }
 
 #[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
@@ -385,6 +414,9 @@ impl World {
             damaged_tick: 0,
             warp_tick: 0,
             arrive_tick: 0,
+            energy: max_energy(kind, self.faction(owner)).min(HUB_START_ENERGY),
+            ability_ready_tick: 0,
+            cast: None,
         });
         self.next_id += 1;
     }
@@ -618,6 +650,7 @@ impl World {
             if command.queued
                 && (unit.queue.len() >= MAX_QUEUE
                     || training.is_some()
+                    || ability(&order.kind).is_some()
                     || matches!(order.kind.as_str(), "stop" | "hold" | "teleport"))
             {
                 return Err("Order queue is full or action cannot be queued".into());
@@ -735,6 +768,13 @@ impl World {
                     if !Navigation::new(map, &self.units).free(order.x, order.y) {
                         return Err("Destination is obstructed".into());
                     }
+                }
+                kind if ability(kind).is_some() => {
+                    let spell = ability(kind).unwrap();
+                    if command.units.len() != 1 {
+                        return Err(format!("{} is cast by one hub", spell.label));
+                    }
+                    self.validate_cast(unit, &spell, order, map)?;
                 }
                 "hold" => {
                     if !fights(&unit.kind) {
@@ -881,6 +921,10 @@ impl World {
             // No cancellation and no interruption: from here the site builds
             // itself one tick at a time until it is finished or destroyed.
             debug_assert_eq!(site.id, building_id);
+            return Ok(());
+        }
+        if let Some(spell) = ability(&command.order.kind) {
+            self.cast(command.units[0], &spell, &command.order);
             return Ok(());
         }
         for id in &command.units {
@@ -1040,6 +1084,7 @@ impl World {
         }
 
         self.units.sort_by_key(|unit| unit.id);
+        self.resolve_casts(map);
         // Before the snapshot, so the field this tick is built from the creep
         // as it stands after this tick's growth or recession.
         self.advance_creep();
@@ -1075,6 +1120,10 @@ impl World {
             if unit.construction_remaining > 0 {
                 construction.insert(unit.id, 1);
                 continue;
+            }
+            if self.tick % ENERGY_REGEN_INTERVAL_TICKS == 0 {
+                let faction = factions.get(&unit.owner).copied().unwrap_or(Faction::Industrial);
+                unit.energy = (unit.energy + 1).min(max_energy(&unit.kind, faction));
             }
             // Just arrived from a teleport: inactive until `arrive_tick`. It
             // does nothing at all this tick, but it is still in the snapshot,
@@ -1698,10 +1747,18 @@ impl World {
                 .binary_search_by_key(&source, |unit| unit.id)
                 .is_ok_and(|at| units[at].construction_remaining == 0)
         };
+        // A bloom has no source entity: it is live until it expires.
         let mut creep: Vec<CreepPatch> = self
             .creep
             .iter()
-            .filter_map(|patch| advance_patch(*patch, live(patch.source), tick))
+            .filter_map(|patch| {
+                let alive = if patch.expires_tick > 0 {
+                    tick < patch.expires_tick
+                } else {
+                    live(patch.source)
+                };
+                advance_patch(*patch, alive, tick)
+            })
             .collect();
         for unit in units {
             if unit.construction_remaining > 0
@@ -1726,6 +1783,156 @@ impl World {
         creep.sort_unstable_by_key(|patch| patch.source);
         self.creep = creep;
     }
+
+    /// Everything that decides whether `caster` may cast `spell` at `order`
+    /// right now, beyond the checks every order shares.
+    fn validate_cast(
+        &self,
+        caster: &Entity,
+        spell: &Ability,
+        order: &Order,
+        map: &MapDefinition,
+    ) -> Result<(), String> {
+        let faction = self.faction(caster.owner);
+        if faction != spell.faction {
+            return Err(format!(
+                "Only the {} faction can cast {}; you are playing {faction}",
+                spell.faction, spell.label
+            ));
+        }
+        if !is_hub(&caster.kind) {
+            return Err(format!("{} is cast by a hub", spell.label));
+        }
+        if caster.cast.is_some() {
+            return Err("This hub is already channelling".into());
+        }
+        if self.tick < caster.ability_ready_tick {
+            let left = (caster.ability_ready_tick - self.tick).div_ceil(20);
+            return Err(format!("{} is recharging: {left}s left", spell.label));
+        }
+        if caster.energy < spell.energy {
+            return Err(format!(
+                "Not enough energy: {} needed, {} available",
+                spell.energy, caster.energy
+            ));
+        }
+        validate_position(order.x, order.y, map.size)?;
+        match spell.kind {
+            "recall" => {
+                if !self
+                    .units
+                    .iter()
+                    .any(|unit| recallable(unit, caster.owner, order.x, order.y))
+                {
+                    return Err("None of your units are near that point to recall".into());
+                }
+            }
+            "bloom" => {
+                if !self.on_creep(caster.owner, order.x, order.y) {
+                    return Err("Bloom must be placed on your own creep".into());
+                }
+            }
+            _ => unreachable!("every ability is validated"),
+        }
+        Ok(())
+    }
+
+    /// Is `(x, y)` on any of `owner`'s creep, blooms included?
+    pub fn on_creep(&self, owner: u8, x: f32, y: f32) -> bool {
+        self.creep.iter().any(|patch| {
+            patch.owner == owner && distance(x, y, patch.x, patch.y) <= f32::from(patch.radius)
+        })
+    }
+
+    /// Spends the energy, starts the cooldown and either takes effect at once
+    /// or starts the channel. Called only after `validate_cast` passed.
+    fn cast(&mut self, caster: u32, spell: &Ability, order: &Order) {
+        let tick = self.tick;
+        let Some(unit) = self.units.iter_mut().find(|unit| unit.id == caster) else {
+            return;
+        };
+        unit.energy -= spell.energy;
+        unit.ability_ready_tick = tick + spell.cooldown_ticks;
+        if spell.channel_ticks > 0 {
+            unit.cast = Some(Cast {
+                kind: spell.kind.into(),
+                x: order.x,
+                y: order.y,
+                complete_tick: tick + spell.channel_ticks,
+            });
+            return;
+        }
+        let owner = unit.owner;
+        if spell.kind == BLOOM.kind {
+            // The id is taken from the entity counter so it sorts and never
+            // collides, but no entity is ever spawned with it.
+            let source = self.next_id;
+            self.next_id += 1;
+            self.creep.push(CreepPatch::bloom(
+                source,
+                owner,
+                order.x,
+                order.y,
+                tick + BLOOM_LIFETIME_TICKS,
+            ));
+            self.creep.sort_unstable_by_key(|patch| patch.source);
+        }
+    }
+
+    /// Resolves every channelled cast that completes this tick. A hub that
+    /// died during the channel took its cast with it, so there is nothing to
+    /// interrupt here. Expects `self.units` sorted by id.
+    fn resolve_casts(&mut self, map: &MapDefinition) {
+        let tick = self.tick;
+        let due: Vec<(u8, f32, f32, Cast)> = self
+            .units
+            .iter_mut()
+            .filter(|unit| {
+                unit.cast
+                    .as_ref()
+                    .is_some_and(|cast| cast.complete_tick <= tick)
+            })
+            .map(|unit| (unit.owner, unit.x, unit.y, unit.cast.take().unwrap()))
+            .collect();
+        for (owner, hub_x, hub_y, cast) in due {
+            debug_assert_eq!(cast.kind, RECALL.kind);
+            // Landing spots are searched against the world as it stands
+            // before anyone moves: units never block landing, and the
+            // separation step spreads the arrivals out afterwards.
+            let navigation = Navigation::new(map, &self.units);
+            let mut landed = 0usize;
+            for unit in &mut self.units {
+                if !recallable(unit, owner, cast.x, cast.y) {
+                    continue;
+                }
+                // A spiral around the hub: the golden angle keeps neighbours
+                // apart, and every eight arrivals step one ring further out.
+                let angle = landed as f32 * 2.399_963;
+                let ring = 60.0 + 16.0 * (landed / 8) as f32;
+                let (x, y) = (hub_x + angle.cos() * ring, hub_y + angle.sin() * ring);
+                let landing = if navigation.free(x, y) {
+                    Some((x, y))
+                } else {
+                    navigation.escape(x, y)
+                };
+                let Some((x, y)) = landing else {
+                    continue;
+                };
+                landed += 1;
+                unit.x = x;
+                unit.y = y;
+                unit.order = Order::idle();
+                unit.queue.clear();
+                unit.returning = false;
+                unit.arrive_tick = tick + TELEPORT_ARRIVAL_TICKS;
+                // Shield-funded: every recalled unit arrives with its shields
+                // spent, and they wait the usual delay before regenerating.
+                unit.shields = 0;
+                unit.damaged_tick = tick;
+            }
+        }
+    }
+
 
     pub fn surrender(&mut self, owner: u8) {
         if self.outcome.is_some() {
@@ -2164,6 +2371,7 @@ mod tests {
                 radius: crate::CREEP_HQ_RADIUS,
                 max_radius: crate::CREEP_HQ_RADIUS,
                 lost_tick: 0,
+                expires_tick: 0,
             }],
             "one full patch, the Organic HQ's; the Industrial HQ spreads nothing"
         );
@@ -4691,5 +4899,182 @@ mod tests {
         // 148 hit points and 72 shields.
         let sentinel = world.units.iter().find(|unit| unit.kind == "sentinel").unwrap();
         assert_eq!((sentinel.hp, sentinel.shields), (148, 72));
+    }
+
+    // --- abilities: energy, recall and bloom -----------------------------------
+
+    #[test]
+    fn network_and_organic_hubs_carry_energy_and_industrial_ones_do_not() {
+        let mut world = power_arena();
+        let hq = world.units[0].id;
+        let industrial = world.units[1].id;
+        assert_eq!(unit_of(&world, hq).energy, crate::HUB_START_ENERGY);
+        assert_eq!(unit_of(&world, industrial).energy, 0);
+        for _ in 0..crate::ENERGY_REGEN_INTERVAL_TICKS * 10 {
+            world.step();
+        }
+        assert_eq!(unit_of(&world, hq).energy, crate::HUB_START_ENERGY + 10);
+        assert_eq!(unit_of(&world, industrial).energy, 0);
+        world.units[0].energy = crate::HUB_MAX_ENERGY;
+        for _ in 0..crate::ENERGY_REGEN_INTERVAL_TICKS * 2 {
+            world.step();
+        }
+        assert_eq!(unit_of(&world, hq).energy, crate::HUB_MAX_ENERGY, "capped");
+    }
+
+    #[test]
+    fn recall_channels_then_brings_units_home_inactive_and_without_shields() {
+        let mut world = power_arena();
+        let hq = world.units[0].id;
+        let near = spawned(&mut world, 0, "sentinel", UNPOWERED);
+        let also = spawned(&mut world, 0, "skimmer", (UNPOWERED.0 + 60.0, UNPOWERED.1));
+        let far = spawned(&mut world, 0, "sentinel", (UNPOWERED.0 + 300.0, UNPOWERED.1));
+        // A rally set before the cast survives it.
+        world
+            .execute(&order_at(hq, "rally_move", (400.0, 1300.0)))
+            .unwrap();
+        world.execute(&order_at(hq, "recall", UNPOWERED)).unwrap();
+        let caster = unit_of(&world, hq);
+        assert_eq!(caster.energy, crate::HUB_START_ENERGY - crate::RECALL.energy);
+        assert_eq!(caster.order.kind, "rally_move");
+        assert!(world
+            .validate(&order_at(hq, "recall", UNPOWERED))
+            .unwrap_err()
+            .contains("already channelling"));
+        for _ in 0..crate::RECALL.channel_ticks - 1 {
+            world.step();
+        }
+        assert_eq!(
+            (unit_of(&world, near).x, unit_of(&world, near).y),
+            UNPOWERED,
+            "still channelling"
+        );
+        world.step();
+        for id in [near, also] {
+            let unit = unit_of(&world, id);
+            assert!(
+                distance(unit.x, unit.y, NETWORK_HQ.0, NETWORK_HQ.1) < 120.0,
+                "recalled next to the hub"
+            );
+            assert_eq!(unit.shields, 0, "recall is paid in shields");
+            assert_eq!(unit.arrive_tick, world.tick + crate::TELEPORT_ARRIVAL_TICKS);
+        }
+        let (near_unit, also_unit) = (unit_of(&world, near), unit_of(&world, also));
+        assert!(distance(near_unit.x, near_unit.y, also_unit.x, also_unit.y) > 20.0);
+        let stayed = unit_of(&world, far);
+        assert_eq!(
+            (stayed.x, stayed.y),
+            (UNPOWERED.0 + 300.0, UNPOWERED.1),
+            "out of range"
+        );
+        let caster = unit_of(&world, hq);
+        assert!(caster.cast.is_none());
+        assert_eq!(caster.order.kind, "rally_move");
+        // The cooldown runs from the cast, whatever the energy.
+        world.units.iter_mut().find(|unit| unit.id == hq).unwrap().energy = 200;
+        assert!(world
+            .validate(&order_at(hq, "recall", (UNPOWERED.0 + 300.0, UNPOWERED.1)))
+            .unwrap_err()
+            .contains("recharging"));
+    }
+
+    #[test]
+    fn recall_is_refused_without_energy_units_or_the_right_faction() {
+        let mut world = power_arena();
+        let hq = world.units[0].id;
+        let industrial = world.units[1].id;
+        spawned(&mut world, 0, "sentinel", UNPOWERED);
+        assert!(world
+            .validate(&order_at(hq, "recall", (1000.0, 600.0)))
+            .unwrap_err()
+            .contains("None of your units"));
+        let mut theirs = order_at(industrial, "recall", UNPOWERED);
+        theirs.owner = 1;
+        assert!(world.validate(&theirs).unwrap_err().contains("Only the"));
+        world.units[0].energy = crate::RECALL.energy - 1;
+        assert!(world
+            .validate(&order_at(hq, "recall", UNPOWERED))
+            .unwrap_err()
+            .contains("Not enough energy"));
+        world.units[0].energy = crate::RECALL.energy;
+        let mut queued = order_at(hq, "recall", UNPOWERED);
+        queued.queued = true;
+        assert!(world.validate(&queued).is_err(), "abilities cannot be queued");
+        let relay = spawned(&mut world, 0, "relay", RELAY);
+        assert!(world
+            .validate(&order_at(relay, "recall", UNPOWERED))
+            .unwrap_err()
+            .contains("cast by a hub"));
+    }
+
+    #[test]
+    fn a_hub_destroyed_while_channelling_recalls_nobody() {
+        let mut world = power_arena();
+        world.spawn(0, "outpost", 700.0, 1300.0);
+        let outpost = world.units.last().unwrap().id;
+        let sentinel = spawned(&mut world, 0, "sentinel", UNPOWERED);
+        world.execute(&order_at(outpost, "recall", UNPOWERED)).unwrap();
+        world.step();
+        world.units.retain(|unit| unit.id != outpost);
+        for _ in 0..crate::RECALL.channel_ticks {
+            world.step();
+        }
+        let stayed = unit_of(&world, sentinel);
+        assert_eq!((stayed.x, stayed.y), UNPOWERED);
+        assert_eq!(stayed.shields, stayed.max_shields);
+    }
+
+    #[test]
+    fn bloom_grows_temporary_creep_on_your_own_creep_then_recedes() {
+        let mut world = organic_versus_industrial();
+        let hq = world
+            .units
+            .iter()
+            .find(|unit| unit.owner == 0 && unit.kind == "hq")
+            .unwrap()
+            .clone();
+        // Towards the middle of the map, just inside the HQ's creep.
+        let (dx, dy) = (800.0 - hq.x, 800.0 - hq.y);
+        let length = (dx * dx + dy * dy).sqrt();
+        let at = |reach: f32| (hq.x + dx / length * reach, hq.y + dy / length * reach);
+        let edge = at(f32::from(crate::CREEP_HQ_RADIUS) - 20.0);
+        let beyond = at(f32::from(crate::CREEP_HQ_RADIUS) + 150.0);
+        assert!(world
+            .validate(&order_at(hq.id, "bloom", beyond))
+            .unwrap_err()
+            .contains("your own creep"));
+        world.execute(&order_at(hq.id, "bloom", edge)).unwrap();
+        let bloom = *world.creep.last().unwrap();
+        assert_eq!(bloom.expires_tick, crate::BLOOM_LIFETIME_TICKS);
+        assert_eq!(bloom.max_radius, crate::BLOOM_RADIUS);
+        assert!(world.units.iter().all(|unit| unit.id != bloom.source));
+        assert_eq!(
+            unit_of(&world, hq.id).energy,
+            crate::HUB_START_ENERGY - crate::BLOOM.energy
+        );
+        // Grows to full, and extends the creep past the HQ's own edge.
+        for _ in 0..400 {
+            world.step();
+        }
+        assert_eq!(
+            patch_of(&world, bloom.source).unwrap().radius,
+            crate::BLOOM_RADIUS
+        );
+        assert!(world.on_creep(0, beyond.0, beyond.1));
+        // Blooms chain: the new creep takes another, once the cooldown is up.
+        world.units.iter_mut().find(|unit| unit.id == hq.id).unwrap().energy = 100;
+        world.execute(&order_at(hq.id, "bloom", beyond)).unwrap();
+        // Lives out its lifetime, then lingers and recedes like a lost hub's.
+        while world.tick < crate::BLOOM_LIFETIME_TICKS + crate::CREEP_LINGER_TICKS {
+            world.step();
+        }
+        assert_eq!(
+            patch_of(&world, bloom.source).unwrap().radius,
+            crate::BLOOM_RADIUS
+        );
+        for _ in 0..crate::TICKS_PER_SECOND * 11 {
+            world.step();
+        }
+        assert!(patch_of(&world, bloom.source).is_none(), "receded to nothing");
     }
 }
