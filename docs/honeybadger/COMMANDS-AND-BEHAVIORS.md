@@ -71,9 +71,10 @@ Policies survive loss of client connection and run on the server. Policy changes
 | --- | --- | --- |
 | Relay transfer | Delayed intent, validate source/destination, channel, land in valid slots, arrival state | Revalidate relay and occupancy at resolution; source/destination loss cancels without duplicating units; partial group handling declared |
 | Recall | Delayed intent, pay permitted shield cost at cast, short channel, resolve eligible units, arrival state | Incoming damage interrupts affected units; no refund on ordinary interruption unless explicitly specified; do not kill casting hub through cost |
-| Smoke | Delayed cast or active policy action, bounded lifetime/charges, owner-aware visibility | Sight-only effect initially; not bullet collision; leaving fog removes live tracking; opposing fields have explicit overlap rules |
-| Retreat boost | Delayed command or active policy, speed phase, recovery penalty | Cannot toggle away the penalty; policy cannot evade it by issuing another action |
+| Smoke (turned down 2026-09-25; earlier mod version only) | Delayed cast or active policy action, bounded lifetime/charges, owner-aware visibility | Sight-only effect initially; not bullet collision; leaving fog removes live tracking; opposing fields have explicit overlap rules |
+| Retreat boost (turned down 2026-09-25; earlier mod version only) | Delayed command or active policy, speed phase, recovery penalty | Cannot toggle away the penalty; policy cannot evade it by issuing another action |
 | Organic sacrifice/morph | Delayed intent; consume eligible inputs atomically at start; timed output | Death/cancel races and input ownership tested; combine consumes exactly four selected eligible workers in the reference-inspired design |
+| Repair drone | Delayed intent at a target; the nearest hub with enough energy pays and launches a drone that travels there, heals for a bounded amount, then expires | One drone per target at a time (H0); healing total is capped (about 300 life in H0); whether the drone can be shot in transit is open |
 | Temporary death-spawns | Resolve after simultaneous deaths against the defined territory snapshot | Child entities ineligible for recursive spawning/refunds; budgets cannot nondeterministically drop effects |
 | Area damage | Telegraph, windup/travel, resolve gameplay area; visuals follow events | Give warning proportional to delay or support preconfigured avoidance; do not import twitch-dependent attacks unchanged |
 

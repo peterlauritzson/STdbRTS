@@ -573,3 +573,113 @@ Badger versions. What Industrial gets instead is open.
 played. Blooms may need a limit per hub if chained creep crosses the map too
 quickly. Casting from hubs keeps the command card uniform, but a unit caster
 (SC2's queen) is the obvious alternative for Organic.
+
+---
+
+## 2026-09-29 — The author's changelog sheet is the reference source
+
+**Decision (author).** The author's changelog spreadsheet (H0, transcribed in
+[REFERENCE-CHANGELOG.md](REFERENCE-CHANGELOG.md)) replaces the mod's website
+page (H1) as the reference for what Honey Badger was. H1 describes an earlier
+version. [RESEARCH.md](RESEARCH.md) is updated to match.
+
+**What this does not do.** It overturns no entry above. Every earlier entry
+was either the author's own call or labeled experimental, and several already
+matched H0 rather than H1: construction with no builder unit, the sensor
+tower, shield restoration on death in the power field, owner-only death spawns
+on creep, and dropping smoke, retreat and suppression. A reference source
+informs decisions; it does not make them.
+
+**Where the built game now differs from H0.** These were open questions for the
+author; the answers are the next entry. Each needs a decision before code changes.
+
+| Built today | H0 says | Question |
+| --- | --- | --- |
+| Finite deposits that deplete | Minerals and gas are infinite and replenish | Keep depletion (it pushes expansion) or go infinite? |
+| Opening stipend 200 then 100/min | Not present (H1 only) | Keep as a tuning aid or remove? |
+| Refund: army only | Also gas buildings, Zerg bases, Protoss probes | Widen eligibility? |
+| Material buys units; catalyst buys tech and specialists | Unit prices look gas-denominated; Terrazine, a third resource, buys static defense | Is the currency split right, and is a third resource for defense wanted? |
+| Research at a lab, with a timer | Instant, global, on the hero builder, plus four global ability tiers | Adopt instant research and tiers? |
+| Build anywhere legal | Within 40 of a finished structure; static defense only in a faction zone; no building on the enemy half early | Adopt adjacency and zone-gated defense? |
+| Network shields regenerate after 10s out of combat; hit points never regenerate | Shields regenerate in combat; the power field also regenerates life and energy | Change regeneration? |
+| Industrial has no ability | Orbital repair drones (75 energy), tech reactors | Is the repair drone the Industrial ability? |
+| No overkill rule | Protoss ricochet: overkill bounces to a nearby unit | Wanted for Network? |
+| No burrow | Zerg burrowed units move and regenerate faster | Wanted for Organic? |
+| Every faction opens with its labour plus one fighter | Terran opens with 16 SCVs | Opening counts per faction? |
+
+**Would overturn it.** A later or more authoritative source from the author,
+such as the mod's data files.
+
+---
+
+## 2026-09-29 — Three currencies, base income, instant research, build rules
+
+The author's answers to the questions in the previous entry. All settled;
+every number is still experimental.
+
+**Currencies (author: "a huge part of the schtick").** Each currency buys one
+kind of thing, so spending on the army never competes with building or
+teching:
+
+| Currency (working name) | SC2 reference | Buys |
+| --- | --- | --- |
+| Material | minerals | Structures, research, ability tiers |
+| Catalyst | gas | Army units |
+| Terrazine | Terrazine | Static defense (turrets) |
+
+Terrazine is earned by mining material, as a by-product; Industrial earns 20%
+more of it (H0). This supersedes the 2026-09-22 split (material for workers,
+buildings and basic army; catalyst for tech and specialists).
+
+**Base income never stops.** The opening stipend becomes permanent base
+income. The 90-second phases stop mattering after the opening.
+
+**Depletion stays**, for now, although H0 has infinite resources.
+
+**Research is instant and global**, bought from the command card with no
+building, as on H0's hero builder. H0's four global ability tiers come with it.
+The lab's research queue goes.
+
+**Build rules.** A structure must be placed within a fixed range of one of the
+owner's *finished* structures. Static defense can only be placed inside the
+owner's faction zone: power field, creep, or sensor-tower radius. No building
+on the opponent's half of the map for the first few minutes.
+
+**Network regeneration.** Shields regenerate in combat (no 10s delay). Inside
+the power field, hit points and energy regenerate as well as shields, faster.
+
+**Industrial ability: the repair drone.** Cast from an Industrial hub for
+energy (H0: 75). A drone flies from the nearest hub with enough energy to the
+target and heals **hit points of any unit**, not only mechanical ones, for a
+bounded total (H0: about 300), then expires. One drone per target at a time.
+Industrial hubs therefore gain energy.
+
+**Yes to the rest:** Network ricochet (overkill damage bounces to a nearby
+enemy); Organic burrow (burrowed units move and regenerate faster, and are
+never hidden); wider refunds at 50% for gas buildings, Organic hubs and Network
+drifters, on top of army units.
+
+**Still open (not asked yet).**
+
+- Base income rate and which currencies it pays. Implementation default until
+  answered: 100 material per minute, the stipend's second-phase rate, forever.
+- ~~What labour costs~~: material (author, 2026-09-29, later).
+- ~~How catalyst is gathered~~: **automatic refineries for every faction**
+  (author, 2026-09-29, later). A refinery on a catalyst site produces catalyst
+  on its own, with no workers, as H0's gas buildings do. This revives the
+  demoted autonomous extractor (Increment F) as a shared mechanic, not an
+  Industrial identity, and without suppression or an output switch.
+- **Cross-income, as the author remembers it (unconfirmed):** every X material
+  mined also gave Y catalyst, and every X catalyst gave Y material. Exact
+  values, and whether this is the same mechanism as Terrazine's by-product
+  income, are not known. Not in H0.
+- Refinery rate, cost, and whether workers can still mine catalyst at all.
+- The Terrazine rate per material mined, the placement range, the no-build
+  window's length and what counts as "the opponent's half", and what the four
+  tiers contain for this game's three rosters.
+- Whether the Organic burrow and the Network ricochet are per-kind or
+  faction-wide.
+
+**Would overturn it.** Play showing that separate currencies make one of them
+irrelevant (for example, static defense never built), or that permanent base
+income removes the pressure to expand.

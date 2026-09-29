@@ -37,7 +37,20 @@ export class Feedback {
     }
   }
 
-  private play(notes: number[]): void {
+  private lastAck = 0;
+  /**
+   * The acknowledgement for an order you just gave: one short, quiet blip,
+   * lower for a fight than for a move, at the click rather than a second
+   * later when the order executes. Rapid re-clicks do not stack.
+   */
+  ack(kind: string): void {
+    const now = performance.now();
+    if (now - this.lastAck < 70) return;
+    this.lastAck = now;
+    this.play([kind === "attack" || kind === "attack_move" ? 392 : kind.startsWith("build_") ? 660 : 523], 0.02, 0.06);
+  }
+
+  private play(notes: number[], volume = 0.035, length = 0.15): void {
     const audio = this.audio;
     if (!this.enabled || !audio || audio.state !== "running") return;
     for (const [index, frequency] of notes.entries()) {
@@ -45,9 +58,9 @@ export class Feedback {
       const gain = audio.createGain();
       const start = audio.currentTime + index * 0.13;
       oscillator.type = "triangle"; oscillator.frequency.value = frequency;
-      gain.gain.setValueAtTime(0, start); gain.gain.linearRampToValueAtTime(0.035, start + 0.01); gain.gain.exponentialRampToValueAtTime(0.001, start + 0.15);
+      gain.gain.setValueAtTime(0, start); gain.gain.linearRampToValueAtTime(volume, start + 0.01); gain.gain.exponentialRampToValueAtTime(0.001, start + length);
       oscillator.connect(gain); gain.connect(audio.destination);
-      oscillator.start(start); oscillator.stop(start + 0.16);
+      oscillator.start(start); oscillator.stop(start + length + 0.01);
       oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
     }
   }

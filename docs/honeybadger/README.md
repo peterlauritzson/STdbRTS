@@ -11,7 +11,7 @@ Build an original browser RTS about contested territory, asymmetric economies, r
 ## Reading order
 
 1. [Game design](GAME-DESIGN.md): what the game should feel like, resources, factions, zones, maps, and the first playable slice.
-2. [Research ledger](RESEARCH.md): documented Honeybadger mechanics, exact historical numbers where available, source links, and uncertainties.
+2. [Research ledger](RESEARCH.md): documented Honeybadger mechanics, exact historical numbers where available, source links, and uncertainties. Its primary source since 2026-09-29 is the author's changelog sheet, transcribed in [reference changelog](REFERENCE-CHANGELOG.md).
 3. [Commands and behaviors](COMMANDS-AND-BEHAVIORS.md): delayed execution, automation, ability timing, fairness, and player feedback.
 4. [Architecture and experience](ARCHITECTURE-AND-UX.md): reusable code, security, simulation, maps, graphics, controls, assets, and testing boundaries.
 5. [Roadmap](ROADMAP.md): incremental deliverables, dependencies, acceptance gates, playtests, and risks.
@@ -27,6 +27,8 @@ Build an original browser RTS about contested territory, asymmetric economies, r
 
 These decisions override any earlier proposal to reproduce precise unit multipliers, immediately prioritize touch parity, or port every inherited SC2 ability.
 
+Later corrections: on 2026-09-25 the author turned down smoke, retreat and refinery suppression as leftovers of earlier mod versions, so "refineries/smoke/harassment" above is no longer a requirement. On 2026-09-29 the author's changelog sheet replaced the website as the reference source; the website describes an earlier version. See [DECISIONS.md](DECISIONS.md).
+
 ## First release-shaped goal
 
 Three small but genuinely different factions, two purpose-built 1v1 maps, dependable group movement, dual-resource tradeoffs, clear delayed-order feedback, useful behavior presets, and readable original 3D presentation. Start with one map and one representative loop per faction; do not wait for a complete roster to playtest.
@@ -35,7 +37,7 @@ Existing skirmish code is the starting point, not disposable scaffolding. See [c
 
 ## Research limits
 
-The authenticated repository inspected is a Django information website. Its rules were read, but executable mod data and linked match videos have not been analyzed. Documentary inconsistencies and unspecified values are recorded rather than guessed. Old-version video links are research leads, not verified gameplay evidence.
+The authenticated repository inspected is a Django information website. Its rules were read, but executable mod data and linked match videos have not been analyzed. The author's changelog sheet, added 2026-09-29, is design documentation as well, not mod data. Documentary inconsistencies and unspecified values are recorded rather than guessed. Old-version video links are research leads, not verified gameplay evidence.
 
 The plan proposes experiments and architecture decisions; it does not claim completed security, load, balance, replay, or rendering work. Small-model agents assisted bounded interaction and architecture reviews; their suggestions were checked against the code and the author's clarified priorities.
 

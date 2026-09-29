@@ -61,10 +61,12 @@ Dependencies: M2. Implement one faction loop at a time in the sandbox, but do no
 | Increment | Essential content | Must demonstrate |
 | --- | --- | --- |
 | Network | Remote material mining, fragile relay/supply infrastructure, stationary transfer, arrival vulnerability, then shield-funded recall | Expand without a base-centered mineral loop; respond through relays; opponent can disrupt mobility; recall trades base safety for preservation |
-| Industrial | Conventional labor, auto-extractors with output switch, damage suppression/burning, repair support, smoke and retreat penalty | A nonlethal raid measurably affects income; output choice changes tech/mass options; smoke affects opponents' sight only |
+| Industrial | Conventional labor, sensor-tower speed zone, repair support (H0: repair drones from hubs), then possibly double-production add-ons | Tower coverage measurably changes where fights happen; destroying towers is worth an attack; repair keeps an army in the field without making it immortal |
 | Organic | Shared local production stock, free small labor (no builder conversion: construction is from the command card for everyone), growing/decaying territory, temporary terrain source, death-spawns | Worker replacement competes with army production; severing territory changes economy; defending on territory has value without infinite spawning |
 
-This sequence is a provisional engineering order: stationary transfer tests zones, industrial smoke tests asymmetric sight, organic adds the largest entity/territory load. Reorder if M1 evidence favors it; do not infer priority from sequence.
+This sequence is a provisional engineering order: stationary transfer tests zones, organic adds the largest entity/territory load. Reorder if M1 evidence favors it; do not infer priority from sequence.
+
+The Industrial row was revised 2026-09-29. Its earlier content (auto-extractors with an output switch, suppression and burning, smoke, retreat) came from the mod's website page (H1), an earlier version. The author turned smoke, retreat and suppression down on 2026-09-25, and the author's changelog sheet (H0, [REFERENCE-CHANGELOG.md](REFERENCE-CHANGELOG.md)) makes auto-extraction common to every race. Smoke remains listed elsewhere in this roadmap only as a possible later ability.
 
 Give each faction only the original roles needed to attack, defend, and express its loop. Make all three use the same policy framework and delay contract. Preserve a distinct catalyst tradeoff for every faction instead of letting remote/free mining eliminate resource specialization.
 
@@ -152,12 +154,14 @@ Use replay comparison and conservation assertions for correctness. Use player ob
 3. Exact first-slice costs/rates, resource-node quantities, zone timings, and refund percentage. Use the reference as a starting hypothesis, not a numeric mandate.
 4. ~~Primary-hub elimination proposal versus a different victory rule~~: settled 2026-09-25, primary-hub elimination (see DECISIONS.md).
 5. How expressive advanced policies should become and which information/abilities they may use. Start bounded and review evidence in M5.
-6. Whether actual mod data is needed to resolve a specific contested interaction. The author can provide it when useful; no need to postpone the whole project.
+6. Whether actual mod data is needed to resolve a specific contested interaction. The author can provide it when useful; no need to postpone the whole project. The author's changelog sheet (H0) is now the reference, 2026-09-29.
 7. Production hosting/region/concurrency and minimum supported GPU/browser. Establish measured development targets first.
+8. ~~Where the built game differs from H0~~: answered by the author 2026-09-29 (three currencies, permanent base income, depletion kept, instant research and tiers, build rules, regeneration, repair drone, ricochet, burrow, wider refunds). Remaining sub-questions are in DECISIONS.md. Original item: depletion versus infinite resources, the opening stipend, refund eligibility, a third resource (Terrazine) for static defense, instant global research and ability tiers, build adjacency and zone-gated static defense, power-field regeneration, an Industrial ability (repair drones), ricochet, burrow, and opening worker counts. Listed with the question for each in [DECISIONS.md](DECISIONS.md), 2026-09-29.
 
 ## Current Status
 
 - [x] Authenticated website rules researched and evidence saved.
+- [x] Author's changelog sheet transcribed and adopted as the reference source (2026-09-29); conflicts with built mechanics listed in DECISIONS.md.
 - [x] Author priorities clarified: economies/zones/resources over exact units; desktop 1v1; tunable delay and reduced micro.
 - [x] Design, technical boundaries, UX, experiments, and dependency-ordered roadmap recorded.
 - [ ] M0 contracts and baseline measurements.

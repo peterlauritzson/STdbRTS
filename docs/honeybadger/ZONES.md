@@ -8,6 +8,26 @@ which **supersedes** the earlier draft and parts of
 Zones are the mechanic the author ranked first, ahead of per-faction mining and
 far ahead of the autonomous extractor.
 
+**Checked against the author's changelog sheet (H0), 2026-09-29.** The three
+zones below match H0: creep with owner-only death spawns, the power field with
+shield restoration on death, and the sensor tower's speed boost. H0 adds rules
+not built here. The author adopted the first two on 2026-09-29 (see
+[DECISIONS.md](DECISIONS.md)); they are settled but not yet implemented:
+
+- **All zones:** static defense can be built *only* inside a faction zone (power
+  field, creep, or sensor-tower radius). That would give every zone an
+  eligibility role.
+- **Power field:** regenerates shields +0.5/s, **life** +0.5/s and energy
+  +0.25/s (Normal-speed seconds), and shields also regenerate in combat. Here,
+  shields wait 10s after a hit and hit points never regenerate. H0 does not
+  describe teleporting between points in the field; that is this project's
+  mechanic.
+- **Creep:** H0 splits death spawns into broodlings, infested terrans and (for
+  air) mosquitolisks, and counts creep near tumors, bases and overseers.
+  Burrowed Zerg units move and regenerate faster.
+- **Sensor tower:** H0 says "large speed boost to friendly army units", which
+  fits the 30% experimental value or a higher one.
+
 ## Correcting the earlier draft
 
 The first draft named "Industrial smoke" as the third faction's zone. That was

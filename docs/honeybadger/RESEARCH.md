@@ -1,10 +1,13 @@
 # Honeybadger Research Ledger
 
-Research date: 2026-09-19. Status: planning evidence, not an implementation specification.
+Research date: 2026-09-19; primary source replaced 2026-09-29. Status: planning evidence, not an implementation specification.
+
+**Read this first (2026-09-29).** The author supplied a changelog spreadsheet (H0) as a better account of the mod than the website page (H1) this ledger was first built on. H0 is now the primary source; it is transcribed in [REFERENCE-CHANGELOG.md](REFERENCE-CHANGELOG.md) and summarized in the next section. The H1 sections further down are kept as a record of an **earlier version** of the mod. Where H0 and H1 disagree, H0 wins. Where only H1 describes something, treat it as possibly obsolete, not as documented fact.
 
 ## Sources and confidence
 
-- **H1: published mod description and changelog.** [mod_information.html](https://bitbucket.org/Thalagor/honeybadger/src/master/information_sites/templates/mod_information.html), read through the authenticated browser. The rules below are paraphrased from this page, including its General, Protoss, Zerg, Terran, and strategy sections.
+- **H0: the author's changelog spreadsheet (primary).** [Published sheet](https://docs.google.com/spreadsheets/d/e/2PACX-1vT1YxwepoM8Iu1c73e5X9ZnIseoCoub0Xv4O5CCwo1F8NylZsGLCbCHrvyPEY8tni340Y6BRR3dOzZ7/pubhtml), transcribed in [REFERENCE-CHANGELOG.md](REFERENCE-CHANGELOG.md). General and per-race rules, four global tiers of ability upgrades, and a stat table for about 70 units. Undated.
+- **H1: published mod description and changelog (earlier version).** [mod_information.html](https://bitbucket.org/Thalagor/honeybadger/src/master/information_sites/templates/mod_information.html), read through the authenticated browser. The rules below are paraphrased from this page, including its General, Protoss, Zerg, Terran, and strategy sections.
 - **H2: play instructions.** [how_to_play.html](https://bitbucket.org/Thalagor/honeybadger/src/master/information_sites/templates/how_to_play.html). Describes SC2 Custom > Melee > any map > Create with Mod > search for Honey Badger.
 - **H3: repository.** [honeybadger master](https://bitbucket.org/Thalagor/honeybadger/src/master/). The inspected tree is a Django website with information pages, player features, and static assets. Its root displayed a last-update date of 2021-05-17. This is not proof of the date of the mod's final release.
 - **Local baseline:** [engineering history](../ENGINEERING.md), [playtest checklist](../PLAYTEST.md), and the existing Rust/TypeScript implementation. Previous passing test counts are historical evidence, not tests rerun during this planning task.
@@ -19,7 +22,7 @@ The inspected [home page template](https://bitbucket.org/Thalagor/honeybadger/sr
 
 H1 identifies two design inspirations: [comeback opportunities](https://www.reddit.com/r/FrostGiant/comments/jo36xq/comeback_opportunities_will_determine_the_games/) and [volatility rather than difficulty](https://www.reddit.com/r/FrostGiant/comments/jsa0uh/the_volatility_of_rts_games_not_the_difficulty_is/). They are leads, not additional evidence read during this pass. No editor-project download was found in the inspected information/home/play-instruction pages; this is not a claim that no such files exist elsewhere.
 
-Labels throughout this plan: **Documented** means H1/H2 explicitly says it; **Observed** means inspected in this workspace; **Inferred** means a likely gameplay consequence; **Proposed** means a new-game design recommendation; **Unresolved** means evidence or a user decision is still needed. Numeric values below are historical reference values, not automatically approved balance for the new game. Source faction/unit names identify reference mechanics only, not proposed shipped names or assets.
+Labels throughout this plan: **Documented** means H0 (or, for the earlier version, H1/H2) explicitly says it; **Observed** means inspected in this workspace; **Inferred** means a likely gameplay consequence; **Proposed** means a new-game design recommendation; **Unresolved** means evidence or a user decision is still needed. Numeric values below are historical reference values, not automatically approved balance for the new game. Source faction/unit names identify reference mechanics only, not proposed shipped names or assets.
 
 ## Identity worth preserving
 
@@ -29,7 +32,42 @@ Labels throughout this plan: **Documented** means H1/H2 explicitly says it; **Ob
 
 **Inferred:** the design's core is economic geography and recoverable conflict, not merely a large roster. Maps, scouting, fragile infrastructure, and ways to move between fronts are first-class mechanics.
 
-## General rules (H1)
+## The mod according to H0 (primary)
+
+Full transcription: [REFERENCE-CHANGELOG.md](REFERENCE-CHANGELOG.md). H0 times are SC2 Normal-speed seconds (divide by 1.4 for real time on Faster), and its speeds and ranges assume every tier upgrade is done.
+
+### What H0 establishes
+
+| Area | Documented in H0 | Inferred for this project |
+| --- | --- | --- |
+| Construction | Every race builds with a **hero builder**. Structures go within 40 range of another *finished* structure. Static defense only in powerfield, on creep, or near a sensor tower. No building on the opponent's half for the first X minutes. | Supports the settled command-card construction (no builder unit per worker) and an adjacency rule this game does not yet have. X is unknown. |
+| Upgrades | All research is on the hero builder, **instant**, and global (one +attack covers ground and air). Plus four global **tiers** costing 500, 750, 1000 and 7500, each unlocking a race-specific bundle of abilities and speeds. | Research as a player-level purchase fits Increment K's move of research onto the player. The lab-with-a-timer model does not match. |
+| Resources | Minerals and gas are **infinite** and replenish periodically. Gas buildings mine gas automatically for every race. A third resource, **Terrazine**, comes from mining minerals and pays for static defense. | Depletion is not a source mechanic. The autonomous gas extractor is general, not Industrial-only. Terrazine gives the third currency a single narrow purpose. |
+| Prices | The unit table's cost column is priced as if in **gas** (its derived columns are "per 100 gas"). Tier cost currency is not stated. | Unresolved. If units cost gas, minerals fund structures and tiers and the dual-currency split is not material-for-units/catalyst-for-tech. |
+| Refunds | Army units 50%; gas buildings 50%; Zerg bases 50%; Protoss probes 50%. | Wider than the implemented army-only refund. |
+| Visibility | No unit is ever cloaked, burrowed ones included. | Consistent with the demoted fog and no detection. |
+| Map | Mineral walls become destructible rocks. Structures capture Xel'Naga towers. | Map features, not yet in the map format. |
+| Protoss | Probes mine without a base; probes refund 50%. Powerfield regenerates shield +0.5/s, **life** +0.5/s and energy +0.25/s (tier 3 adds +0.3/+0.15). Shields regenerate **in combat**. Dying in a powerfield regenerates nearby shields. **Ricochet**: overkill bounces to a nearby unit. Pylons see very far and over cliffs. Cannons and batteries work unpowered; batteries start at 0 energy. | Matches the implemented no-return mining and death restoration. Differs from the implemented 10s shield-regeneration delay and hit points that never regenerate. Ricochet is new. |
+| Zerg | Burrowed units regenerate faster and can move. Units dying on the owner's creep leave time-limited broodlings, infested terrans or mosquitolisks. Bases refund 50%. Lair and Hive make larvae 50% faster. The free Harvester has 9 life. Infestors summon an uncontrollable Queen. | Matches the implemented owner-only death spawns and free harvesters. Burrow is new. |
+| Terran | 20% more Terrazine. **Sensor towers** give friendly army units a large speed boost. Tech reactors on barracks, factory and starport allow research and double production. Orbitals send **repair drones** (75 energy, about 300 life healed, one drone per target). The Command Center starts with 16 SCVs. | Matches the implemented sensor tower. Repair drones are a candidate Industrial ability, which the 2026-09-25 decision left open. |
+| Roster | About 70 units with stats, including non-standard ones: Noogard, Warhound, HERC, Scout, Odin, Mosquitolisk, Locust from larva. Many units carry reworked abilities (Colossus energy volleys, Dark Templar rage, Immortal damage cap, Oracle energy armour). | Reference for roles and relationships only. The project does not copy the roster. |
+
+### Where H1 (earlier version) disagrees or is not confirmed
+
+| H1 rule | H0 status |
+| --- | --- |
+| Bases exhaust about 30% faster; finite deposits | **Contradicted**: resources are infinite. |
+| Opening stipend of 200 then 100 minerals/minute | Not in H0. |
+| Army refunds 50%, but workers and structures excluded | **Contradicted in part**: gas buildings, Zerg bases and Protoss probes also refund 50%. |
+| 2x HP/shields, doubled static-defense damage, 1.5x spell durations and burst damage | Not in H0. H0 lists absolute stats instead. |
+| Protoss Pylon Walk, Warp Gate timing, Pylon Overcharge, shield-funded Nexus Recall | Not in H0. H0 has Mothership Core Mass Recall to Nexus, with a tier 3 upgrade to its area and pre-recall stun. |
+| Zerg harvester conversion (combine four into a drone; sacrifice for creep), injection, queen sacrifice | Not in H0. H0's Queen is summoned by the Infestor. |
+| Terran Retreat, HERC smoke, refinery suppression/burning, refinery output switch to minerals | Not in H0. The author called smoke, retreat and suppression leftovers of earlier versions (2026-09-25). HERC exists in H0 as barracks infantry with no smoke. |
+| Rich-mineral harvest amounts | Not in H0. |
+
+**Inferred:** H0 describes a later and substantially reworked version. Several of the author's own statements made while this project was being built already matched H0 rather than H1: construction with no builder unit, the sensor tower, restoration on death in the powerfield, ground/air death spawns, and dropping smoke/retreat/suppression.
+
+## General rules (H1, earlier version)
 
 | Reference rule | Documented detail | Interpretation limit |
 | --- | --- | --- |
@@ -43,7 +81,7 @@ Labels throughout this plan: **Documented** means H1/H2 explicitly says it; **Ob
 | Basic melee | Zergling damage 5 to 4; zealot 8 to 7 per strike | Relative to an unspecified vanilla version |
 | Rich minerals | Harvest amount: Zerg 1 to 2; Terran 3 to 5; Protoss 5 to 8; MULE excluded | Does not itself specify trip duration |
 
-## Network faction reference: Protoss (H1)
+## Network faction reference: Protoss (H1, earlier version)
 
 | Area | Documented rules |
 | --- | --- |
@@ -65,7 +103,7 @@ Labels throughout this plan: **Documented** means H1/H2 explicitly says it; **Ob
 
 **Inferred interactions:** expansion need not be centered on a town hall; vulnerable workers and relay infrastructure become the economy's attack surface. Relays provide both reinforcement and escape paths. Supply and strategic mobility share a destructible dependency. Shield-funded recall spends base defense to save units. The upgrade removing arrival vulnerability is a major timing window, not a cosmetic upgrade.
 
-## Organic faction reference: Zerg (H1)
+## Organic faction reference: Zerg (H1, earlier version)
 
 | Area | Documented rules |
 | --- | --- |
@@ -89,7 +127,7 @@ Labels throughout this plan: **Documented** means H1/H2 explicitly says it; **Ob
 
 **Inferred interactions:** workers are free in currency but cost larvae, supply, space, and territory. Worker recovery competes with army production. Cutting creep can destroy both income and mobility. Disposable creep sources and larva-rich new bases enable aggressive recovery. Broodlings reward fighting on home territory and prolong battles, while also increasing entity count and on-death processing risk.
 
-## Industrial faction reference: Terran (H1)
+## Industrial faction reference: Terran (H1, earlier version)
 
 | Area | Documented rules |
 | --- | --- |
@@ -112,15 +150,15 @@ Labels throughout this plan: **Documented** means H1/H2 explicitly says it; **Ob
 
 ## Unknowns that must not silently become facts
 
-1. Final intended mod revision and whether H1 reflects it; actual SC2 data/trigger project and dependency patch.
-2. Values expressed as "faster": reduced duration versus increased rate. The worker 40%/50% contradiction must be resolved from data or author memory.
-3. Teleport channel length, source radius, destination occupancy, mobile-field handling, and relay destruction during transit.
-4. Creep growth/decay rates, harvesting death timer off creep, larva cadence, conversion timing, broodling counts/lifetime and recursive exclusions.
-5. Refinery cadence, depletion behavior, burning damage, suppression trigger and recovery duration.
-6. Refund calculation for minerals/gas, morph chains, temporary units, cancellation, friendly fire, and simultaneous elimination.
+1. Whether H0 is the final mod revision (it is undated); actual SC2 data/trigger project and dependency patch.
+2. The currency of H0's unit costs (the sheet implies gas) and of its tier costs; how Terrazine accrues from mineral mining and what static defense costs in it.
+3. H0's "first X minutes" build restriction, the replenishment rate of infinite resources, and the automatic gas extractor's rate.
+4. Teleport channel length, source radius, destination occupancy, mobile-field handling, and relay destruction during transit. (H0 does not describe powerfield teleport at all.)
+5. Creep growth/decay rates, larva cadence, which units leave broodlings versus infested terrans versus mosquitolisks and how many, lifetimes and recursive exclusions.
+6. Refund calculation for minerals/gas, morph chains, temporary units, cancellation, friendly fire, and simultaneous elimination. H0 names the eligible entities but not the basis.
 7. Which spells, inherited SC2 mechanics, and faction interactions the author considers essential. Documented presence is not evidence of priority or enjoyment.
 8. Exact map pool, practical game length, army size, supply cap, competitive formats, and desired treatment of air, detection, elevation, transports, and siege.
-9. Published examples and tournament videos can corroborate behavior, but old-version videos must not override later rules without a revision match.
+9. Published examples and tournament videos can corroborate behavior, but old-version videos (and H1) must not override H0 without a revision match.
 
 ## SpacetimeDB references
 

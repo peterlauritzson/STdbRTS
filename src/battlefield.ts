@@ -12,6 +12,27 @@ interface Motion { from: Point; to: Point; at: number }
 type InputMode = "select" | "order" | "pan";
 type TargetMode = "attack_move" | "repair" | "rally" | "teleport" | AbilityKind | `build_${string}`;
 
+/** How long a click ping, a target flash and a death burst last, in ms. */
+const PING_MS = 520;
+const FLASH_MS = 700;
+const DEATH_MS = 650;
+const HIT_MS = 140;
+const OWN_RING = "#7cf0b0";
+const ENEMY_RING = "#ff7a86";
+
+/**
+ * One colour per intent, as in SC2: green goes, red fights, gold works, cyan
+ * builds, violet casts. Used for the click ping, the intent line and the
+ * order line, so the same order reads the same way at every stage.
+ */
+export function orderColor(kind: string): string {
+  if (kind === "attack" || kind === "attack_move") return "#ff6b6b";
+  if (["gather", "rally_gather", "return", "repair"].includes(kind)) return "#f3d570";
+  if (kind.startsWith("build_")) return "#8fd8ff";
+  if (kind === "recall" || kind === "bloom") return "#c9b2ff";
+  return "#6ee7a8";
+}
+
 export class Battlefield {
   selected = new Set<number>();
   mode: InputMode = "select";
@@ -36,6 +57,29 @@ export class Battlefield {
   private health = new Map<number, number>();
   /** Where your units were recently hurt, pinged on the minimap for a few seconds. */
   private alerts: { x: number; y: number; at: number }[] = [];
+  /**
+   * Local acknowledgement, drawn on the next frame after the click and before
+   * the server has even seen the order: the one-second delay is honest, but a
+   * click that answers nothing for a second reads as a dropped click.
+   */
+  private pings: { x: number; y: number; color: string; at: number }[] = [];
+  /** Units and deposits (keyed -id - 1) just named as a target, blinking in the order's colour. */
+  private flashes = new Map<number, { color: string; at: number }>();
+  /** Units that were just removed, drawn as a short burst where they stood. */
+  private deaths: { x: number; y: number; radius: number; color: string; building: boolean; at: number }[] = [];
+  /** When each unit last lost health, for a brief hit flash. */
+  private hurtAt = new Map<number, number>();
+  /** The previous update's units, to know the kind and owner of one that just vanished. */
+  private lastSeen = new Map<number, Entity>();
+  /** Units the box being dragged would select, highlighted before release. */
+  private boxPreview: Set<number> | undefined;
+  /** Measured milliseconds per server tick, so motion spans the real gap between updates. */
+  private tickInterval = 50;
+  private lastTick: { tick: bigint; at: number } | undefined;
+  /** The targeting mode was kept armed by Shift; releasing Shift disarms it. */
+  private stickyTarget = false;
+  /** Called once per order this battlefield sends, for the acknowledgement sound. */
+  onOrder: (kind: string) => void = () => {};
   /** The unit under the pointer, drawn with a hover ring and its bars. */
   hovered: number | undefined;
   /**
@@ -75,6 +119,7 @@ export class Battlefield {
     // issues the same context order a right-click on the ground would.
     minimap.addEventListener("contextmenu", event => event.preventDefault());
     minimap.addEventListener("pointerdown", event => {
+      if (event.button === 2 && this.targeting) { this.disarm(); return; }
       if (event.button === 2 || (event.button === 0 && this.targeting)) {
         if (this.session.matchReady) this.contextOrder(this.minimapPoint(event), event.shiftKey);
         return;
@@ -119,7 +164,11 @@ export class Battlefield {
         this.onSelection();
       }
     });
-    window.addEventListener("keyup", event => this.keys.delete(event.key));
+    window.addEventListener("keyup", event => {
+      this.keys.delete(event.key);
+      // SC2's shift-queue: a mode kept armed by Shift ends when Shift is let go.
+      if (event.key === "Shift" && this.stickyTarget) { this.stickyTarget = false; this.targeting = undefined; this.onSelection(); }
+    });
     window.addEventListener("blur", () => { this.keys.clear(); this.drag = undefined; });
     requestAnimationFrame(now => this.frame(now));
   }
@@ -134,17 +183,41 @@ export class Battlefield {
       this.motions.clear();
       this.health.clear();
       this.alerts = [];
+      this.pings = [];
+      this.flashes.clear();
+      this.deaths = [];
+      this.hurtAt.clear();
+      this.lastTick = undefined;
+    }
+    const now = performance.now();
+    // Updates arrive at whatever cadence the host and the network deliver, not
+    // exactly every 50ms. Motion is spread over the measured gap per tick, so
+    // units glide instead of moving in 50ms bursts and standing still between.
+    const tick = room?.tick;
+    if (tick !== undefined && tick !== this.lastTick?.tick) {
+      if (this.lastTick && tick > this.lastTick.tick) {
+        const perTick = (now - this.lastTick.at) / Number(tick - this.lastTick.tick);
+        this.tickInterval = clamp(this.tickInterval * 0.8 + perTick * 0.2, 40, 120);
+      }
+      this.lastTick = { tick, at: now };
     }
     this.noticeDamage(units);
     const initial = this.motions.size === 0 && units.length > 0;
-    const now = performance.now();
+    const alive = new Map(units.map(unit => [unit.id, unit]));
     for (const unit of units) {
       const old = this.motions.get(unit.id);
       if (!old || old.to.x !== unit.x || old.to.y !== unit.y) {
         this.motions.set(unit.id, { from: old ? this.position(unit, now) : unit, to: { x: unit.x, y: unit.y }, at: now });
       }
     }
-    for (const id of this.motions.keys()) if (!units.some(unit => unit.id === id)) this.motions.delete(id);
+    for (const [id, motion] of this.motions) {
+      if (alive.has(id)) continue;
+      this.motions.delete(id);
+      const last = this.lastSeen.get(id);
+      // A snapshot that empties at once is a reconnect or a reset, not a battle.
+      if (last && units.length) this.deaths.push({ x: motion.to.x, y: motion.to.y, radius: VISUALS[last.kind]?.radius ?? 12, color: COLORS[last.owner] ?? "#ffffff", building: isBuilding(last.kind), at: now });
+    }
+    this.lastSeen = alive;
     this.pruneSelection();
     if (initial) this.home();
   }
@@ -163,6 +236,7 @@ export class Battlefield {
     for (const unit of units) {
       const before = this.health.get(unit.id);
       this.health.set(unit.id, unit.hp + unit.shields);
+      if (before !== undefined && unit.hp + unit.shields < before) this.hurtAt.set(unit.id, now);
       if (unit.owner !== me || before === undefined || unit.hp + unit.shields >= before) continue;
       if (Math.abs(unit.x - this.camera.x) <= halfWidth && Math.abs(unit.y - this.camera.y) <= halfHeight) continue;
       if (this.alerts.some(alert => Math.hypot(alert.x - unit.x, alert.y - unit.y) < 300)) continue;
@@ -172,6 +246,7 @@ export class Battlefield {
       const alive = new Set(units.map(unit => unit.id));
       for (const id of this.health.keys()) if (!alive.has(id)) this.health.delete(id);
     }
+    for (const [id, at] of this.hurtAt) if (now - at > HIT_MS) this.hurtAt.delete(id);
   }
 
   /**
@@ -295,7 +370,7 @@ export class Battlefield {
     this.targeting = undefined;
     // Only a carrier can be told to bring a load home; a drifter has no load.
     const units = this.ownedSelection().filter(unit => kind === "return" ? carriesCargo(unit.kind) : kind === "hold" ? fights(unit.kind) : !isBuilding(unit.kind));
-    if (units.length) void this.session.order(units.map(unit => unit.id), { kind, x: 0, y: 0, target: 0 });
+    if (units.length) { void this.session.order(units.map(unit => unit.id), { kind, x: 0, y: 0, target: 0 }); this.onOrder(kind); }
     this.onSelection();
   }
 
@@ -306,7 +381,7 @@ export class Battlefield {
   private position(unit: Entity, now: number): Point {
     const motion = this.motions.get(unit.id);
     if (!motion) return unit;
-    const fraction = clamp((now - motion.at) / 50, 0, 1);
+    const fraction = clamp((now - motion.at) / this.tickInterval, 0, 1);
     return { x: motion.from.x + (motion.to.x - motion.from.x) * fraction, y: motion.from.y + (motion.to.y - motion.from.y) * fraction };
   }
 
@@ -366,6 +441,8 @@ export class Battlefield {
     if (!this.session.matchReady) return;
     this.canvas.focus();
     const point = this.local(event);
+    // As in SC2, the right button backs out of an armed mode instead of firing it.
+    if (event.button === 2 && this.targeting) { this.disarm(); return; }
     if (event.button === 2 || (event.button === 0 && (this.mode === "order" || this.targeting))) { this.contextOrder(this.world(point), event.shiftKey); return; }
     this.canvas.setPointerCapture(event.pointerId);
     this.drag = { start: point, end: point, pan: event.button === 1 || this.keys.has(" ") || this.mode === "pan", pointer: event.pointerId };
@@ -391,7 +468,6 @@ export class Battlefield {
     if (drag.pan) return;
     const start = this.world(drag.start);
     const end = this.world(this.local(event));
-    const units = this.session.snapshot.units;
     if (!event.shiftKey) this.selected.clear();
     if (Math.hypot(drag.start.x - drag.end.x, drag.start.y - drag.end.y) < 6) {
       const hit = this.unitAt(end);
@@ -402,11 +478,47 @@ export class Battlefield {
         else this.selected.add(hit.id);
       }
     } else {
-      for (const unit of units) {
-        if (unit.owner === this.session.snapshot.me?.slot && !isBuilding(unit.kind) && unit.x >= Math.min(start.x, end.x) && unit.x <= Math.max(start.x, end.x) && unit.y >= Math.min(start.y, end.y) && unit.y <= Math.max(start.y, end.y)) this.selected.add(unit.id);
-      }
+      // A box takes your mobile units; only a box with none in it takes your
+      // buildings, as in SC2, so sweeping over a base still selects its army.
+      const boxed = this.boxed(start, end);
+      for (const unit of boxed.some(unit => !isBuilding(unit.kind)) ? boxed.filter(unit => !isBuilding(unit.kind)) : boxed) this.selected.add(unit.id);
     }
     this.onSelection();
+  }
+
+  /** Your units inside a world-space box, buildings included. */
+  private boxed(start: Point, end: Point): Entity[] {
+    const me = this.session.snapshot.me?.slot;
+    const [left, right, top, bottom] = [Math.min(start.x, end.x), Math.max(start.x, end.x), Math.min(start.y, end.y), Math.max(start.y, end.y)];
+    return this.session.snapshot.units.filter(unit => unit.owner === me && unit.x >= left && unit.x <= right && unit.y >= top && unit.y <= bottom);
+  }
+
+  /** Leaves an armed targeting mode without sending anything. */
+  private disarm(): void {
+    this.targeting = undefined;
+    this.stickyTarget = false;
+    this.onSelection();
+  }
+
+  /**
+   * Ends a targeted order the way SC2 does: with Shift held the mode stays
+   * armed for the next click (queue several attack-moves, place several
+   * buildings), otherwise it is spent.
+   */
+  private spend(queued: boolean): void {
+    if (queued && this.targeting) this.stickyTarget = true;
+    else { this.targeting = undefined; this.stickyTarget = false; }
+    this.onSelection();
+  }
+
+  /** The immediate answer to an order: a ping where it was aimed, a flash on its target, a sound. */
+  private acknowledge(kind: string, point: Point, target?: { id: number; node: boolean }): void {
+    const now = performance.now();
+    const color = orderColor(kind);
+    this.pings.push({ x: point.x, y: point.y, color, at: now });
+    if (this.pings.length > 12) this.pings.shift();
+    if (target) this.flashes.set(target.node ? -target.id - 1 : target.id, { color, at: now });
+    this.onOrder(kind);
   }
 
   private contextOrder(point: Point, queued: boolean): void {
@@ -423,7 +535,8 @@ export class Battlefield {
       const issuer = this.issuer();
       if (issuer) {
         void this.session.order([issuer.id], { kind: this.targeting, x: point.x, y: point.y, target: 0 });
-        this.targeting = undefined; this.onSelection();
+        this.acknowledge(this.targeting, point);
+        this.spend(queued);
       }
       return;
     }
@@ -434,8 +547,8 @@ export class Battlefield {
       const movers = this.teleporters();
       if (!movers.length) { this.session.onNotice("Select units standing inside your power field"); return; }
       void this.session.order(movers.map(unit => unit.id), { kind: "teleport", x: clampToMap(point.x), y: clampToMap(point.y), target: 0 });
-      this.targeting = undefined;
-      this.onSelection();
+      this.acknowledge("teleport", point);
+      this.spend(false);
       return;
     }
     if ((this.targeting === "recall" || this.targeting === "bloom") && me) {
@@ -447,15 +560,15 @@ export class Battlefield {
       const hub = this.caster(kind);
       if (!hub) { this.session.onNotice(`No hub can cast ${ABILITIES[kind].label} right now`); return; }
       void this.session.order([hub.id], { kind, x: clampToMap(point.x), y: clampToMap(point.y), target: 0 });
-      this.targeting = undefined;
-      this.onSelection();
+      this.acknowledge(kind, point);
+      this.spend(false);
       return;
     }
     const headquarters = owned.find(unit => RALLIES.includes(unit.kind)) ?? units.find(unit => unit.kind === "hq" && unit.owner === me?.slot);
     if (headquarters && (this.targeting === "rally" || (!this.targeting && owned.length === 1 && ["hq", "outpost", "barracks", "factory"].includes(owned[0].kind)))) {
       void this.session.order([headquarters.id], { kind: node ? "rally_gather" : "rally_move", x: clampToMap(point.x), y: clampToMap(point.y), target: node?.id ?? 0 });
-      this.targeting = undefined;
-      this.onSelection();
+      this.acknowledge(node ? "rally_gather" : "rally_move", node ?? point, node && { id: node.id, node: true });
+      this.spend(false);
       return;
     }
     let selected = this.ownedSelection().filter(unit => !isBuilding(unit.kind));
@@ -478,8 +591,10 @@ export class Battlefield {
     else if (friendly && friendly.hp < friendly.maxHp) { order.kind = "repair"; order.target = friendly.id; selected = selected.filter(unit => isLabour(unit.kind) && unit.id !== friendly.id); }
     if (selected.length) {
       void this.session.order(selected.map(unit => unit.id), order, queued);
-      this.targeting = undefined;
-      this.onSelection();
+      const target = order.kind === "attack" ? enemy : order.kind === "repair" ? friendly : order.kind === "return" ? hq : undefined;
+      if (order.kind === "gather" && node) this.acknowledge("gather", node, { id: node.id, node: true });
+      else this.acknowledge(order.kind, target ?? point, target && { id: target.id, node: false });
+      this.spend(queued);
     }
     else this.session.onNotice(enemy ? "Select fighting units to attack" : "Select labour units for this order");
   }
@@ -606,6 +721,11 @@ export class Battlefield {
       // The amount is written out when it is asked for: zoomed in, or under the
       // pointer. At every other zoom 150 labels are only noise; the shape and
       // colour already say which currency a deposit holds.
+      const flash = this.flashes.get(-node.id - 1);
+      if (flash && now - flash.at < FLASH_MS && Math.floor((now - flash.at) / 110) % 2 === 0) {
+        context.strokeStyle = flash.color; context.lineWidth = 2.5 / this.camera.zoom;
+        context.beginPath(); context.arc(0, 0, 36, 0, Math.PI * 2); context.stroke();
+      }
       const hovered = this.pointer && Math.hypot(this.pointer.x - node.x, this.pointer.y - node.y) < 35;
       if (hovered || this.camera.zoom >= 1.4) {
         context.font = "11px 'IBM Plex Mono'"; context.textAlign = "center";
@@ -614,28 +734,48 @@ export class Battlefield {
       }
       context.restore();
     }
+    const mySlot = this.session.snapshot.me?.slot;
+    // Order lines, SC2's shift-queue view: each leg in its order's colour with
+    // a waypoint dot, for selected units (and your HQ's rally, always).
     for (const unit of units) {
-      if (this.selected.has(unit.id) || (unit.kind === "hq" && unit.owner === this.session.snapshot.me?.slot)) {
+      if (this.selected.has(unit.id) || (unit.kind === "hq" && unit.owner === mySlot)) {
         let point: Point = this.position(unit, now);
         for (const order of [unit.order, ...unit.queue]) {
           const target = this.orderTarget(order);
           if (!target) continue;
-          context.strokeStyle = "#c4ddd17f"; context.lineWidth = 1.5 / this.camera.zoom; context.setLineDash([5, 5]);
+          const color = orderColor(order.kind);
+          context.strokeStyle = `${color}90`; context.lineWidth = 1.5 / this.camera.zoom; context.setLineDash([5 / this.camera.zoom, 5 / this.camera.zoom]);
           context.beginPath(); context.moveTo(point.x, point.y); context.lineTo(target.x, target.y); context.stroke(); context.setLineDash([]);
+          context.fillStyle = color; context.beginPath(); context.arc(target.x, target.y, 3.5 / this.camera.zoom, 0, Math.PI * 2); context.fill();
           if (order.kind.startsWith("rally_")) this.marker(target, COLORS[unit.owner], "RALLY");
           point = target;
         }
       }
     }
+    // Your orders still inside the delay: a line from every unit that will
+    // carry it out to where it is aimed, and a ring at the aim that closes as
+    // the delay runs out. The units have visibly "heard" the order at once;
+    // the ring says when they will act. An opponent's reads as before.
+    const delay = Math.max(1, Number(room?.commandDelay ?? 20n));
+    const since = now - this.session.tickReceivedAt;
     for (const command of commands.filter(command => command.status === "scheduled")) {
       const target = this.orderTarget(command.order);
-      if (target) this.marker(target, COLORS[command.owner], `${countdown(command.executeTick, room?.tick ?? 0n, now - this.session.tickReceivedAt).toFixed(1)}s`);
+      if (!target) continue;
+      const left = countdown(command.executeTick, room?.tick ?? 0n, since);
+      if (command.owner === mySlot) this.intent(command.units, command.order.kind, target, 1 - left * 20 / delay, now);
+      else this.marker(target, COLORS[command.owner], `${left.toFixed(1)}s`);
     }
     for (const pending of this.session.pending.values()) {
       const target = this.orderTarget(pending.order);
-      if (target) this.marker(target, "#ffffff", "...");
+      if (target) this.intent(pending.units, pending.order.kind, target, 0, now);
     }
+    if (this.targeting?.startsWith("build_") && this.session.snapshot.me) this.drawPlacementZones(this.session.snapshot.me.slot);
+    this.boxPreview = this.drag && !this.drag.pan && Math.hypot(this.drag.start.x - this.drag.end.x, this.drag.start.y - this.drag.end.y) >= 6
+      ? new Set((boxed => boxed.some(unit => !isBuilding(unit.kind)) ? boxed.filter(unit => !isBuilding(unit.kind)) : boxed)(this.boxed(this.world(this.drag.start), this.world(this.drag.end))).map(unit => unit.id))
+      : undefined;
     for (const unit of [...units].sort((left, right) => left.y - right.y)) this.drawUnit(unit, now);
+    this.drawDeaths(now);
+    this.drawPings(now);
     this.drawCreepCountdowns(now);
     if (this.targeting?.startsWith("build_") && this.pointer && this.session.snapshot.me) {
       const kind = this.targeting.slice(6);
@@ -781,6 +921,111 @@ export class Battlefield {
     }
   }
 
+  /**
+   * An order you gave that has not executed yet: faint lines from the units
+   * that will carry it out, and a ring at the aim that fills as the delay
+   * elapses (`progress` 0 to 1). At most 40 lines, so a whole army's order
+   * stays a hint rather than a hatching.
+   */
+  private intent(unitIds: readonly number[], kind: string, target: Point, progress: number, now: number): void {
+    const context = this.context;
+    const color = orderColor(kind);
+    const zoom = this.camera.zoom;
+    const ids = new Set(unitIds.slice(0, 40));
+    context.strokeStyle = `${color}55`; context.lineWidth = 1.25 / zoom;
+    context.beginPath();
+    for (const unit of this.session.snapshot.units) {
+      if (!ids.has(unit.id) || isBuilding(unit.kind)) continue;
+      const from = this.position(unit, now);
+      context.moveTo(from.x, from.y); context.lineTo(target.x, target.y);
+    }
+    context.stroke();
+    const radius = 11 / zoom;
+    context.lineWidth = 2 / zoom;
+    context.strokeStyle = `${color}40`;
+    context.beginPath(); context.arc(target.x, target.y, radius, 0, Math.PI * 2); context.stroke();
+    context.strokeStyle = color;
+    context.beginPath(); context.arc(target.x, target.y, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp(progress, 0.02, 1)); context.stroke();
+  }
+
+  /** Click pings: two rings and four ticks closing on the spot, fading out. */
+  private drawPings(now: number): void {
+    const context = this.context;
+    const zoom = this.camera.zoom;
+    this.pings = this.pings.filter(ping => now - ping.at < PING_MS);
+    for (const [key, flash] of this.flashes) if (now - flash.at > FLASH_MS) this.flashes.delete(key);
+    for (const ping of this.pings) {
+      const age = (now - ping.at) / PING_MS;
+      const radius = (7 + 20 * (1 - age) ** 2) / zoom;
+      context.globalAlpha = 1 - age * age;
+      context.strokeStyle = ping.color; context.lineWidth = 2.5 / zoom;
+      context.beginPath(); context.arc(ping.x, ping.y, radius, 0, Math.PI * 2); context.stroke();
+      context.lineWidth = 1.5 / zoom;
+      context.beginPath(); context.arc(ping.x, ping.y, radius * 0.45, 0, Math.PI * 2); context.stroke();
+      context.lineWidth = 2.5 / zoom;
+      context.beginPath();
+      for (let index = 0; index < 4; index++) {
+        const angle = Math.PI / 4 + index * Math.PI / 2;
+        context.moveTo(ping.x + Math.cos(angle) * (radius + 9 / zoom), ping.y + Math.sin(angle) * (radius + 9 / zoom));
+        context.lineTo(ping.x + Math.cos(angle) * (radius + 2 / zoom), ping.y + Math.sin(angle) * (radius + 2 / zoom));
+      }
+      context.stroke();
+    }
+    context.globalAlpha = 1;
+  }
+
+  /** A unit that just vanished: a ring in its owner's colour and debris flying out. */
+  private drawDeaths(now: number): void {
+    const context = this.context;
+    this.deaths = this.deaths.filter(death => now - death.at < DEATH_MS);
+    for (const death of this.deaths) {
+      const age = (now - death.at) / DEATH_MS;
+      const reach = death.radius * (death.building ? 1.6 : 1.3);
+      context.globalAlpha = (1 - age) * 0.9;
+      context.fillStyle = "#ffd98a";
+      context.beginPath(); context.arc(death.x, death.y, reach * (0.5 + age) * (1 - age * 0.6), 0, Math.PI * 2); context.fill();
+      context.strokeStyle = death.color; context.lineWidth = 2.5;
+      context.beginPath(); context.arc(death.x, death.y, reach * (0.8 + age * 1.4), 0, Math.PI * 2); context.stroke();
+      context.fillStyle = "#3a403a";
+      const pieces = death.building ? 10 : 6;
+      for (let index = 0; index < pieces; index++) {
+        const angle = index / pieces * Math.PI * 2 + death.x % 1.7;
+        const distance = reach * (0.4 + age * (1.6 + (index % 3) * 0.4));
+        context.fillRect(death.x + Math.cos(angle) * distance - 2, death.y + Math.sin(angle) * distance - 2, 4, 4);
+      }
+    }
+    context.globalAlpha = 1;
+  }
+
+  /**
+   * While a building is being placed: the ground your buildings reach, and
+   * the halos where a site is refused (around terrain, deposits, buildings
+   * and nearby units), mirroring `placementError`. Placement near the HQ was
+   * often refused with no way to see why before the click.
+   */
+  private drawPlacementZones(slot: number): void {
+    const context = this.context;
+    const { units, nodes } = this.session.snapshot;
+    context.fillStyle = "#8fd8ff12";
+    context.beginPath();
+    for (const unit of units) {
+      if (unit.owner !== slot || !isBuilding(unit.kind) || unit.constructionRemaining !== 0n) continue;
+      context.moveTo(unit.x + 500, unit.y); context.arc(unit.x, unit.y, 500, 0, Math.PI * 2);
+    }
+    context.fill();
+    context.fillStyle = "#ed7c8b1c";
+    context.beginPath();
+    for (const [left, top, width, height] of terrain) context.rect(left - 50, top - 50, width + 100, height + 100);
+    for (const node of nodes) { context.moveTo(node.x + 75, node.y); context.arc(node.x, node.y, 75, 0, Math.PI * 2); }
+    for (const unit of units) {
+      const building = isBuilding(unit.kind);
+      if (!building && (!this.pointer || Math.hypot(unit.x - this.pointer.x, unit.y - this.pointer.y) > 300)) continue;
+      const reach = building ? 110 : 55;
+      context.moveTo(unit.x + reach, unit.y); context.arc(unit.x, unit.y, reach, 0, Math.PI * 2);
+    }
+    context.fill();
+  }
+
   private orderTarget(order: Order): Point | undefined {
     if (order.kind.startsWith("build_")) return order;
     if (["move", "attack_move", "rally_move", "teleport", "recall", "bloom"].includes(order.kind)) return order;
@@ -830,11 +1075,19 @@ export class Battlefield {
     if (unit.constructionRemaining > 0n) context.globalAlpha = 0.6;
     context.fillStyle = "#101c1980"; context.beginPath(); context.ellipse(3, radius * 0.6, radius * 1.2, radius * 0.55, 0, 0, Math.PI * 2); context.fill();
     const selected = this.selected.has(unit.id);
-    const hovered = this.hovered === unit.id;
+    const previewed = this.boxPreview?.has(unit.id) ?? false;
+    const hovered = this.hovered === unit.id || previewed;
+    const own = unit.owner === this.session.snapshot.me?.slot;
+    // SC2's selection: an ellipse at the unit's feet, green for yours and red
+    // for anyone else's. A hover, or a box still being dragged, shows it faint.
     if (selected || hovered) {
-      context.strokeStyle = selected ? "#efffea" : unit.owner === this.session.snapshot.me?.slot ? "#efffea70" : "#ff9ba290";
+      const building = isBuilding(unit.kind);
+      context.strokeStyle = own ? selected ? OWN_RING : `${OWN_RING}80` : selected ? ENEMY_RING : `${ENEMY_RING}80`;
       context.lineWidth = (selected ? 2 : 1.5) / this.camera.zoom;
-      context.beginPath(); context.arc(0, 0, radius + 7, 0, Math.PI * 2); context.stroke();
+      context.beginPath();
+      if (building) context.ellipse(0, 4, radius + 10, (radius + 10) * 0.8, 0, 0, Math.PI * 2);
+      else context.ellipse(0, radius * 0.45, radius + 5, (radius + 5) * 0.6, 0, 0, Math.PI * 2);
+      context.stroke();
     }
     context.fillStyle = color; context.strokeStyle = "#172a26"; context.lineWidth = 2.5;
     if (unit.kind === "hq") {
@@ -980,6 +1233,22 @@ export class Battlefield {
     } else {
       context.beginPath(); context.moveTo(0, -14); context.lineTo(12, -5); context.lineTo(9, 11); context.lineTo(-9, 11); context.lineTo(-12, -5); context.closePath(); context.fill(); context.stroke();
       context.fillStyle = "#e8ece1"; context.fillRect(-5, -6, 10, 5); context.fillStyle = "#172a26"; context.fillRect(7, -13, 5, 15);
+    }
+    // A hit: the body flashes pale for a moment, so who is taking fire reads
+    // in a crowd before any bar moves.
+    const hurt = this.hurtAt.get(unit.id);
+    if (hurt !== undefined && now - hurt < HIT_MS) {
+      const alpha = context.globalAlpha;
+      context.globalAlpha = alpha * 0.55 * (1 - (now - hurt) / HIT_MS);
+      context.fillStyle = "#fff4e0";
+      context.beginPath(); context.arc(0, 0, radius * 0.9, 0, Math.PI * 2); context.fill();
+      context.globalAlpha = alpha;
+    }
+    // Named as the target of an order you just gave: it blinks in that order's colour.
+    const flash = this.flashes.get(unit.id);
+    if (flash && now - flash.at < FLASH_MS && Math.floor((now - flash.at) / 110) % 2 === 0) {
+      context.strokeStyle = flash.color; context.lineWidth = 2.5 / this.camera.zoom;
+      context.beginPath(); context.arc(0, 0, radius + 9, 0, Math.PI * 2); context.stroke();
     }
     const tick = this.session.snapshot.room?.tick ?? 0n;
     const health = unit.hp / Math.max(1, unit.maxHp);

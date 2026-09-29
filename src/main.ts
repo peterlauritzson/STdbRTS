@@ -758,6 +758,7 @@ function render(): void {
 }
 
 battlefield.onSelection = renderMatch;
+battlefield.onOrder = kind => feedback.ack(kind);
 practice.onChange = render;
 session.onChange = render;
 setInterval(renderTimers, 100);

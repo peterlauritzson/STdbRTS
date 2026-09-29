@@ -4,6 +4,8 @@ Updated: 2026-09-25. User authorized implementation and requested a handoff at e
 
 ## Resume Here
 
+**Reference source changed (2026-09-29, docs only).** The author's changelog sheet ([REFERENCE-CHANGELOG.md](REFERENCE-CHANGELOG.md)) replaces the mod website as the reference; the website describes an earlier version. No code changed. Several built mechanics came from the website and differ from the sheet: depletion (the sheet has infinite resources), the opening stipend, army-only refunds, the 10s shield-regeneration delay, research at a lab. The author answered the same day (DECISIONS.md, "Three currencies, base income, instant research, build rules"): minerals/material for structures and research, gas/catalyst for the army, Terrazine for static defense; permanent base income; depletion kept; instant global research and tiers; build rules; Network regeneration and ricochet; the Industrial repair drone; Organic burrow; wider refunds. **Next action: Increment N in [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md), starting with N1**, Both sub-questions are answered: labour costs material; catalyst comes from automatic refineries for every faction. Treat RESEARCH.md's H1 sections as possibly obsolete.
+
 Completed increments: the shared versioned map definition and validation (steps 1-4); the playtest UX fixes (step 6); the M0 match identity and delay contract (step 7); and the dual-currency economy plus a navigation livelock fix (step 8). Ordering and scope live in [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md); settled choices in [DECISIONS.md](DECISIONS.md).
 
 Completed increment: **the melee map (step 9)**. The playable build is on the local database `stdbrts-map`. Earlier databases were not touched.
@@ -35,7 +37,7 @@ Latest: **controls and layout (step 24)**: full-height battlefield, hotkeys on e
 5. Movement and tick load at 120 units per player.
 6. Renderer pilot.
 
-**Demoted by the author:** fog of war and the private-state experiment (Increment C), which may never be built, and Increment F, the autonomous extractor. Do not pick either up because it looks cheap.
+**Demoted by the author:** fog of war and the private-state experiment (Increment C), which may never be built, and Increment F, the autonomous extractor. Do not pick either up because it looks cheap. *(2026-09-29: the extractor returns as the automatic refinery every faction uses for catalyst, inside Increment N1, without suppression or an output switch.)*
 
 Smaller open items:
 
@@ -390,6 +392,27 @@ Client only: no server, schema or balance change. Build on the new database `std
 - **Tests:** client 58 (3 new: group chords, edge direction, no key collisions), browser 4/4 on `stdbrts-ux` (the tall-window height pin moved 576 → 742), typecheck and build clean.
 - **Played** by a Sonnet agent through real mouse and keyboard in Playwright: 13/13 control checks passed, with no page or console errors. Its one real bug was fixed: a disabled train key now says "Needs a finished barracks/factory/hub", not the unit blurb. Not played by a person. Not tested: Shift+group add in the browser, and the enemy-hover cursor.
 - **Open for the author:** whether the key changes (H, F, Backspace) suit you; map growth, which the author says is needed but deferred to the engine-optimisation work (2026-09-26); and the playtest's note that first-barracks placement near the HQ is often refused by terrain.
+
+### Step 25: Order feel (implemented; checked by script; not committed)
+
+Client only: no server, schema or balance change. Runs on `stdbrts-ux`. The author said the game still felt clunky next to SC2 (2026-09-27). The one-second command delay stays (a ruleset decision). This step makes the client answer every click at once, as [ARCHITECTURE-AND-UX.md](ARCHITECTURE-AND-UX.md) asks ("immediate local click feedback by next rendered frame").
+
+- **Click acknowledgement.** Every order draws a ping where it was aimed on the next frame, in the order's colour: green move, red attack, gold gather/return/repair, cyan build, violet cast (`orderColor`). The target unit or deposit blinks, and a short quiet blip plays (`Feedback.ack`, lower for fights).
+- **Intent while the delay runs.** Your scheduled and still-sending orders draw faint lines from every unit that will carry them out to the aim, plus a ring that fills as the delay elapses. This replaces the "1.0s" / "..." text markers for your own orders; an opponent's still show the old marker.
+- **Order lines** for selected units are coloured by order, with a dot at each waypoint.
+- **Shift-queue like SC2.** With Shift held, an armed mode (attack-move, repair, build placement) stays armed after the click, and releasing Shift disarms it. A right-click while armed cancels the mode instead of firing it (battlefield and minimap).
+- **Selection.** Selected units get an ellipse at their feet: green for yours, red for others. While a box is dragged, the units it would take are highlighted. A box with no mobile units selects your buildings in it.
+- **Placement overlay.** While placing a building, the reach of your finished buildings (500) is tinted, and the halos `placementError` refuses (terrain +50, deposits 75, buildings 110, units 55 near the pointer) are shaded red. This shows why first-barracks sites near the HQ were refused: deposit and HQ halos cover most of the main.
+- **Combat reading.** A unit that loses health flashes pale for 140ms. A removed unit leaves a short burst in its owner's colour, larger for buildings. A snapshot that empties at once (reconnect) draws no bursts.
+- **Motion smoothing.** Interpolation spans the measured time per tick (EMA, 40-120ms), not a fixed 50ms, so units glide instead of stepping when updates arrive unevenly.
+- **Tests:** typecheck clean; client 58/58; browser 4/4 on `stdbrts-ux`. No new unit tests: everything here is drawing and input timing.
+- **Checked** with a scratch Playwright script (not committed), Industrial vs a Network bot, with screenshots I read myself: box preview, gather ping and deposit flash, intent line, placement overlay, and two Shift-queued attack-moves (armed while Shift is held, disarmed on release, red legs with waypoints). Right-click cancelled build placement. No page or console errors. Not seen on screen: the hit flash and the death burst (no fight happened in the window), and the sound.
+- **Not played by a person.**
+- **Open for the author** (larger levers, not done here):
+  - The 1.0s command delay is the biggest remaining gap to SC2's feel. The ruleset already allows 0.5s (`COMMAND_DELAY_MIN`); a practice trial at 0.5s would be cheap.
+  - Group moves converge on one point. SC2 keeps the group's shape (server side).
+  - Your own units standing on a site refuse placement. SC2 pushes them aside (server side).
+  - Tab to cycle subgroups, and a command card that follows the selection.
 
 ## Remaining Implementation
 

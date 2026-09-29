@@ -402,7 +402,38 @@ some kinds should stop to fire instead, and whether a plain move should ignore
 enemies, is settled (2026-09-25): a per-kind stat, and `move` keeps firing. See
 [DECISIONS.md](DECISIONS.md).
 
+## Increment N: the H0 ruleset (settled 2026-09-29, not started)
+
+The author's answers in [DECISIONS.md](DECISIONS.md) (2026-09-29). Proposed
+split, each piece visible in play, schema changes batched onto one new
+database:
+
+- **N1 - three currencies and base income.** Army units cost catalyst only;
+  structures, research and tiers cost material; turrets cost Terrazine, earned
+  as a fraction of material mined (Industrial +20%). The stipend becomes
+  permanent base income. The client shows three balances. Refunds widen to gas
+  buildings, Organic hubs and Network drifters. Labour costs material.
+  Catalyst comes from an automatic refinery built on a catalyst site, for every
+  faction (reusing the demoted Increment F's extractor idea, without
+  suppression). Refinery rate and the remembered cross-income rule get labeled
+  experimental values.
+- **N2 - instant research and tiers.** Research becomes a command-card
+  purchase with no building; the lab's queue goes. Tier contents per roster
+  need proposing.
+- **N3 - build rules.** Placement within a fixed range of a finished
+  structure; turrets only in the owner's zone; no building on the opponent's
+  half for an opening window. Server validation and client placement preview
+  both.
+- **N4 - faction mechanics.** Network: in-combat shield regeneration, power
+  field regenerates hit points and energy, ricochet. Industrial: hub energy and
+  the repair drone (heals any unit's hit points). Organic: burrow.
+
+Base income and Terrazine touch the conservation audit and the stipend mirror in
+`tests/integration.test.ts`; update both with N1.
+
 ## Ordering
+
+Increment N is the next work, starting with N1 (author, 2026-09-29).
 
 Fog no longer gates anything. The next chunky work is listed in
 [HANDOVER-2026-09-25.md](HANDOVER-2026-09-25.md). M1's remaining experiments
