@@ -3,7 +3,7 @@ import { createElement, createIcons, Keyboard, Crosshair, Radio, Plus, Play, Log
 import { ABILITIES, castRefusal, scheduledCasts, type AbilityKind } from "./abilities";
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
-import { COLORS, countdown, VISUALS } from "./presentation";
+import { COLORS, countdown, TICK_MS, VISUALS } from "./presentation";
 import { addCost, isCompletedHub, ARMY, armyFaction, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
 import { Practice, type PracticeOpponent } from "./practice";
 import { Feedback } from "./feedback";
@@ -723,7 +723,7 @@ function renderTimers(): void {
   const ours = commands.filter(command => command.owner === me.slot).sort((left, right) => left.id > right.id ? -1 : 1);
   element("pending-count").textContent = String(ours.filter(command => command.status === "scheduled").length + session.pending.size);
   const rows = [...session.pending.values()].map(pending => {
-    const row = text("div", "", "command-row"); row.append(text("span", pending.order.kind, "command-label"), text("span", "Sending", "command-status")); return row;
+    const row = text("div", "", "command-row"); row.append(text("span", pending.order.kind.split("_").join(" "), "command-label"), text("span", `${countdown(pending.executeTick, room.tick, performance.now() - session.tickReceivedAt).toFixed(1)}s`, "command-status")); return row;
   });
   for (const command of ours.slice(0, 8)) {
     const row = text("div", "", `command-row ${command.status}`);
@@ -741,7 +741,10 @@ function renderTimers(): void {
   }
   element("command-list").replaceChildren(...rows);
   const age = Math.round(performance.now() - session.tickReceivedAt);
-  element("telemetry").textContent = `TICK ${room.tick} / ACK ${session.ackMs}ms${room.state === "playing" && age > 1000 ? ` / STALE ${Math.floor(age / 1000)}s` : ""}`;
+  // LATE: your newest order reached the server after its stamp, so it ran
+  // that much later than the delay promised: the round trip is over budget.
+  const late = session.lateTicks > 0n ? ` / LATE +${Number(session.lateTicks) * TICK_MS}ms` : "";
+  element("telemetry").textContent = `TICK ${room.tick} / ACK ${session.ackMs}ms${late}${session.stalled() ? ` / STALL ${(age / 1000).toFixed(1)}s` : ""}`;
 }
 
 function render(): void {

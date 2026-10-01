@@ -30,6 +30,7 @@ export const Command = __t.object("Command", {
   },
   queued: __t.bool(),
   issuedTick: __t.u64(),
+  requestedTick: __t.u64(),
   executeTick: __t.u64(),
   status: __t.string(),
   reason: __t.string(),

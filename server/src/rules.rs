@@ -8,7 +8,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 12;
+pub const RULESET_VERSION: u32 = 13;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -37,6 +37,19 @@ pub const fn is_sample_tick(tick: u64) -> bool {
 /// creation, never clamped.
 pub const COMMAND_DELAY_MIN: u64 = 10;
 pub const COMMAND_DELAY_MAX: u64 = 30;
+
+/// How far before the full delay an order may be scheduled, in ticks: 300ms.
+///
+/// The client stamps each order with the tick it wants, the newest tick it has
+/// seen plus the delay, so an order runs exactly one delay after the state the
+/// player was looking at, whatever the network did in between. By the time it
+/// arrives the server is ahead of that tick by the player's round trip, so the
+/// stamp is honoured down to `room.tick + delay - allowance`. The floor is
+/// what stops a modified client from skipping the delay: the most it can gain
+/// is the allowance, which is what an honest player at that ping gets anyway.
+/// An order later than this runs at the floor, so above ~300ms round trip the
+/// delay grows with ping again.
+pub const COMMAND_LATENESS_ALLOWANCE: u64 = 6;
 
 // ---------------------------------------------------------------------------
 // Factions
@@ -68,7 +81,8 @@ impl Default for Faction {
 /// The rotation a room hands out, in slot order. A four-player room therefore
 /// holds all three economies, and slot 0 — the host, and the slot every existing
 /// test and replay uses — keeps the Industrial baseline.
-pub const FACTION_ROTATION: [Faction; 3] = [Faction::Industrial, Faction::Network, Faction::Organic];
+pub const FACTION_ROTATION: [Faction; 3] =
+    [Faction::Industrial, Faction::Network, Faction::Organic];
 
 /// The faction a slot is given. Deterministic and total: the same slot always
 /// yields the same faction, on any host, in any order of joining.
@@ -352,7 +366,9 @@ pub const MAX_WORLD_SIZE: f32 = 4096.0;
 /// and "8000 is rejected" are different authoring mistakes.
 pub fn validate_world_size(size: f32) -> Result<f32, String> {
     if !size.is_finite() || size <= 0.0 {
-        return Err(format!("Map size must be a positive finite number, got {size}"));
+        return Err(format!(
+            "Map size must be a positive finite number, got {size}"
+        ));
     }
     if !(MIN_WORLD_SIZE..=MAX_WORLD_SIZE).contains(&size) {
         return Err(format!(
@@ -1040,7 +1056,9 @@ pub const BLOOM_RADIUS: u16 = 200;
 pub const BLOOM_LIFETIME_TICKS: u64 = 1200;
 
 pub fn ability(kind: &str) -> Option<Ability> {
-    [RECALL, BLOOM].into_iter().find(|ability| ability.kind == kind)
+    [RECALL, BLOOM]
+        .into_iter()
+        .find(|ability| ability.kind == kind)
 }
 
 /// Can `kind` be trained at *any* finished structure standing in its owner's
@@ -1239,7 +1257,10 @@ pub enum ZoneOnset {
     /// Starts at `start` world units when the source completes and gains
     /// `per_second` once per second (stepped every `TICKS_PER_SECOND` ticks,
     /// on ticks that are a multiple of it) up to the source's own maximum.
-    Grows { start: u16, per_second: u16 },
+    Grows {
+        start: u16,
+        per_second: u16,
+    },
 }
 
 /// How a zone ends. A timed zone (a thrown grenade's field, say) would be a
@@ -1865,6 +1886,25 @@ pub fn execution_tick(current_tick: u64, delay: u64) -> Result<u64, String> {
         .ok_or_else(|| "Match tick limit reached".into())
 }
 
+/// The tick an order runs on, given the tick its client asked for.
+///
+/// `requested` is the client's stamp (see `COMMAND_LATENESS_ALLOWANCE`); 0
+/// means none was given and the order waits the full delay from arrival, as
+/// scripts and tools expect. A stamp is clamped into
+/// `[current + delay - allowance, current + delay]`, and never earlier than
+/// the next tick. It is a request about timing, not a rule a match was created
+/// under, so clamping it is right where the delay itself is rejected instead.
+pub fn scheduled_tick(current_tick: u64, delay: u64, requested: u64) -> Result<u64, String> {
+    let latest = execution_tick(current_tick, delay)?;
+    if requested == 0 {
+        return Ok(latest);
+    }
+    let earliest = latest
+        .saturating_sub(COMMAND_LATENESS_ALLOWANCE)
+        .max(current_tick + 1);
+    Ok(requested.clamp(earliest, latest))
+}
+
 /// A command delay outside `COMMAND_DELAY_MIN..=COMMAND_DELAY_MAX`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CommandDelayError {
@@ -1999,6 +2039,51 @@ mod tests {
     fn commands_wait_one_full_second() {
         assert_eq!(execution_tick(42, DEFAULT_COMMAND_DELAY), Ok(62));
         assert!(execution_tick(u64::MAX, DEFAULT_COMMAND_DELAY).is_err());
+    }
+
+    #[test]
+    fn an_unstamped_order_waits_the_full_delay_from_arrival() {
+        assert_eq!(scheduled_tick(42, DEFAULT_COMMAND_DELAY, 0), Ok(62));
+        assert!(scheduled_tick(u64::MAX, DEFAULT_COMMAND_DELAY, 0).is_err());
+    }
+
+    #[test]
+    fn a_stamp_inside_the_allowance_is_honoured_exactly() {
+        // Stamped at tick 100 as 120; it arrives after 1..=6 ticks of travel.
+        for arrival in 100..=100 + COMMAND_LATENESS_ALLOWANCE {
+            assert_eq!(
+                scheduled_tick(arrival, DEFAULT_COMMAND_DELAY, 120),
+                Ok(120),
+                "arrived at {arrival}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_late_stamp_runs_at_the_floor_not_in_the_past() {
+        let arrival = 100 + COMMAND_LATENESS_ALLOWANCE + 4;
+        assert_eq!(
+            scheduled_tick(arrival, DEFAULT_COMMAND_DELAY, 120),
+            Ok(arrival + DEFAULT_COMMAND_DELAY - COMMAND_LATENESS_ALLOWANCE)
+        );
+        // An absurdly old stamp is no different.
+        assert_eq!(scheduled_tick(5000, DEFAULT_COMMAND_DELAY, 1), Ok(5014));
+    }
+
+    #[test]
+    fn a_stamp_cannot_skip_the_delay_or_push_past_it() {
+        // A modified client asking for the next tick gains the allowance, no more.
+        assert_eq!(scheduled_tick(100, DEFAULT_COMMAND_DELAY, 101), Ok(114));
+        // A stamp beyond the full delay is from a client ahead of the server.
+        assert_eq!(scheduled_tick(100, DEFAULT_COMMAND_DELAY, 500), Ok(120));
+    }
+
+    #[test]
+    fn the_floor_is_never_before_the_next_tick() {
+        assert!(COMMAND_LATENESS_ALLOWANCE < COMMAND_DELAY_MIN);
+        for delay in COMMAND_DELAY_MIN..=COMMAND_DELAY_MAX {
+            assert!(scheduled_tick(100, delay, 1).unwrap() > 100);
+        }
     }
 
     #[test]
@@ -2181,7 +2266,10 @@ mod tests {
             ..patch
         };
         assert_eq!(advance_patch(small, false, 130).unwrap().radius, 5);
-        assert_eq!(advance_patch(CreepPatch { radius: 5, ..small }, false, 150), None);
+        assert_eq!(
+            advance_patch(CreepPatch { radius: 5, ..small }, false, 150),
+            None
+        );
     }
 
     #[test]
@@ -2208,11 +2296,16 @@ mod tests {
         );
         // The owner's harvester: full speed on its creep, 0.6 off it.
         assert_eq!(field.movement_multiplier(0, "harvester", 500.0, 500.0), 1.0);
-        assert_eq!(field.movement_multiplier(0, "harvester", 1000.0, 1000.0), 0.6);
+        assert_eq!(
+            field.movement_multiplier(0, "harvester", 1000.0, 1000.0),
+            0.6
+        );
         // Another slot's harvester is on none of *its* owner's creep.
         assert_eq!(field.movement_multiplier(1, "harvester", 500.0, 500.0), 0.6);
         // Nothing else is touched, on creep or off it, friend or enemy.
-        for kind in ["soldier", "scout", "siege", "worker", "drifter", "brood", "brute"] {
+        for kind in [
+            "soldier", "scout", "siege", "worker", "drifter", "brood", "brute",
+        ] {
             for owner in [0, 1] {
                 for (x, y) in [(500.0, 500.0), (1000.0, 1000.0)] {
                     assert_eq!(field.movement_multiplier(owner, kind, x, y), 1.0, "{kind}");
@@ -2235,10 +2328,24 @@ mod tests {
     #[test]
     fn death_spawns_follow_total_cost_for_every_kind_with_stats() {
         let every_kind = [
-            "hq", "barracks", "factory", "turret", "outpost", "lab", "sensor",
-            "research_weapons", "research_armor", "research_logistics",
-            "worker", "drifter", "harvester", "soldier", "scout", "siege",
-            "brood", "brute",
+            "hq",
+            "barracks",
+            "factory",
+            "turret",
+            "outpost",
+            "lab",
+            "sensor",
+            "research_weapons",
+            "research_armor",
+            "research_logistics",
+            "worker",
+            "drifter",
+            "harvester",
+            "soldier",
+            "scout",
+            "siege",
+            "brood",
+            "brute",
         ];
         for kind in every_kind {
             assert!(stats(kind).is_some(), "{kind} has stats");
@@ -2291,7 +2398,8 @@ mod tests {
         // construction (no builder, no cancel), shield shares by kind, and the
         // teleport cooldown. 10: primary-hub victory. 11: outposts train
         // labour. 12: hub energy, Network recall and Organic bloom.
-        assert_eq!(RULESET_VERSION, 12);
+        // 13: orders run at the client's stamped tick, within the allowance.
+        assert_eq!(RULESET_VERSION, 13);
         assert!(RULESET_VERSION > 0);
     }
 
@@ -2324,7 +2432,9 @@ mod tests {
 
     #[test]
     fn catalyst_gates_technology_and_specialists_only() {
-        for basic in ["worker", "soldier", "scout", "barracks", "turret", "outpost"] {
+        for basic in [
+            "worker", "soldier", "scout", "barracks", "turret", "outpost",
+        ] {
             assert_eq!(stats(basic).unwrap().cost.catalyst, 0, "{basic}");
         }
         for advanced in [
@@ -2358,7 +2468,11 @@ mod tests {
             ("research_weapons", 0, 300),
         ] {
             let definition = stats(kind).unwrap();
-            assert_eq!((definition.hp, definition.training_ticks), (hp, training_ticks), "{kind}");
+            assert_eq!(
+                (definition.hp, definition.training_ticks),
+                (hp, training_ticks),
+                "{kind}"
+            );
         }
     }
 
@@ -2414,7 +2528,10 @@ mod tests {
         assert_eq!(Cost::new(101, 51).percent(50), Cost::new(50, 25));
         assert_eq!(Cost::new(1, 1).percent(50), Cost::ZERO);
         assert_eq!(Cost::new(150, 50).percent(75), Cost::new(112, 37));
-        assert_eq!(Cost::new(u32::MAX, u32::MAX).percent(50), Cost::new(u32::MAX / 2, u32::MAX / 2));
+        assert_eq!(
+            Cost::new(u32::MAX, u32::MAX).percent(50),
+            Cost::new(u32::MAX / 2, u32::MAX / 2)
+        );
     }
 
     #[test]
@@ -2488,7 +2605,10 @@ mod tests {
         assert_eq!(faction_for_slot(3), Faction::Industrial);
         let spread: Vec<Faction> = (0..4).map(faction_for_slot).collect();
         for faction in FACTION_ROTATION {
-            assert!(spread.contains(&faction), "{faction} is missing from a full room");
+            assert!(
+                spread.contains(&faction),
+                "{faction} is missing from a full room"
+            );
         }
         // Deterministic, and total for every slot a u8 can hold.
         for slot in 0..=u8::MAX {
@@ -2507,7 +2627,10 @@ mod tests {
             (Faction::Organic, "harvester"),
         ];
         for (faction, kind) in expected {
-            assert!(producer(kind, "hq", faction), "{faction} cannot train {kind}");
+            assert!(
+                producer(kind, "hq", faction),
+                "{faction} cannot train {kind}"
+            );
             for other in FACTION_ROTATION {
                 if other != faction {
                     assert!(
@@ -2560,27 +2683,41 @@ mod tests {
                     }
                 }
             }
-            assert!(stats(heavy).unwrap().cost.catalyst > 0, "{heavy} is catalyst-gated");
-            assert_eq!(attack_damage(heavy, "barracks", 10), 30, "{heavy} vs structures");
+            assert!(
+                stats(heavy).unwrap().cost.catalyst > 0,
+                "{heavy} is catalyst-gated"
+            );
+            assert_eq!(
+                attack_damage(heavy, "barracks", 10),
+                30,
+                "{heavy} vs structures"
+            );
         }
     }
 
     #[test]
     fn the_three_armies_lean_the_way_their_factions_do() {
-        let [sentinel, soldier, swarmer] = ["sentinel", "soldier", "swarmer"].map(|kind| stats(kind).unwrap());
+        let [sentinel, soldier, swarmer] =
+            ["sentinel", "soldier", "swarmer"].map(|kind| stats(kind).unwrap());
         // Network: fewer, stronger. Organic: cheaper, faster, weaker.
         assert!(sentinel.cost.material > soldier.cost.material && sentinel.hp > soldier.hp);
         assert!(swarmer.cost.material < soldier.cost.material && swarmer.speed > soldier.speed);
         assert!(swarmer.hp < soldier.hp);
         // The raiders: the skimmer is the fastest thing on the map and hunts labour.
-        let fastest = ["soldier", "scout", "siege", "sentinel", "lancer", "swarmer", "spitter", "crusher"]
-            .map(|kind| stats(kind).unwrap().speed)
-            .into_iter()
-            .fold(0.0, f32::max);
+        let fastest = [
+            "soldier", "scout", "siege", "sentinel", "lancer", "swarmer", "spitter", "crusher",
+        ]
+        .map(|kind| stats(kind).unwrap().speed)
+        .into_iter()
+        .fold(0.0, f32::max);
         assert!(stats("skimmer").unwrap().speed > fastest);
         assert_eq!(attack_damage("skimmer", "drifter", 8), 24);
         assert_eq!(attack_damage("skimmer", "soldier", 8), 8);
-        assert_eq!(attack_damage("soldier", "skimmer", 18), 36, "a fighter counters a raider");
+        assert_eq!(
+            attack_damage("soldier", "skimmer", 18),
+            36,
+            "a fighter counters a raider"
+        );
         // Death on creep: a swarmer leaves a brood, a crusher a brute.
         assert_eq!(death_spawn("swarmer"), Some(("brood", 1)));
         assert_eq!(death_spawn("crusher"), Some(("brute", 1)));

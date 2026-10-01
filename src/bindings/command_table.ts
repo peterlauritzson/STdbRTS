@@ -26,6 +26,7 @@ export default __t.row({
   },
   queued: __t.bool(),
   issuedTick: __t.u64().name("issued_tick"),
+  requestedTick: __t.u64().name("requested_tick"),
   executeTick: __t.u64().name("execute_tick"),
   status: __t.string(),
   reason: __t.string(),

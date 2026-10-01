@@ -683,3 +683,36 @@ drifters, on top of army units.
 **Would overturn it.** Play showing that separate currencies make one of them
 irrelevant (for example, static defense never built), or that permanent base
 income removes the pressure to expand.
+
+---
+
+## 2026-09-30 — Orders run at the client's stamped tick, not at arrival
+
+**Decision (author).** The command delay exists so that the network never
+decides when an order runs. The client stamps each order with the tick it
+should run on: the newest tick it has seen plus the match's delay. The server
+honours the stamp while the order arrives within `COMMAND_LATENESS_ALLOWANCE`
+(6 ticks, 300ms), and clamps it into
+`[room.tick + delay - allowance, room.tick + delay]` otherwise. An unstamped
+order (stamp 0, scripts and tools) waits the full delay from arrival, as
+before. The stamp is stored as `Command.requested_tick`. `RULESET_VERSION` 13.
+
+**Why.** Before this, the server stamped `room.tick + delay` on arrival, so a
+player's real delay was their ping plus one second, and a lag spike moved
+execution by the length of the spike. That paid the whole price of the delay
+and got none of its value. With the stamp, every player under ~300ms round
+trip gets exactly one delay after the state they were looking at, whatever the
+jitter, and the client knows the execution tick at the click, so its countdown
+ring starts at once. The simulation stays server-only: no lockstep, no client
+prediction, no rollback. A server that goes quiet for 500ms shows "Waiting
+for server" instead of a silently frozen picture.
+
+**Cheating bound.** A client may stamp any tick; the floor stops it from
+skipping the delay. The most it gains is the allowance, which an honest
+player at 300ms round trip gets anyway. Clamping, not rejecting, is right here
+because the stamp is a timing request, not a rule the match was created under
+(the delay itself is still rejected when out of range).
+
+**Would overturn it.** Real online play showing typical round trips above
+300ms (raise the allowance, accepting a larger cheat bound), or players
+exploiting the allowance measurably.

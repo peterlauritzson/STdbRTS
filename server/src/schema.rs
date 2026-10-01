@@ -134,6 +134,9 @@ pub struct Command {
     pub order: Order,
     pub queued: bool,
     pub issued_tick: u64,
+    /// The tick the client asked for (0: none). Differs from `execute_tick`
+    /// only when the order arrived too late to honour it.
+    pub requested_tick: u64,
     pub execute_tick: u64,
     pub status: String,
     pub reason: String,

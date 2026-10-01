@@ -1,6 +1,6 @@
 use crate::{lobby::current_player, schema::*};
 use rts_core::{
-    execution_tick, is_army, is_building, is_labour, is_sample_tick, maps,
+    is_army, is_building, is_labour, is_sample_tick, maps, scheduled_tick,
     simulation::{Command as CoreCommand, Order, World},
     stats, Balance, Cost,
 };
@@ -51,7 +51,10 @@ pub fn sync_tick_schedule(ctx: &ReducerContext) {
         return;
     }
     if let Some(row) = current {
-        ctx.db.tick_schedule().scheduled_id().delete(row.scheduled_id);
+        ctx.db
+            .tick_schedule()
+            .scheduled_id()
+            .delete(row.scheduled_id);
     }
     if let Some(scheduled_at) = desired {
         ctx.db.tick_schedule().insert(TickSchedule {
@@ -274,7 +277,11 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
         let collected = world.collected(player.slot);
         let lost = world.lost(player.slot);
         let killed = world.killed(player.slot);
-        let research = world.research.get(&player.slot).cloned().unwrap_or_default();
+        let research = world
+            .research
+            .get(&player.slot)
+            .cloned()
+            .unwrap_or_default();
         let changed = balance.is_some_and(|balance| {
             (player.material, player.catalyst) != (balance.material, balance.catalyst)
         }) || faction.is_some_and(|faction| player.faction != faction)
@@ -423,6 +430,7 @@ pub fn issue_order(
     y: f32,
     target: u32,
     queued: bool,
+    requested_tick: u64,
 ) -> Result<(), String> {
     let mut player = current_player(ctx)?;
     let room = ctx
@@ -465,16 +473,16 @@ pub fn issue_order(
         return Err("Too many pending orders".into());
     }
     let order = Order { kind, x, y, target };
-    let execute_tick = execution_tick(room.tick, room.command_delay)?;
+    let execute_tick = scheduled_tick(room.tick, room.command_delay, requested_tick)?;
     let map = maps::by_id(&room.map_id).ok_or("This match was created on an unknown map")?;
     world.validate_on(
         &CoreCommand {
-        id: 0,
-        owner: player.slot,
-        units: units.clone(),
-        order: order.clone(),
-        queued,
-        execute_tick,
+            id: 0,
+            owner: player.slot,
+            units: units.clone(),
+            order: order.clone(),
+            queued,
+            execute_tick,
             status: "scheduled".into(),
             reason: String::new(),
         },
@@ -492,6 +500,7 @@ pub fn issue_order(
         order,
         queued,
         issued_tick: room.tick,
+        requested_tick,
         execute_tick,
         status: "scheduled".into(),
         reason: String::new(),
@@ -539,9 +548,7 @@ pub fn game_tick(ctx: &ReducerContext, _timer: TickSchedule) -> Result<(), Strin
                     // so a wake that advances four ticks still writes one row
                     // per sample point and dates it by the tick it describes.
                     // See `World::step_many_on`.
-                    world.step_many_on(map, due as u64, |world| {
-                        record_sample(ctx, room.id, world)
-                    });
+                    world.step_many_on(map, due as u64, |world| record_sample(ctx, room.id, world));
                     record_final_sample(ctx, room.id, &world);
                 }
                 // A match frozen on a map this build no longer ships cannot be

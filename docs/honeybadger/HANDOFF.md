@@ -26,7 +26,9 @@ Latest: **primary-hub victory (step 21, Increment K)**. A player is out once eve
 
 Then: **outposts as town halls and C&C-style training (step 22)**. Every outpost trains its faction's labour, and train buttons need no building selected. Same database, `RULESET_VERSION` 11. Not committed.
 
-Latest: **controls and layout (step 24)**: full-height battlefield, hotkeys on every button, control groups, edge scroll, minimap orders, and the map painted at its real size. Client only; the build is on `stdbrts-ux`. Not committed.
+Latest: **orders run at the client's stamped tick (step 26)**: the command delay now absorbs network jitter instead of adding to it, and a 500ms server stall shows a banner. Schema and ruleset change (`RULESET_VERSION` 13): the build is on the new database `stdbrts-sched`. Not committed.
+
+Before that: **controls and layout (step 24)**: full-height battlefield, hotkeys on every button, control groups, edge scroll, minimap orders, and the map painted at its real size. Client only; the build is on `stdbrts-ux`. Not committed.
 
 **The next chunky steps, with the questions to ask the author first, are in [HANDOVER-2026-09-25.md](HANDOVER-2026-09-25.md).** In short:
 
@@ -413,6 +415,23 @@ Client only: no server, schema or balance change. Runs on `stdbrts-ux`. The auth
   - Group moves converge on one point. SC2 keeps the group's shape (server side).
   - Your own units standing on a site refuse placement. SC2 pushes them aside (server side).
   - Tab to cycle subgroups, and a command card that follows the selection.
+
+### Step 26: Stamped execution ticks (implemented; checked by script; not committed)
+
+- **Asked by the author (2026-09-30).** The point of a fixed command delay is that the network never decides when an order runs; the server stamped orders on arrival, so a player's real delay was ping + 1s and a lag spike moved execution. See [DECISIONS.md](DECISIONS.md).
+- **Server.** `issue_order` takes `requested_tick`; `rules::scheduled_tick` clamps it into `[tick + delay - COMMAND_LATENESS_ALLOWANCE, tick + delay]`, never before the next tick; 0 means unstamped and waits the full delay from arrival. `Command.requested_tick` is stored. `RULESET_VERSION` 13. New database `stdbrts-sched`.
+- **Client.** `Session.order` stamps `room.tick + room.commandDelay` and keeps it on the pending order, so the intent ring and the command list count down from the click rather than from the server's answer ("Sending" is gone). `Session.lateTicks` records how late your newest order ran; the telemetry line shows `LATE +Nms` when the round trip exceeds the allowance. `Session.stalled()` (500ms without a tick) draws "WAITING FOR SERVER" over the battlefield and `STALL` in the telemetry. Nothing is predicted: a stall freezes the picture, as before.
+- **Tests.**
+
+  | Suite | Result |
+  | --- | --- |
+  | Rust | 164 (5 new: unstamped orders wait the full delay; a stamp inside the allowance is exact; a late stamp runs at the floor; a stamp cannot skip or exceed the delay; the floor is after the next tick for every legal delay) |
+  | Client | 58 |
+  | Integration (`stdbrts-sched`) | 13/13 (1 new: a client-style stamp runs exactly on its stamp; a stamp of tick 1 is clamped to issue + 14) |
+  | Browser (`stdbrts-sched`) | 3/4 then 4/4. The first run failed "desktop and touch multiplayer flow", the load-sensitive test noted at step 22; it passed alone and in a full rerun. The failing assertion was not captured. |
+  | Typecheck | clean |
+- **Checked** by a Sonnet agent with a scratch Playwright script on `stdbrts-sched`, 1440x900, screenshots read by it. Right-click move with F2: the command list read "move / 1 / 1.0s" 6ms after the click and 0.6s at 300ms ("Sending" never appeared); the intent ring was ~40% at 570ms and nearly closed at 950ms, and the unit moved after about 1s. Telemetry "TICK n / ACK 10ms", no LATE. CDP `Network.emulateNetworkConditions` offline stalled the socket: telemetry counted "STALL 1.0s ... 3.1s" and the canvas showed "WAITING FOR SERVER 3.1s". No page or console errors. At ~70ms the click ping sits on the ring, so its fill is not readable that early.
+- **Not verified:** real online latency. `LATE` and the allowance are exercised only by the Rust and integration tests, never at a real 200ms+ round trip. Not played by a person.
 
 ## Remaining Implementation
 

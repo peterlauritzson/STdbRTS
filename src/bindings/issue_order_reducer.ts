@@ -18,4 +18,5 @@ export default {
   y: __t.f32(),
   target: __t.u32(),
   queued: __t.bool(),
+  requestedTick: __t.u64(),
 };

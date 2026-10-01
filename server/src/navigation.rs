@@ -63,13 +63,7 @@ const ESCAPE_DIRECTIONS: [(f32, f32); 8] = [
 /// map other than skirmish used to be tested against skirmish's rectangles,
 /// so units shot through walls that were there and were stopped by walls that
 /// were not.
-pub fn line_of_sight(
-    map: &MapDefinition,
-    x: f32,
-    y: f32,
-    target_x: f32,
-    target_y: f32,
-) -> bool {
+pub fn line_of_sight(map: &MapDefinition, x: f32, y: f32, target_x: f32, target_y: f32) -> bool {
     let steps = (distance(x, y, target_x, target_y) / 8.0).ceil().max(1.0) as usize;
     (0..=steps).all(|index| {
         let fraction = index as f32 / steps as f32;
@@ -465,7 +459,14 @@ mod tests {
         let world = crate::simulation::World::new(&[0, 1]);
         let navigation = Navigation::new(skirmish(), &world.units);
         assert!(navigation.free(551.0, 736.0), "the start must be legal");
-        let trip = travel(skirmish(), &navigation, (551.0, 736.0), (220.0, 220.0), 45.0, 600);
+        let trip = travel(
+            skirmish(),
+            &navigation,
+            (551.0, 736.0),
+            (220.0, 220.0),
+            45.0,
+            600,
+        );
         assert!(
             trip.arrived,
             "worker stalled at ({:.1}, {:.1}), {:.1} from the hub, after {} reverted ticks",

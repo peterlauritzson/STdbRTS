@@ -257,6 +257,21 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       await order(host, [2], "stop");
     });
 
+    await context.test("a stamped order runs on its stamp; a stamp that skips the delay is clamped", async () => {
+      const find = (requestId: string) => [...host.db.command.iter()].find(command => command.requestId === requestId);
+      // Stamped the way the client does: the newest tick seen plus the delay.
+      const onTime = crypto.randomUUID();
+      await order(host, [2], "stop", { requestId: onTime, requestedTick: host.db.room.id.find(matchId)!.tick + 20n });
+      await until(() => find(onTime) !== undefined, "stamped command row");
+      const stamped = find(onTime)!;
+      assert.equal(stamped.executeTick, stamped.requestedTick, "a local round trip is well inside the allowance");
+      // A modified client asking for the next tick gains the allowance, no more.
+      const early = crypto.randomUUID();
+      await order(host, [2], "stop", { requestId: early, requestedTick: 1n });
+      await until(() => find(early) !== undefined, "clamped command row");
+      assert.equal(find(early)!.executeTick - find(early)!.issuedTick, 14n);
+    });
+
     await context.test("production is delayed, charged once, and serialized", async () => {
       const startTick = host.db.room.id.find(matchId)!.tick;
       const start = me(host).material;

@@ -409,7 +409,10 @@ mod tests {
             .iter()
             .filter(|d| d.kind == ResourceKind::Catalyst)
             .count();
-        assert_eq!(catalyst, 32, "eight catalyst sites per player, two per base");
+        assert_eq!(
+            catalyst, 32,
+            "eight catalyst sites per player, two per base"
+        );
         assert_eq!(map.deposits.len() - catalyst, 120);
 
         // Catalyst is per-base, like gas, and the centre is fought over for
@@ -598,7 +601,9 @@ mod tests {
         assert!(sized(3210.0).unwrap_err().contains("navigation cell"));
         assert!(sized(0.0).unwrap_err().contains("positive finite"));
         assert!(sized(f32::NAN).unwrap_err().contains("positive finite"));
-        assert!(sized(f32::INFINITY).unwrap_err().contains("positive finite"));
+        assert!(sized(f32::INFINITY)
+            .unwrap_err()
+            .contains("positive finite"));
     }
 
     /// The 3200 melee proposal, parsed and validated by the real validator —

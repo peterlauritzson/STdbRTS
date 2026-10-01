@@ -755,19 +755,21 @@ export class Battlefield {
     // Your orders still inside the delay: a line from every unit that will
     // carry it out to where it is aimed, and a ring at the aim that closes as
     // the delay runs out. The units have visibly "heard" the order at once;
-    // the ring says when they will act. An opponent's reads as before.
+    // the ring says when they will act. An opponent's reads as before. An
+    // order still in flight is stamped with its tick, so its ring starts
+    // filling at the click rather than when the server answers.
     const delay = Math.max(1, Number(room?.commandDelay ?? 20n));
     const since = now - this.session.tickReceivedAt;
+    const left = (executeTick: bigint) => countdown(executeTick, room?.tick ?? 0n, since);
     for (const command of commands.filter(command => command.status === "scheduled")) {
       const target = this.orderTarget(command.order);
       if (!target) continue;
-      const left = countdown(command.executeTick, room?.tick ?? 0n, since);
-      if (command.owner === mySlot) this.intent(command.units, command.order.kind, target, 1 - left * 20 / delay, now);
-      else this.marker(target, COLORS[command.owner], `${left.toFixed(1)}s`);
+      if (command.owner === mySlot) this.intent(command.units, command.order.kind, target, 1 - left(command.executeTick) * 20 / delay, now);
+      else this.marker(target, COLORS[command.owner], `${left(command.executeTick).toFixed(1)}s`);
     }
     for (const pending of this.session.pending.values()) {
       const target = this.orderTarget(pending.order);
-      if (target) this.intent(pending.units, pending.order.kind, target, 0, now);
+      if (target) this.intent(pending.units, pending.order.kind, target, 1 - left(pending.executeTick) * 20 / delay, now);
     }
     if (this.targeting?.startsWith("build_") && this.session.snapshot.me) this.drawPlacementZones(this.session.snapshot.me.slot);
     this.boxPreview = this.drag && !this.drag.pan && Math.hypot(this.drag.start.x - this.drag.end.x, this.drag.start.y - this.drag.end.y) >= 6
@@ -831,6 +833,16 @@ export class Battlefield {
       context.strokeStyle = "#b3f7dc"; context.fillStyle = "#9cedd321"; context.lineWidth = 1;
       const { start, end } = this.drag;
       context.fillRect(start.x, start.y, end.x - start.x, end.y - start.y); context.strokeRect(start.x, start.y, end.x - start.x, end.y - start.y);
+    }
+    // Nothing is predicted, so a quiet server simply freezes the picture;
+    // say so rather than leave the player wondering whether a click took.
+    if (this.session.stalled(now)) {
+      const label = `WAITING FOR SERVER ${((now - this.session.tickReceivedAt) / 1000).toFixed(1)}s`;
+      context.font = "600 14px 'IBM Plex Mono'"; context.textAlign = "center";
+      const width = context.measureText(label).width + 28;
+      context.fillStyle = "#101c19e0"; context.fillRect(this.width / 2 - width / 2, 16, width, 32);
+      context.strokeStyle = "#edce6d"; context.lineWidth = 1; context.strokeRect(this.width / 2 - width / 2 + 0.5, 16.5, width - 1, 31);
+      context.fillStyle = "#edce6d"; context.fillText(label, this.width / 2, 37);
     }
   }
 

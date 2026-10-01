@@ -1,17 +1,17 @@
 use crate::maps::MapDefinition;
 use crate::navigation::{line_of_sight, Navigation};
 use crate::{
-    attack_damage, building_faction, cargo_capacity, carries_cargo, death_refund, distance,
-    drifter_pulse, gathers_in_place, is_army, is_building, is_hub, is_labour, labour_faction,
-    advance_patch, creep_max_radius, creep_zone, death_spawn, fights, is_temporary, mining_yield,
-    producer, stats, stipend_payment, temporary_lifetime, validate_position, zone_template,
-    can_teleport, power_field, projects_power, shield_regen, trains_in_field, vitals, Balance,
-    TELEPORT_COOLDOWN_TICKS, ability, max_energy, Ability, BLOOM, BLOOM_LIFETIME_TICKS,
-    ENERGY_REGEN_INTERVAL_TICKS, HUB_START_ENERGY, RECALL, RECALL_RADIUS,
-    Cost, CreepPatch, Faction, ResourceKind, Zone, ZoneField,
-    HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, MAX_BUILDINGS, MAX_QUEUE, MAX_UNITS,
-    MINING_PULSE_TICKS, POWER_RESTORE_RADIUS, REPAIR_COST, SHIELD_REGEN_DELAY_TICKS,
+    ability, advance_patch, attack_damage, building_faction, can_teleport, cargo_capacity,
+    carries_cargo, creep_max_radius, creep_zone, death_refund, death_spawn, distance,
+    drifter_pulse, fights, gathers_in_place, is_army, is_building, is_hub, is_labour, is_temporary,
+    labour_faction, max_energy, mining_yield, power_field, producer, projects_power, shield_regen,
+    stats, stipend_payment, temporary_lifetime, trains_in_field, validate_position, vitals,
+    zone_template, Ability, Balance, Cost, CreepPatch, Faction, ResourceKind, Zone, ZoneField,
+    BLOOM, BLOOM_LIFETIME_TICKS, ENERGY_REGEN_INTERVAL_TICKS, HUB_START_ENERGY, HUB_STOCK_CAP,
+    HUB_STOCK_INTERVAL_TICKS, MAX_BUILDINGS, MAX_QUEUE, MAX_UNITS, MINING_PULSE_TICKS,
+    POWER_RESTORE_RADIUS, RECALL, RECALL_RADIUS, REPAIR_COST, SHIELD_REGEN_DELAY_TICKS,
     SHIELD_REGEN_INTERVAL_TICKS, STARTING_BALANCE, TELEPORT_ARRIVAL_TICKS, TELEPORT_CHANNEL_TICKS,
+    TELEPORT_COOLDOWN_TICKS,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -427,8 +427,7 @@ impl World {
     /// by `MAX_UNITS`: it takes no supply. Every spawn follows a non-temporary
     /// death, so the count is bounded by what the players built.
     fn spawn_temporary(&mut self, owner: u8, kind: &str, x: f32, y: f32) {
-        let lifetime =
-            temporary_lifetime(kind).expect("only temporary kinds are spawned this way");
+        let lifetime = temporary_lifetime(kind).expect("only temporary kinds are spawned this way");
         self.spawn(owner, kind, x, y);
         let unit = self.units.last_mut().unwrap();
         unit.expires_tick = self.tick + lifetime;
@@ -555,7 +554,10 @@ impl World {
             // no worker is sent, assigned or needed. The one unit named is only
             // the issuer the command protocol requires; nothing happens to it.
             if command.units.len() != 1 || command.queued {
-                return Err("Construction is ordered once, from the command card, and cannot be queued".into());
+                return Err(
+                    "Construction is ordered once, from the command card, and cannot be queued"
+                        .into(),
+                );
             }
             validate_position(order.x, order.y, map.size)?;
             if !map.terrain_free(order.x, order.y, 50.0) {
@@ -722,7 +724,10 @@ impl World {
                         })
                         .ok_or("Select another friendly unit or HQ to repair")?;
                     if target.construction_remaining > 0 {
-                        return Err("This building is still under construction; it finishes on its own".into());
+                        return Err(
+                            "This building is still under construction; it finishes on its own"
+                                .into(),
+                        );
                     }
                     if target.hp >= target.max_hp {
                         return Err("Target is already fully repaired".into());
@@ -750,8 +755,11 @@ impl World {
                     if unit.arrive_tick > self.tick {
                         return Err("Unit is still arriving from its last teleport".into());
                     }
-                    if unit.arrive_tick > 0 && self.tick < unit.arrive_tick + TELEPORT_COOLDOWN_TICKS {
-                        let left = (unit.arrive_tick + TELEPORT_COOLDOWN_TICKS - self.tick).div_ceil(20);
+                    if unit.arrive_tick > 0
+                        && self.tick < unit.arrive_tick + TELEPORT_COOLDOWN_TICKS
+                    {
+                        let left =
+                            (unit.arrive_tick + TELEPORT_COOLDOWN_TICKS - self.tick).div_ceil(20);
                         return Err(format!("Teleport is recharging: {left}s left"));
                     }
                     validate_position(order.x, order.y, map.size)?;
@@ -787,8 +795,7 @@ impl World {
                 "attack" => {
                     if !fights(&unit.kind) {
                         return Err(
-                            "Only fighting units can attack; labour and buildings cannot"
-                                .into(),
+                            "Only fighting units can attack; labour and buildings cannot".into(),
                         );
                     }
                     if !self
@@ -1122,7 +1129,10 @@ impl World {
                 continue;
             }
             if self.tick % ENERGY_REGEN_INTERVAL_TICKS == 0 {
-                let faction = factions.get(&unit.owner).copied().unwrap_or(Faction::Industrial);
+                let faction = factions
+                    .get(&unit.owner)
+                    .copied()
+                    .unwrap_or(Faction::Industrial);
                 unit.energy = (unit.energy + 1).min(max_energy(&unit.kind, faction));
             }
             // Just arrived from a teleport: inactive until `arrive_tick`. It
@@ -1194,7 +1204,11 @@ impl World {
                             unit,
                             target.x,
                             target.y,
-                            if is_building(&target.kind) { 55.0 } else { 24.0 },
+                            if is_building(&target.kind) {
+                                55.0
+                            } else {
+                                24.0
+                            },
                         ) && self.tick % 10 == 0
                         {
                             let balance = self.balances.entry(unit.owner).or_default();
@@ -1318,8 +1332,7 @@ impl World {
                         .iter_mut()
                         .find(|node| node.id == unit.order.target && node.amount > 0)
                     {
-                        if advance(unit, node.x, node.y, 28.0) && self.tick % interval == 0
-                        {
+                        if advance(unit, node.x, node.y, 28.0) && self.tick % interval == 0 {
                             // What leaves the deposit arrives in exactly one
                             // balance, in the deposit's own currency.
                             let amount = pulse.min(node.amount);
@@ -1450,10 +1463,9 @@ impl World {
                     distance(unit.x, unit.y, target.x, target.y) <= definition.range
                         && line_of_sight(map, unit.x, unit.y, target.x, target.y)
                 }) {
-                    let armor = self
-                        .research
-                        .get(&target.owner)
-                        .is_some_and(|research| research.iter().any(|item| item == "research_armor"));
+                    let armor = self.research.get(&target.owner).is_some_and(|research| {
+                        research.iter().any(|item| item == "research_armor")
+                    });
                     let hit = attack_damage(
                         &unit.kind,
                         &target.kind,
@@ -1499,8 +1511,8 @@ impl World {
                 // finished Network building is at full health rather than
                 // waiting minutes to regenerate half of it.
                 let shields = unit.max_shields as u64;
-                let old_shields = shields * (definition.training_ticks - before)
-                    / definition.training_ticks;
+                let old_shields =
+                    shields * (definition.training_ticks - before) / definition.training_ticks;
                 let new_shields = shields
                     * (definition.training_ticks - unit.construction_remaining)
                     / definition.training_ticks;
@@ -1777,7 +1789,9 @@ impl World {
                 .binary_search_by_key(&unit.id, |patch| patch.source)
                 .is_err()
             {
-                creep.push(CreepPatch::sprouting(unit.id, unit.owner, unit.x, unit.y, max));
+                creep.push(CreepPatch::sprouting(
+                    unit.id, unit.owner, unit.x, unit.y, max,
+                ));
             }
         }
         creep.sort_unstable_by_key(|patch| patch.source);
@@ -1932,7 +1946,6 @@ impl World {
             }
         }
     }
-
 
     pub fn surrender(&mut self, owner: u8) {
         if self.outcome.is_some() {
@@ -2138,7 +2151,9 @@ mod tests {
                 .validate(&command(1, 0, 1, &format!("train_{kind}"), 0))
                 .unwrap_err();
             assert!(
-                refused.contains("HQ") || refused.contains("barracks") || refused.contains("factory"),
+                refused.contains("HQ")
+                    || refused.contains("barracks")
+                    || refused.contains("factory"),
                 "training a {kind} at a hub should say where it is made: {refused}"
             );
         }
@@ -2156,8 +2171,12 @@ mod tests {
 
         // With one finished, both open up.
         let barracks = barracks_for(&mut world, 0);
-        world.validate(&command(3, 0, barracks, "train_soldier", 0)).unwrap();
-        world.validate(&command(4, 0, barracks, "train_scout", 0)).unwrap();
+        world
+            .validate(&command(3, 0, barracks, "train_soldier", 0))
+            .unwrap();
+        world
+            .validate(&command(4, 0, barracks, "train_scout", 0))
+            .unwrap();
         world.validate(&lab).unwrap();
 
         // Siege still needs its own building, not merely a barracks.
@@ -2184,14 +2203,21 @@ mod tests {
         for _ in 0..60 {
             world.step_on(map);
         }
-        world.execute_on(&command(1, 0, 2, "gather", 1), map).unwrap();
+        world
+            .execute_on(&command(1, 0, 2, "gather", 1), map)
+            .unwrap();
         for _ in 0..400 {
             world.step_on(map);
-            if unit_of(&world, 2).cargo_kind == ResourceKind::Catalyst && unit_of(&world, 2).cargo > 0 {
+            if unit_of(&world, 2).cargo_kind == ResourceKind::Catalyst
+                && unit_of(&world, 2).cargo > 0
+            {
                 return;
             }
         }
-        panic!("worker 2 never reached the catalyst: {:?}", (unit_of(&world, 2).x, unit_of(&world, 2).y));
+        panic!(
+            "worker 2 never reached the catalyst: {:?}",
+            (unit_of(&world, 2).x, unit_of(&world, 2).y)
+        );
     }
 
     #[test]
@@ -2333,13 +2359,20 @@ mod tests {
             .find(|unit| unit.owner == 1 && unit.kind == "soldier")
             .unwrap()
             .hp;
-        assert_eq!(after, before, "a movement field must not extend weapon reach");
+        assert_eq!(
+            after, before,
+            "a movement field must not extend weapon reach"
+        );
     }
 
     // --- Organic creep -------------------------------------------------------
 
     fn patch_of(world: &World, source: u32) -> Option<CreepPatch> {
-        world.creep.iter().find(|patch| patch.source == source).copied()
+        world
+            .creep
+            .iter()
+            .find(|patch| patch.source == source)
+            .copied()
     }
 
     fn organic_versus_industrial() -> World {
@@ -2505,8 +2538,9 @@ mod tests {
                 .unwrap();
             let field = zones_of(&world.units, &world.creep, &world.factions);
             assert!(
-                field.iter().any(|zone| zone.template.name == "creep"
-                    && zone.contains(soldier.x, soldier.y)),
+                field.iter().any(
+                    |zone| zone.template.name == "creep" && zone.contains(soldier.x, soldier.y)
+                ),
                 "the soldier ended on creep"
             );
             assert!(plain > 50.0, "the soldier moved at all: {plain}");
@@ -2635,7 +2669,10 @@ mod tests {
         let victim = victim.id;
         world.spawn(1 - owner, "soldier", IN_FIELD.0 + 60.0, IN_FIELD.1);
         world.step();
-        assert!(world.units.iter().all(|unit| unit.id != victim), "{kind} died");
+        assert!(
+            world.units.iter().all(|unit| unit.id != victim),
+            "{kind} died"
+        );
         assert_eq!(world.outcome, None);
         (world, victim)
     }
@@ -2654,7 +2691,11 @@ mod tests {
         let before = creep_arena(Some(0)).balance(0);
         let (world, victim) = death_on(Some(0), 0, "soldier");
         assert_eq!(temporaries(&world), vec![(0, "brood".to_string())]);
-        let brood = world.units.iter().find(|unit| unit.kind == "brood").unwrap();
+        let brood = world
+            .units
+            .iter()
+            .find(|unit| unit.kind == "brood")
+            .unwrap();
         assert!(brood.id > victim);
         assert_eq!((brood.x, brood.y), IN_FIELD, "spawned where it fell");
         assert_eq!(brood.expires_tick, 1 + 200);
@@ -2675,7 +2716,11 @@ mod tests {
     fn siege_dying_on_creep_spawns_a_brute_and_a_scout_a_brood() {
         let (world, _) = death_on(Some(0), 0, "siege");
         assert_eq!(temporaries(&world), vec![(0, "brute".to_string())]);
-        let brute = world.units.iter().find(|unit| unit.kind == "brute").unwrap();
+        let brute = world
+            .units
+            .iter()
+            .find(|unit| unit.kind == "brute")
+            .unwrap();
         assert_eq!(brute.expires_tick, 1 + 300);
         let (world, _) = death_on(Some(0), 0, "scout");
         assert_eq!(temporaries(&world), vec![(0, "brood".to_string())]);
@@ -2706,8 +2751,14 @@ mod tests {
         world.spawn(1, "soldier", IN_FIELD.0 + 60.0, IN_FIELD.1);
         world.spawn(1, "soldier", TOWER.0, TOWER.1 + 80.0);
         world.step();
-        assert!(world.units.iter().all(|unit| unit.id != outpost), "source died");
-        assert!(world.units.iter().all(|unit| unit.kind != "soldier" || unit.owner == 1));
+        assert!(
+            world.units.iter().all(|unit| unit.id != outpost),
+            "source died"
+        );
+        assert!(world
+            .units
+            .iter()
+            .all(|unit| unit.kind != "soldier" || unit.owner == 1));
         assert_eq!(temporaries(&world), vec![(0, "brood".to_string())]);
     }
 
@@ -2715,7 +2766,9 @@ mod tests {
     fn an_expired_spawn_is_removed_without_touching_lost_killed_or_balances() {
         let (mut world, _) = death_on(Some(0), 0, "soldier");
         // Clear the killer so nothing else can happen to the brood.
-        world.units.retain(|unit| unit.owner != 1 || unit.kind == "hq");
+        world
+            .units
+            .retain(|unit| unit.owner != 1 || unit.kind == "hq");
         let lost = world.lost.clone();
         let killed = world.killed.clone();
         let balances = world.balances.clone();
@@ -2751,7 +2804,12 @@ mod tests {
         }
         let army = world.army_value(0);
         for index in 0..30 {
-            world.spawn_temporary(0, if index % 2 == 0 { "brood" } else { "brute" }, 700.0, 700.0);
+            world.spawn_temporary(
+                0,
+                if index % 2 == 0 { "brood" } else { "brute" },
+                700.0,
+                700.0,
+            );
         }
         assert_eq!(world.army_value(0), army, "spawns are not army value");
         // 59 soldiers and 30 spawns: one more fighter still fits.
@@ -2760,7 +2818,12 @@ mod tests {
         world.spawn(0, "soldier", 700.0, 100.0);
         assert!(world.validate(&train).unwrap_err().contains("Unit limit"));
         // And spawns are controllable fighters.
-        let brood = world.units.iter().find(|unit| unit.kind == "brood").unwrap().id;
+        let brood = world
+            .units
+            .iter()
+            .find(|unit| unit.kind == "brood")
+            .unwrap()
+            .id;
         for kind in ["attack_move", "hold", "move", "stop"] {
             let mut order = command(2, 0, brood, kind, 0);
             order.order.x = 700.0;
@@ -2789,7 +2852,10 @@ mod tests {
             world.step();
             positions.push(unit_of(&world, soldier).x);
         }
-        assert!(unit_of(&world, target).hp < before, "it fired while passing");
+        assert!(
+            unit_of(&world, target).hp < before,
+            "it fired while passing"
+        );
         assert!(
             positions.windows(2).all(|pair| pair[1] > pair[0]),
             "it never stopped to fire: {positions:?}"
@@ -2801,7 +2867,12 @@ mod tests {
         let mut first = creep_arena(Some(0));
         for index in 0..4 {
             first.spawn(0, "soldier", IN_FIELD.0, IN_FIELD.1 + index as f32 * 25.0);
-            first.spawn(1, "soldier", IN_FIELD.0 + 90.0, IN_FIELD.1 + index as f32 * 25.0);
+            first.spawn(
+                1,
+                "soldier",
+                IN_FIELD.0 + 90.0,
+                IN_FIELD.1 + index as f32 * 25.0,
+            );
         }
         let mut second = first.clone();
         let mut spawned = false;
@@ -2811,7 +2882,11 @@ mod tests {
             spawned |= !temporaries(&first).is_empty();
         }
         assert!(spawned, "the fight spawned something on creep");
-        assert_eq!(temporaries(&first), vec![], "and every spawn expired or died");
+        assert_eq!(
+            temporaries(&first),
+            vec![],
+            "and every spawn expired or died"
+        );
         assert_eq!(first, second);
     }
 
@@ -2822,11 +2897,10 @@ mod tests {
             (Faction::Network, false),
             (Faction::Organic, false),
         ] {
-            let mut world =
-                World::new_on_with_factions(
-                    crate::maps::default_map(),
-                    &[(0, faction), (1, Faction::Industrial)],
-                );
+            let mut world = World::new_on_with_factions(
+                crate::maps::default_map(),
+                &[(0, faction), (1, Faction::Industrial)],
+            );
             world.balances.insert(0, Balance::new(3000, 1000));
             let labour = world
                 .units
@@ -3161,10 +3235,14 @@ mod tests {
         idle_labour(&mut world);
         let barracks = barracks_for(&mut world, 0);
         world.commands.push(command(1, 0, 1, "train_worker", 0));
-        world.commands.push(command(2, 0, barracks, "train_soldier", 0));
+        world
+            .commands
+            .push(command(2, 0, barracks, "train_soldier", 0));
         // The rally belongs to whatever produces, and soldiers come from the
         // barracks now, so that is where the rally under test lives.
-        world.commands.push(command(3, 0, barracks, "rally_move", 0));
+        world
+            .commands
+            .push(command(3, 0, barracks, "rally_move", 0));
         for _ in 0..80 {
             world.step();
         }
@@ -3185,7 +3263,10 @@ mod tests {
         assert_eq!(world.balances[&0], Balance::new(216, 0));
         let producer = world.units.iter().find(|unit| unit.id == barracks).unwrap();
         assert!(producer.production.is_empty());
-        assert_eq!(producer.order.kind, "rally_move", "cancelling keeps the rally");
+        assert_eq!(
+            producer.order.kind, "rally_move",
+            "cancelling keeps the rally"
+        );
         assert_eq!(world.commands.last().unwrap().status, "rejected");
         // hq, two labour, the starting soldier, the trained worker, and the
         // barracks the soldier was being made in.
@@ -3279,7 +3360,9 @@ mod tests {
         let mut world = World::new(&[0, 1]);
         let barracks = barracks_for(&mut world, 0);
         for id in 1..=3 {
-            world.commands.push(command(id, 0, barracks, "train_soldier", 0));
+            world
+                .commands
+                .push(command(id, 0, barracks, "train_soldier", 0));
         }
         for _ in 0..19 {
             world.step();
@@ -3400,10 +3483,24 @@ mod tests {
         world.units[0].hp = 0;
         world.step();
         assert_eq!(world.outcome, None);
-        assert!(world.units.iter().any(|unit| unit.owner == 0 && unit.kind == "outpost"));
-        assert!(world.units.iter().any(|unit| unit.owner == 0 && !is_building(&unit.kind)));
-        assert!(world.has_research(0, "research_armor"), "research outlives the HQ");
-        let outpost = world.units.iter().find(|unit| unit.kind == "outpost").unwrap().id;
+        assert!(world
+            .units
+            .iter()
+            .any(|unit| unit.owner == 0 && unit.kind == "outpost"));
+        assert!(world
+            .units
+            .iter()
+            .any(|unit| unit.owner == 0 && !is_building(&unit.kind)));
+        assert!(
+            world.has_research(0, "research_armor"),
+            "research outlives the HQ"
+        );
+        let outpost = world
+            .units
+            .iter()
+            .find(|unit| unit.kind == "outpost")
+            .unwrap()
+            .id;
         world.units.retain(|unit| unit.id != outpost);
         world.step();
         assert_eq!(world.outcome, Some(1));
@@ -3449,7 +3546,9 @@ mod tests {
     #[test]
     fn a_player_without_a_hub_is_refused_every_order() {
         let mut world = World::new(&[0, 1, 2]);
-        world.units.retain(|unit| !(unit.owner == 0 && unit.kind == "hq"));
+        world
+            .units
+            .retain(|unit| !(unit.owner == 0 && unit.kind == "hq"));
         let order = command(1, 0, 2, "move", 0);
         assert_eq!(world.validate(&order), Err("You have no hubs left".into()));
     }
@@ -3943,10 +4042,7 @@ mod tests {
         // An unlabelled world is the Industrial baseline, exactly as before.
         let plain = World::new(&[0, 1]);
         assert_eq!(plain.faction(0), Faction::Industrial);
-        assert_eq!(
-            plain.units.iter().filter(|u| u.kind == "worker").count(),
-            4
-        );
+        assert_eq!(plain.units.iter().filter(|u| u.kind == "worker").count(), 4);
     }
 
     /// The Network model, stated as its own claim: a drifter is credited while
@@ -4139,9 +4235,7 @@ mod tests {
         let world = factional(&[(0, Faction::Organic), (1, Faction::Industrial)]);
         assert_eq!(unit_of(&world, 2).kind, "harvester");
         for (kind, target) in [("attack", 5), ("attack_move", 0), ("hold", 0)] {
-            let refusal = world
-                .validate(&command(1, 0, 2, kind, target))
-                .unwrap_err();
+            let refusal = world.validate(&command(1, 0, 2, kind, target)).unwrap_err();
             assert!(
                 refusal.contains("Harvesters cannot fight"),
                 "{kind}: {refusal}"
@@ -4156,7 +4250,7 @@ mod tests {
     fn a_faction_can_only_train_its_own_labour_unit() {
         for faction in crate::FACTION_ROTATION {
             let mut world = factional(&[(0, faction), (1, Faction::Industrial)]);
-        let barracks = barracks_for(&mut world, 0);
+            let barracks = barracks_for(&mut world, 0);
             world.balances.insert(0, Balance::new(1000, 200));
             world.units[0].stock = 1;
             let own = crate::starting_labour(faction)[0];
@@ -4209,7 +4303,9 @@ mod tests {
         // Each player works its own mineral line with one labour unit and the
         // contested centre catalyst with the other.
         for (id, (slot, node)) in [(2u32, (0u8, 1u32)), (6, (1, 2)), (10, (2, 3))] {
-            world.commands.push(command(id as u64, slot, id, "gather", node));
+            world
+                .commands
+                .push(command(id as u64, slot, id, "gather", node));
         }
         for (slot, id) in [(0u8, 3u32), (1, 7), (2, 11)] {
             world
@@ -4226,10 +4322,7 @@ mod tests {
                 "slot {slot} earned no material"
             );
         }
-        assert!(world
-            .balances
-            .values()
-            .any(|balance| balance.catalyst > 0));
+        assert!(world.balances.values().any(|balance| balance.catalyst > 0));
         assert_eq!(held(&world, ResourceKind::Material), material_before);
         assert_eq!(held(&world, ResourceKind::Catalyst), catalyst_before);
         // The drifter still holds nothing: its whole yield is already banked.
@@ -4289,7 +4382,9 @@ mod tests {
         // Each player works its own mineral line with one labour unit and the
         // contested centre catalyst with the other.
         for (id, (slot, node)) in [(2u32, (0u8, 1u32)), (6, (1, 2)), (10, (2, 3))] {
-            world.commands.push(command(id as u64, slot, id, "gather", node));
+            world
+                .commands
+                .push(command(id as u64, slot, id, "gather", node));
         }
         for (slot, id) in [(0u8, 3u32), (1, 7), (2, 11)] {
             world
@@ -4304,7 +4399,10 @@ mod tests {
             (ResourceKind::Catalyst, catalyst_before),
         ] {
             let drained = before - in_ground(&world, kind);
-            assert!(drained > 0, "{kind}: nothing was mined, so nothing is proved");
+            assert!(
+                drained > 0,
+                "{kind}: nothing was mined, so nothing is proved"
+            );
             assert_eq!(
                 collected_total(&world, kind),
                 drained - aboard(&world, kind),
@@ -4426,7 +4524,11 @@ mod tests {
         );
         world.spawn(0, "siege", 420.0, 400.0);
         let siege = world.next_id - 1;
-        assert_eq!(world.army_value(0), Cost::new(250, 50), "it rises on a build");
+        assert_eq!(
+            world.army_value(0),
+            Cost::new(250, 50),
+            "it rises on a build"
+        );
         world.units.iter_mut().find(|u| u.id == siege).unwrap().hp = 0;
         world.step();
         assert_eq!(
@@ -4449,7 +4551,11 @@ mod tests {
             world.step_many_on(map, 4, |world| points.push(world.tick));
         }
         assert_eq!(world.tick, 252);
-        assert_eq!(points, vec![100, 200], "one row per point, never one per wake");
+        assert_eq!(
+            points,
+            vec![100, 200],
+            "one row per point, never one per wake"
+        );
         // And a wake that swallows several points at once still separates them.
         let mut long = World::new(&[0, 1]);
         let mut all = Vec::new();
@@ -4580,7 +4686,10 @@ mod tests {
         assert_eq!((network.hp, network.max_hp), (600, 600));
         assert_eq!((network.shields, network.max_shields), (600, 600));
         let industrial = world.units.iter().find(|unit| unit.owner == 1).unwrap();
-        assert_eq!((industrial.hp, industrial.shields, industrial.max_shields), (1200, 0, 0));
+        assert_eq!(
+            (industrial.hp, industrial.shields, industrial.max_shields),
+            (1200, 0, 0)
+        );
     }
 
     #[test]
@@ -4617,8 +4726,16 @@ mod tests {
             world.step();
         }
         assert_eq!(world.tick, 1199);
-        assert_eq!(unit_of(&world, inside).shields, 10, "still inside the delay");
-        assert_eq!(unit_of(&world, outside).shields, 10, "still inside the delay");
+        assert_eq!(
+            unit_of(&world, inside).shields,
+            10,
+            "still inside the delay"
+        );
+        assert_eq!(
+            unit_of(&world, outside).shields,
+            10,
+            "still inside the delay"
+        );
         for _ in 0..101 {
             world.step();
         }
@@ -4628,7 +4745,11 @@ mod tests {
         for _ in 0..200 {
             world.step();
         }
-        assert_eq!(unit_of(&world, inside).shields, 70, "never past the maximum");
+        assert_eq!(
+            unit_of(&world, inside).shields,
+            70,
+            "never past the maximum"
+        );
         // Hit points never regenerate: that is what repair is for.
         assert_eq!(unit_of(&world, inside).hp, 70);
     }
@@ -4653,9 +4774,15 @@ mod tests {
                 target: victim,
             };
             world.step();
-            assert!(world.units.iter().all(|unit| unit.id != victim), "victim died");
+            assert!(
+                world.units.iter().all(|unit| unit.id != victim),
+                "victim died"
+            );
             assert!(world.units.iter().any(|unit| unit.id == shooter));
-            (unit_of(&world, friend).shields, unit_of(&world, far).shields)
+            (
+                unit_of(&world, friend).shields,
+                unit_of(&world, far).shields,
+            )
         };
         // 20% of the dead soldier's 70 + 70 to the friend 50 away; nothing to
         // the one 190 away, outside the 180 reach.
@@ -4734,7 +4861,10 @@ mod tests {
         assert!(field.powered(0, POWERED.0, POWERED.1));
         assert!(!field.powered(1, POWERED.0, POWERED.1), "owner only");
         assert!(!field.powered(0, UNPOWERED.0, UNPOWERED.1));
-        assert!(!field.powered(1, 1400.0, 260.0), "an Industrial HQ projects none");
+        assert!(
+            !field.powered(1, 1400.0, 260.0),
+            "an Industrial HQ projects none"
+        );
         // Connectivity and combat/death, and nothing else.
         let template = crate::power_field();
         for concept in crate::ZoneConcept::ALL {
@@ -4745,7 +4875,10 @@ mod tests {
             assert_eq!(template.participates_in(concept), expected, "{concept}");
         }
         // It changes no one's speed.
-        assert_eq!(field.movement_multiplier(0, "soldier", POWERED.0, POWERED.1), 1.0);
+        assert_eq!(
+            field.movement_multiplier(0, "soldier", POWERED.0, POWERED.1),
+            1.0
+        );
     }
 
     #[test]
@@ -4765,7 +4898,10 @@ mod tests {
         let arrived = unit_of(&world, soldier);
         assert!(distance(arrived.x, arrived.y, BY_RELAY.0, BY_RELAY.1) < 20.0);
         assert_eq!(arrived.order.kind, "stop");
-        assert_eq!(arrived.arrive_tick, world.tick + crate::TELEPORT_ARRIVAL_TICKS);
+        assert_eq!(
+            arrived.arrive_tick,
+            world.tick + crate::TELEPORT_ARRIVAL_TICKS
+        );
         let landed = (arrived.x, arrived.y);
         // Inactive on arrival: a move order waits out the window.
         assert!(world
@@ -4773,7 +4909,11 @@ mod tests {
             .unwrap_err()
             .contains("still arriving"));
         world
-            .execute(&order_at(soldier, "move", (RELAY.0 + 200.0, RELAY.1 + 200.0)))
+            .execute(&order_at(
+                soldier,
+                "move",
+                (RELAY.0 + 200.0, RELAY.1 + 200.0),
+            ))
             .unwrap();
         for _ in 0..39 {
             world.step();
@@ -4824,16 +4964,17 @@ mod tests {
         let inside = spawned(&mut world, 0, "soldier", POWERED);
         let hq = world.units[0].id;
         let refused = |world: &World, unit: u32, at: (f32, f32)| {
-            world
-                .validate(&order_at(unit, "teleport", at))
-                .unwrap_err()
+            world.validate(&order_at(unit, "teleport", at)).unwrap_err()
         };
         assert!(refused(&world, outside, POWERED).contains("this unit is outside it"));
         assert!(refused(&world, inside, UNPOWERED).contains("destination"));
         assert!(refused(&world, hq, POWERED).contains("Only mobile units"));
         let mut queued = order_at(inside, "teleport", (POWERED.0, POWERED.1 - 100.0));
         queued.queued = true;
-        assert!(world.validate(&queued).is_err(), "teleport cannot be queued");
+        assert!(
+            world.validate(&queued).is_err(),
+            "teleport cannot be queued"
+        );
 
         // An Industrial unit has no field to teleport in.
         let industrial = spawned(&mut world, 1, "soldier", (1400.0, 300.0));
@@ -4854,7 +4995,10 @@ mod tests {
         }
         let stayed = unit_of(&world, soldier);
         assert_ne!(stayed.order.kind, "teleport");
-        assert!(distance(stayed.x, stayed.y, RELAY.0, RELAY.1) > 300.0, "never left");
+        assert!(
+            distance(stayed.x, stayed.y, RELAY.0, RELAY.1) > 300.0,
+            "never left"
+        );
     }
 
     #[test]
@@ -4863,9 +5007,17 @@ mod tests {
         world.balances.insert(0, Balance::new(1000, 0));
         let drifter = spawned(&mut world, 0, "drifter", (POWERED.0, POWERED.1 - 60.0));
         world
-            .execute(&order_at(drifter, "build_relay", (POWERED.0 + 150.0, POWERED.1 - 80.0)))
+            .execute(&order_at(
+                drifter,
+                "build_relay",
+                (POWERED.0 + 150.0, POWERED.1 - 80.0),
+            ))
             .unwrap();
-        let site = world.units.iter().find(|unit| unit.kind == "relay").unwrap();
+        let site = world
+            .units
+            .iter()
+            .find(|unit| unit.kind == "relay")
+            .unwrap();
         assert_eq!((site.shields, site.max_shields), (0, 150));
         let id = site.id;
         for _ in 0..400 {
@@ -4897,7 +5049,11 @@ mod tests {
         }
         // The Network fighter is a third shields (SC2's zealot split): 220 is
         // 148 hit points and 72 shields.
-        let sentinel = world.units.iter().find(|unit| unit.kind == "sentinel").unwrap();
+        let sentinel = world
+            .units
+            .iter()
+            .find(|unit| unit.kind == "sentinel")
+            .unwrap();
         assert_eq!((sentinel.hp, sentinel.shields), (148, 72));
     }
 
@@ -4928,14 +5084,22 @@ mod tests {
         let hq = world.units[0].id;
         let near = spawned(&mut world, 0, "sentinel", UNPOWERED);
         let also = spawned(&mut world, 0, "skimmer", (UNPOWERED.0 + 60.0, UNPOWERED.1));
-        let far = spawned(&mut world, 0, "sentinel", (UNPOWERED.0 + 300.0, UNPOWERED.1));
+        let far = spawned(
+            &mut world,
+            0,
+            "sentinel",
+            (UNPOWERED.0 + 300.0, UNPOWERED.1),
+        );
         // A rally set before the cast survives it.
         world
             .execute(&order_at(hq, "rally_move", (400.0, 1300.0)))
             .unwrap();
         world.execute(&order_at(hq, "recall", UNPOWERED)).unwrap();
         let caster = unit_of(&world, hq);
-        assert_eq!(caster.energy, crate::HUB_START_ENERGY - crate::RECALL.energy);
+        assert_eq!(
+            caster.energy,
+            crate::HUB_START_ENERGY - crate::RECALL.energy
+        );
         assert_eq!(caster.order.kind, "rally_move");
         assert!(world
             .validate(&order_at(hq, "recall", UNPOWERED))
@@ -4971,7 +5135,12 @@ mod tests {
         assert!(caster.cast.is_none());
         assert_eq!(caster.order.kind, "rally_move");
         // The cooldown runs from the cast, whatever the energy.
-        world.units.iter_mut().find(|unit| unit.id == hq).unwrap().energy = 200;
+        world
+            .units
+            .iter_mut()
+            .find(|unit| unit.id == hq)
+            .unwrap()
+            .energy = 200;
         assert!(world
             .validate(&order_at(hq, "recall", (UNPOWERED.0 + 300.0, UNPOWERED.1)))
             .unwrap_err()
@@ -4999,7 +5168,10 @@ mod tests {
         world.units[0].energy = crate::RECALL.energy;
         let mut queued = order_at(hq, "recall", UNPOWERED);
         queued.queued = true;
-        assert!(world.validate(&queued).is_err(), "abilities cannot be queued");
+        assert!(
+            world.validate(&queued).is_err(),
+            "abilities cannot be queued"
+        );
         let relay = spawned(&mut world, 0, "relay", RELAY);
         assert!(world
             .validate(&order_at(relay, "recall", UNPOWERED))
@@ -5013,7 +5185,9 @@ mod tests {
         world.spawn(0, "outpost", 700.0, 1300.0);
         let outpost = world.units.last().unwrap().id;
         let sentinel = spawned(&mut world, 0, "sentinel", UNPOWERED);
-        world.execute(&order_at(outpost, "recall", UNPOWERED)).unwrap();
+        world
+            .execute(&order_at(outpost, "recall", UNPOWERED))
+            .unwrap();
         world.step();
         world.units.retain(|unit| unit.id != outpost);
         for _ in 0..crate::RECALL.channel_ticks {
@@ -5062,7 +5236,12 @@ mod tests {
         );
         assert!(world.on_creep(0, beyond.0, beyond.1));
         // Blooms chain: the new creep takes another, once the cooldown is up.
-        world.units.iter_mut().find(|unit| unit.id == hq.id).unwrap().energy = 100;
+        world
+            .units
+            .iter_mut()
+            .find(|unit| unit.id == hq.id)
+            .unwrap()
+            .energy = 100;
         world.execute(&order_at(hq.id, "bloom", beyond)).unwrap();
         // Lives out its lifetime, then lingers and recedes like a lost hub's.
         while world.tick < crate::BLOOM_LIFETIME_TICKS + crate::CREEP_LINGER_TICKS {
@@ -5075,6 +5254,9 @@ mod tests {
         for _ in 0..crate::TICKS_PER_SECOND * 11 {
             world.step();
         }
-        assert!(patch_of(&world, bloom.source).is_none(), "receded to nothing");
+        assert!(
+            patch_of(&world, bloom.source).is_none(),
+            "receded to nothing"
+        );
     }
 }

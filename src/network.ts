@@ -52,7 +52,12 @@ export interface PendingOrder {
   units: number[];
   order: Order;
   queued: boolean;
+  /** The tick this order was stamped to run on, known from the click. */
+  executeTick: bigint;
 }
+
+/** No new tick for this long in a running match reads as a stall, not jitter. */
+export const STALL_MS = 500;
 
 export class Session {
   constructor(private identityScope = "identity") {}
@@ -63,6 +68,8 @@ export class Session {
   ackMs = 0;
   tickReceivedAt = performance.now();
   pending = new Map<string, PendingOrder>();
+  /** Ticks your newest order ran after its stamp: 0 means it was on time. */
+  lateTicks = 0n;
   snapshot: Snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [] };
   onChange: () => void = () => {};
   onNotice: (message: string) => void = () => {};
@@ -147,7 +154,7 @@ export class Session {
       connection.db.resource_node.onUpdate(refresh);
       connection.db.resource_node.onDelete(refresh);
       connection.db.command.onInsert((_context, command) => {
-        this.pending.delete(command.requestId);
+        if (this.pending.delete(command.requestId) && command.requestedTick > 0n) this.lateTicks = command.executeTick - command.requestedTick;
         refresh();
       });
       connection.db.command.onUpdate((_context, previous, command) => {
@@ -233,13 +240,27 @@ export class Session {
     return this.act(connection => setFactionOn(connection, faction));
   }
 
+  /** Whether a running match has gone quiet for longer than `STALL_MS`. */
+  stalled(now = performance.now()): boolean {
+    return this.matchReady && this.snapshot.room?.state === "playing" && now - this.tickReceivedAt > STALL_MS;
+  }
+
+  /**
+   * Sends an order stamped to run one command delay after the newest tick
+   * this client has seen, which is the state the player was looking at when
+   * they clicked. The server honours the stamp while the order arrives
+   * within its lateness allowance, so the network's jitter never changes when
+   * an order runs, and the client knows that tick before the server answers.
+   */
   async order(units: number[], order: Order, queued = false): Promise<void> {
-    if (!this.matchReady || !this.ready || this.snapshot.room?.state !== "playing") return;
+    const room = this.snapshot.room;
+    if (!this.matchReady || !this.ready || room?.state !== "playing") return;
     const requestId = crypto.randomUUID();
-    this.pending.set(requestId, { requestId, units, order, queued });
+    const executeTick = room.tick + room.commandDelay;
+    this.pending.set(requestId, { requestId, units, order, queued, executeTick });
     this.onChange();
     const started = performance.now();
-    const accepted = await this.act(connection => connection.reducers.issueOrder({ requestId, units, ...order, queued }));
+    const accepted = await this.act(connection => connection.reducers.issueOrder({ requestId, units, ...order, queued, requestedTick: executeTick }));
     this.ackMs = Math.round(performance.now() - started);
     if (!accepted) this.pending.delete(requestId);
     this.onChange();

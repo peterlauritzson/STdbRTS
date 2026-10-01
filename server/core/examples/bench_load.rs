@@ -193,7 +193,14 @@ fn busy_order(map: &MapDefinition, rng: &mut Rng, slot: u8, kind: &str, index: u
 
 /// Spawns one unit of `kind` for `slot`, positioned where it would plausibly be
 /// and carrying a standing order.
-fn enlist(map: &MapDefinition, rng: &mut Rng, world: &mut World, slot: u8, kind: &str, index: usize) {
+fn enlist(
+    map: &MapDefinition,
+    rng: &mut Rng,
+    world: &mut World,
+    slot: u8,
+    kind: &str,
+    index: usize,
+) {
     let start = map.starts[slot as usize];
     let centre = map.size / 2.0;
     let order = busy_order(map, rng, slot, kind, index);
@@ -263,8 +270,10 @@ fn build_world(map: &MapDefinition, mobiles: usize) -> World {
     let mut rng = Rng(0x2545_F491_4F6C_DD1D);
     // `new_on` gives each slot a hub plus three starting units and copies the
     // map's deposits in. Those three count toward the tier.
-    let factions: Vec<(u8, Faction)> =
-        SLOTS.iter().map(|slot| (*slot, faction_of(*slot))).collect();
+    let factions: Vec<(u8, Faction)> = SLOTS
+        .iter()
+        .map(|slot| (*slot, faction_of(*slot)))
+        .collect();
     let mut world = World::new_on_with_factions(map, &factions);
     // Finished outposts ringing the Organic start, 260 out: each sprouts a
     // creep patch on the first tick and grows it through the run.
@@ -338,9 +347,7 @@ fn measure(map: &MapDefinition, mobiles: usize) -> Sample {
                 before
                     .binary_search_by_key(&unit.id, |(id, _, _)| *id)
                     .map(|at| before[at])
-                    .is_ok_and(|(_, x, y)| {
-                        (unit.x - x).abs() > 0.01 || (unit.y - y).abs() > 0.01
-                    })
+                    .is_ok_and(|(_, x, y)| (unit.x - x).abs() > 0.01 || (unit.y - y).abs() > 0.01)
             })
             .count();
         moved_total += moved;
@@ -453,14 +460,23 @@ fn main() {
     }
 
     println!();
-    if rows.iter().any(|(_, size, _, _, _)| *size > RUNTIME_NAV_EXTENT) {
+    if rows
+        .iter()
+        .any(|(_, size, _, _, _)| *size > RUNTIME_NAV_EXTENT)
+    {
         println!(
             "Note on maps larger than {RUNTIME_NAV_EXTENT:.0}: the runtime pathfinder is now map-driven, so"
         );
-        println!("    these rows are real measurements. They were not before: the grid was fixed at");
+        println!(
+            "    these rows are real measurements. They were not before: the grid was fixed at"
+        );
         println!("    40x40 cells and read terrain from the default map, which froze every unit");
-        println!("    outside a 1600 window and left moved% at 6-9% instead of the 74-90% seen now.");
-        println!("    A larger map is genuinely more expensive: the grid is (size/40)^2 cells and is");
+        println!(
+            "    outside a 1600 window and left moved% at 6-9% instead of the 74-90% seen now."
+        );
+        println!(
+            "    A larger map is genuinely more expensive: the grid is (size/40)^2 cells and is"
+        );
         println!("    rebuilt every tick, so 3200 costs about 4x the grid work of 1600.");
         println!();
     }

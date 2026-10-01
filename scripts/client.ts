@@ -37,6 +37,6 @@ export function me(connection: DbConnection) {
   return player;
 }
 
-export function order(connection: DbConnection, units: number[], kind: string, overrides: { x?: number; y?: number; target?: number; queued?: boolean; requestId?: string } = {}) {
-  return connection.reducers.issueOrder({ requestId: crypto.randomUUID(), units, kind, x: 700, y: 500, target: 0, queued: false, ...overrides });
+export function order(connection: DbConnection, units: number[], kind: string, overrides: { x?: number; y?: number; target?: number; queued?: boolean; requestId?: string; requestedTick?: bigint } = {}) {
+  return connection.reducers.issueOrder({ requestId: crypto.randomUUID(), units, kind, x: 700, y: 500, target: 0, queued: false, requestedTick: 0n, ...overrides });
 }
