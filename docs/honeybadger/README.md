@@ -8,6 +8,10 @@ Reference repository: [Thalagor/honeybadger on Bitbucket](https://bitbucket.org/
 
 Build an original browser RTS about contested territory, asymmetric economies, recoverable losses, and prepared unit behavior. Preserve the mod's strategic interactions, not its exact roster or the SC2 audiovisual identity. Orders deliberately take time to become active; skilled play should come primarily from planning, scouting, positioning, economy, and configuring behavior rather than rapid manual micro.
 
+## Player guide (keep it current)
+
+The game as it is today, for players, lives in [docs/guide/](../guide/1-overview.md). The game links to it. It has three layers: a one-screen bullet [overview](../guide/1-overview.md), [how it plays and why](../guide/2-how-it-plays.md), and the [encyclopedia](../guide/3-encyclopedia.md) of every unit, structure, ability and number. The documents below are the design plan; the guide describes what is actually built. Every change a player could notice updates the guide in the same change (see the constraint in [HANDOFF.md](HANDOFF.md)).
+
 ## Reading order
 
 1. [Game design](GAME-DESIGN.md): what the game should feel like, resources, factions, zones, maps, and the first playable slice.

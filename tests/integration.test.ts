@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { tables, type DbConnection } from "../src/bindings";
 import { connectClient, me, order, until } from "../scripts/client";
+import { UnitMerger } from "../src/units";
+
+const merger = new UnitMerger();
 
 // Mirrors the base income in rts_core (DECISIONS.md, 2026-09-22, made permanent
 // in step 27): 200 material per minute for 90s, then 100 per minute for good,
@@ -34,7 +37,7 @@ test("laboratory construction, a refinery and logistics research use mined resou
     // used below is read against that, not against a shared roster.
     assert.equal(me(builder).faction.tag, "Industrial");
     assert.equal(me(opponent).faction.tag, "Network");
-    const units = () => [...builder.db.unit.iter()].filter(row => row.matchId === matchId).map(row => row.data);
+    const units = () => merger.collect(builder.db, matchId);
     assert.deepEqual(units().filter(unit => unit.owner === 0 && unit.kind === "worker").map(unit => unit.id), [2, 3]);
     assert.deepEqual(units().filter(unit => unit.owner === 1 && unit.kind === "drifter").map(unit => unit.id), [6, 7]);
     // Coordinates are on the expanse main, HQ at (850, 850): the same layout as
@@ -101,7 +104,7 @@ test("laboratory construction, a refinery and logistics research use mined resou
     assert.ok(units().filter(unit => unit.kind === "worker").every(unit => unit.cargo <= 40));
     // Logistics raises a carrier's load. It cannot raise a drifter's, because a
     // drifter has no load: every one of them still holds exactly nothing.
-    assert.ok(units().filter(unit => unit.kind === "drifter").every(unit => unit.cargo === 0 && !unit.returning));
+    assert.ok(units().filter(unit => unit.kind === "drifter").every(unit => unit.cargo === 0));
   } finally {
     for (const client of [builder, opponent]) {
       try { await client.reducers.leaveRoom({}); } catch {}
@@ -121,7 +124,7 @@ test("workers repair real combat damage through delayed reducers", { timeout: 24
     await defender.reducers.setReady({ ready: true });
     await attacker.reducers.setReady({ ready: true });
     await defender.reducers.startMatch({});
-    const unit = (id: number) => defender.db.unit.id.find((matchId << 32n) | BigInt(id))!.data;
+    const unit = (id: number) => merger.find(defender.db, (matchId << 32n) | BigInt(id))!;
     // Labour opens already mining. A delivery landing inside the measured
     // window would credit a whole load and break the material arithmetic
     // below, so the defender's workers are stilled first — exactly what the
@@ -207,8 +210,8 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       await order(host, [2], "stop");
       await order(host, [3], "stop");
       await until(
-        () => host.db.unit.id.find((matchId << 32n) | 2n)?.data.order.kind === "stop"
-          && host.db.unit.id.find((matchId << 32n) | 3n)?.data.order.kind === "stop",
+        () => merger.find(host.db, (matchId << 32n) | 2n)?.order.kind === "stop"
+          && merger.find(host.db, (matchId << 32n) | 3n)?.order.kind === "stop",
         "host labour stands down before balance-sensitive subtests",
       );
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -248,7 +251,7 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       const unitKey = (matchId << 32n) | 2n;
       // Unit 2's labour was stood down back in the first subtest, so this is a
       // stable baseline rather than a snapshot of an in-flight gather order.
-      const before = host.db.unit.id.find(unitKey)!.data;
+      const before = merger.find(host.db, unitKey)!;
       await order(host, [2], "move", { requestId });
       await order(host, [2], "move", { requestId });
       await until(() => [...second.db.command.iter()].some(command => command.requestId === requestId), "peer command acknowledgement");
@@ -257,9 +260,9 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       const command = scheduled[0];
       assert.equal(command.executeTick - command.issuedTick, 20n);
       assert.equal(second.db.command.id.find(command.id)!.executeTick, command.executeTick);
-      assert.equal(host.db.unit.id.find(unitKey)!.data.x, before.x);
+      assert.equal(merger.find(host.db, unitKey)!.x, before.x);
       await until(() => host.db.command.id.find(command.id)?.status === "executed", "command execution");
-      assert.notEqual(host.db.unit.id.find(unitKey)!.data.x, before.x);
+      assert.notEqual(merger.find(host.db, unitKey)!.x, before.x);
       await until(() => second.db.command.id.find(command.id)?.status === "executed", "peer execution");
       await order(host, [2], "stop");
     });
@@ -291,14 +294,14 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       await new Promise(resolve => setTimeout(resolve, 150));
       assert.equal(net(), start);
       await until(() => net() === start - 50, "production charge");
-      const hq = host.db.unit.id.find((matchId << 32n) | 1n)!.data;
+      const hq = merger.find(host.db, (matchId << 32n) | 1n)!;
       assert.equal(hq.production.length, 1);
       await until(() => [...host.db.unit.iter()].filter(unit => unit.matchId === matchId && unit.data.owner === 0).length === 5, "worker trained");
       assert.equal(net(), start - 50, "a worker is charged exactly once");
     });
 
     await context.test("delayed tactical orders, rally inheritance and production refunds", async () => {
-      const unit = (id: number) => host.db.unit.id.find((matchId << 32n) | BigInt(id))!.data;
+      const unit = (id: number) => merger.find(host.db, (matchId << 32n) | BigInt(id))!;
       await order(host, [4], "attack_move", { x: 400, y: 350 });
       assert.equal(unit(4).order.kind, "stop");
       await until(() => unit(4).order.kind === "attack_move", "attack-move activation");
@@ -360,12 +363,12 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       await outsiderPeer.reducers.setReady({ ready: true });
       await outsider.reducers.startMatch({});
       const firstKey = (matchId << 32n) | 2n;
-      await until(() => host.db.unit.id.find(firstKey)?.data.order.kind === "stop", "first match stopped");
-      const before = host.db.unit.id.find(firstKey)!.data.x;
+      await until(() => merger.find(host.db, firstKey)?.order.kind === "stop", "first match stopped");
+      const before = merger.find(host.db, firstKey)!.x;
       const requestId = crypto.randomUUID();
       await order(outsider, [2], "move", { requestId });
       await until(() => [...outsider.db.command.iter()].some(command => command.requestId === requestId && command.status === "executed"), "second match command");
-      assert.equal(host.db.unit.id.find(firstKey)!.data.x, before);
+      assert.equal(merger.find(host.db, firstKey)!.x, before);
       assert.notEqual(matchId, otherMatchId);
     });
 
@@ -395,7 +398,7 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       assert.equal(me(second).faction.tag, "Network");
       assert.equal(me(third).faction.tag, "Organic");
       assert.equal(me(fourth).faction.tag, "Industrial");
-      const all = () => [...host.db.unit.iter()].filter(row => row.matchId === matchId).map(row => row.data);
+      const all = () => merger.collect(host.db, matchId);
       const find = (id: number) => all().find(unit => unit.id === id)!;
       // Every slot bootstrapped with two of its own labour, not two workers.
       const labourOf = (owner: number) => all().filter(unit => unit.owner === owner && ["worker", "drifter", "harvester"].includes(unit.kind)).map(unit => unit.kind);
@@ -426,7 +429,7 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       await until(() => me(second).material - driftStipend() >= driftStart + 5, "the drifter credits in place", 40000);
       // ...and it did it without ever holding or hauling anything.
       assert.equal(find(6).cargo, 0, "a drifter never holds a load");
-      assert.equal(find(6).returning, false, "a drifter never makes a return trip");
+      // (`returning` is server-only now; cargo 0 and the order staying "gather" cover the same ground.)
       assert.equal(find(6).order.kind, "gather", "and it stays on the deposit");
 
       // Organic creep persists as its own table, keyed like a unit row. The

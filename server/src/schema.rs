@@ -1,4 +1,4 @@
-use rts_core::simulation::{Entity, Node, Order};
+use rts_core::simulation::{EntityCold, EntityMotion, EntityState, EntityVitals, Node, Order};
 use rts_core::CreepPatch;
 use rts_core::Faction;
 use spacetimedb::{ConnectionId, Identity, ScheduleAt};
@@ -100,7 +100,39 @@ pub struct Unit {
     pub id: u64,
     #[index(btree)]
     pub match_id: u64,
-    pub data: Entity,
+    pub data: EntityCold,
+}
+
+/// A unit's position, keyed like `unit`: the only row a merely-walking unit
+/// rewrites, so it carries nothing else.
+#[spacetimedb::table(public, accessor = unit_motion)]
+pub struct UnitMotion {
+    #[primary_key]
+    pub id: u64,
+    #[index(btree)]
+    pub match_id: u64,
+    pub data: EntityMotion,
+}
+
+/// A unit's health, shields and last shot, keyed like `unit`: rewritten in
+/// combat, not while walking.
+#[spacetimedb::table(public, accessor = unit_vitals)]
+pub struct UnitVitals {
+    #[primary_key]
+    pub id: u64,
+    #[index(btree)]
+    pub match_id: u64,
+    pub data: EntityVitals,
+}
+
+/// Server-only unit bookkeeping. NOT public: never sent to any client.
+#[spacetimedb::table(accessor = unit_state)]
+pub struct UnitState {
+    #[primary_key]
+    pub id: u64,
+    #[index(btree)]
+    pub match_id: u64,
+    pub data: EntityState,
 }
 
 #[spacetimedb::table(public, accessor = resource_node)]

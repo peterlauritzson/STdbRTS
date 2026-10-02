@@ -1,4 +1,4 @@
-import type { Entity } from "./bindings/types";
+import type { Entity } from "./units";
 import { isBuilding, type FactionName } from "./catalog";
 import { canTrainAt, type Field } from "./zones";
 

@@ -53,6 +53,8 @@ import PlayerRow from "./player_table";
 import ResourceNodeRow from "./resource_node_table";
 import RoomRow from "./room_table";
 import UnitRow from "./unit_table";
+import UnitMotionRow from "./unit_motion_table";
+import UnitVitalsRow from "./unit_vitals_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -153,6 +155,34 @@ const tablesSchema = __schema({
       { name: 'unit_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, UnitRow),
+  unit_motion: __table({
+    name: 'unit_motion',
+    indexes: [
+      { accessor: 'id', name: 'unit_motion_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'match_id', name: 'unit_motion_match_id_idx_btree', algorithm: 'btree', columns: [
+        'matchId',
+      ] },
+    ],
+    constraints: [
+      { name: 'unit_motion_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, UnitMotionRow),
+  unit_vitals: __table({
+    name: 'unit_vitals',
+    indexes: [
+      { accessor: 'id', name: 'unit_vitals_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'match_id', name: 'unit_vitals_match_id_idx_btree', algorithm: 'btree', columns: [
+        'matchId',
+      ] },
+    ],
+    constraints: [
+      { name: 'unit_vitals_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, UnitVitalsRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */

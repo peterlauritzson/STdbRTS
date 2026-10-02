@@ -1,4 +1,5 @@
-import type { CreepPatch, Entity } from "./bindings/types";
+import type { CreepPatch } from "./bindings/types";
+import type { Entity } from "./units";
 import { isCompletedHub, type FactionName } from "./catalog";
 
 /**

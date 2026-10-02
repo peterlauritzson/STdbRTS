@@ -10,12 +10,15 @@ import { BUILD_KEYS, edgeDirection, groupAction, TRAIN_KEYS, UNIT_KEYS } from ".
 import skirmishMap from "../shared/maps/skirmish.json";
 import { clampToMap, WORLD_SIZE } from "../src/presentation";
 import { buildSite, isCompletedHub, affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, MAP_HASH, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
-import { Faction, ResourceKind, type CreepPatch, type Entity, type Node } from "../src/bindings/types";
+import { Faction, ResourceKind, type CreepPatch, type Node } from "../src/bindings/types";
+import type { Entity } from "../src/units";
 import { creepGoneTick, creepSecondsLeft, lifetimeFraction, offCreep } from "../src/creep";
 import { MAX_QUEUE, scheduledTraining, trainingSite } from "../src/production";
 import { ABILITIES, abilityOf, castingHub, castRefusal, HUB_MAX_ENERGY, maxEnergy, onCreep, recallable } from "../src/abilities";
 import { ARMY, armyBuilding, armyFaction, describe, FACTORY_KINDS, fights, isArmy, isStaticDefense, isTemporary, PASSIVE_OF, PASSIVES, passiveLine, ROSTER, takesSupply, TEMPORARY_LIFETIME, veteranStacks } from "../src/catalog";
 import { entrenched, passiveEffects, patientOf, removalEffects } from "../src/passives";
+import { readFileSync } from "node:fs";
+import { renderMarkdown, rewriteHref } from "../src/markdown";
 
 test("client renders the same map matches are actually played on", () => {
   // The server freezes this id into every new room, so a mismatch here means
@@ -127,7 +130,7 @@ test("resource kinds map to the currency a deposit or a load actually holds", ()
 
 function unit(id: number, owner: number, kind: string, stock = 0): Entity {
   const hp = kind === "hq" ? 1200 : 60;
-  return { id, owner, kind, x: 220, y: 220, hp, maxHp: hp, shields: 0, maxShields: 0, damagedTick: 0n, warpTick: 0n, arriveTick: 0n, order: { kind: "stop", x: 0, y: 0, target: 0 }, queue: [], cargo: 0, cargoKind: ResourceKind.Material, returning: false, nextAttack: 0n, shotTick: 0n, shotX: 0, shotY: 0, production: [], constructionRemaining: 0n, stock, expiresTick: 0n, energy: 0, abilityReadyTick: 0n, cast: undefined, passiveReadyTick: 0n, lastAttacker: 0, contactTick: 0n, kills: 0, anchorX: 220, anchorY: 220, anchorTick: 0n };
+  return { id, owner, kind, x: 220, y: 220, hp, maxHp: hp, shields: 0, maxShields: 0, damagedTick: 0n, warpTick: 0n, arriveTick: 0n, order: { kind: "stop", x: 0, y: 0, target: 0 }, queue: [], cargo: 0, cargoKind: ResourceKind.Material, shotTick: 0n, shotX: 0, shotY: 0, production: [], constructionRemaining: 0n, stock, expiresTick: 0n, energy: 0, abilityReadyTick: 0n, cast: undefined, passiveReadyTick: 0n, kills: 0 };
 }
 
 function deposit(id: number, x: number, y: number, amount: number, currency: Currency = "material"): Node {
@@ -1146,4 +1149,51 @@ test("the practice bot fields the new roster and builds its faction's defense on
     assert.ok(asked.has(ROSTER[faction][2]) || asked.has(ROSTER[faction][5]), `${faction} never trained a new unit: ${[...asked]}`);
     for (const trained of asked) assert.ok(ROSTER[faction].includes(trained) || trained === LABOUR[faction], `${faction} trained ${trained}`);
   }
+});
+
+// --- Player guide -----------------------------------------------------------
+
+test("the encyclopedia documents every unit and building the client knows", () => {
+  const page = readFileSync(new URL("../docs/guide/3-encyclopedia.md", import.meta.url), "utf8").toLowerCase();
+  const kinds = [
+    ...Object.values(ROSTER).flat(),
+    ...Object.values(LABOUR),
+    ...Object.keys(CATALOG).filter(kind => CATALOG[kind].building || isTemporary(kind)),
+  ];
+  const missing = [...new Set(kinds)].filter(kind => !page.includes(CATALOG[kind].label.toLowerCase()));
+  assert.deepEqual(missing, [], `docs/guide/3-encyclopedia.md does not mention: ${missing.join(", ")}`);
+  // Every passive is described by name too.
+  const unnamed = Object.values(PASSIVES).filter(passive => !page.includes(passive.name.toLowerCase())).map(passive => passive.name);
+  assert.deepEqual(unnamed, [], `docs/guide/3-encyclopedia.md does not describe the passives: ${unnamed.join(", ")}`);
+});
+
+test("the guide's markdown renderer handles tables, nested lists and page links", () => {
+  const html = renderMarkdown([
+    "# Title, *with* <b>html</b>",
+    "",
+    "Intro with **bold**, `code <x>` and [the next page](2-how-it-plays.md#start).",
+    "",
+    "- one",
+    "  - nested",
+    "- two",
+    "",
+    "1. first",
+    "2. second",
+    "",
+    "| Unit | HP |",
+    "| --- | ---: |",
+    "| **Soldier** | 140 |",
+    "",
+    "[bad](javascript:alert(1))",
+  ].join("\n"), { page: "overview" });
+  assert.match(html, /<h1 id="overview--title-with-b-html-b">Title, <em>with<\/em> &lt;b&gt;html&lt;\/b&gt;<\/h1>/);
+  assert.ok(html.includes('<a href="#how-it-plays/start">the next page</a>'));
+  assert.ok(html.includes("<strong>bold</strong>") && html.includes("<code>code &lt;x&gt;</code>"));
+  assert.ok(html.includes("<ul><li>one<ul><li>nested</li></ul></li><li>two</li></ul>"));
+  assert.ok(html.includes("<ol><li>first</li><li>second</li></ol>"));
+  assert.ok(html.includes('<th style="text-align:right">HP</th>') && html.includes('<td style="text-align:right">140</td>'));
+  assert.ok(html.includes('<div class="table-wrap"><table>'));
+  assert.ok(!html.includes("javascript:") && !html.includes("<b>"));
+  assert.deepEqual(rewriteHref("3-encyclopedia.md"), { href: "#encyclopedia", external: false });
+  assert.deepEqual(rewriteHref("#units", "encyclopedia"), { href: "#encyclopedia/units", external: false });
 });

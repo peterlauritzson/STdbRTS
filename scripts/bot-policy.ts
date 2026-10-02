@@ -1,4 +1,5 @@
-import type { CreepPatch, Entity, Node, Order } from "../src/bindings/types";
+import type { CreepPatch, Node, Order } from "../src/bindings/types";
+import type { Entity } from "../src/units";
 import { abilityOf, castingHub, onCreep, recallable } from "../src/abilities";
 import { affords, ARMY, ROSTER, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isCompletedHub, isHub, isLabour, LABOUR, MAX_UNITS, placementError, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, type Cost, type FactionName } from "../src/catalog";
 

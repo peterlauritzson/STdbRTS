@@ -9,7 +9,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 16;
+pub const RULESET_VERSION: u32 = 17;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -360,7 +360,8 @@ pub fn terrazine_owed(collected_material: u32, faction: Faction) -> u32 {
 
 /// A refinery extracts this much catalyst from its deposit...
 pub const REFINERY_YIELD: u32 = 4;
-/// ...every this many ticks (4 per 10 ticks is 24 a minute per refinery).
+/// ...every this many ticks (4 per 10 ticks is 8 a second, 480 a minute,
+/// per refinery).
 pub const REFINERY_INTERVAL_TICKS: u64 = 10;
 /// How far from a catalyst deposit a refinery may be ordered and still snap
 /// onto it. Generous, so a click near the deposit works.
@@ -3034,7 +3035,7 @@ mod tests {
         // base income. 15: unit cap 400 and building cap 150, and routes from
         // shared breadth-first fields (equally short routes may tie-break
         // differently from the old per-unit A*).
-        assert_eq!(RULESET_VERSION, 16);
+        assert_eq!(RULESET_VERSION, 17);
         assert!(RULESET_VERSION > 0);
     }
 

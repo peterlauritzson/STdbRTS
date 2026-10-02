@@ -370,6 +370,164 @@ pub struct Entity {
     pub anchor_tick: u64,
 }
 
+/// The part of an [`Entity`] a client needs that changes rarely: stored in the
+/// public `unit` table. See [`Entity::split`].
+#[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EntityCold {
+    pub id: u32,
+    pub owner: u8,
+    pub kind: String,
+    pub order: Order,
+    pub queue: Vec<Order>,
+    pub cargo: u32,
+    pub cargo_kind: ResourceKind,
+    pub production: Vec<Production>,
+    pub construction_remaining: u64,
+    pub stock: u32,
+    pub expires_tick: u64,
+    pub max_hp: i32,
+    pub max_shields: i32,
+    pub warp_tick: u64,
+    pub arrive_tick: u64,
+    pub energy: i32,
+    pub ability_ready_tick: u64,
+    pub cast: Option<Cast>,
+    pub kills: u16,
+}
+
+/// The hottest part of an [`Entity`]: position, which changes every tick a unit
+/// moves. Stored in the public `unit_motion` table, as narrow as it can be.
+#[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EntityMotion {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// What the client reads that changes in combat (health, shields, the last
+/// shot, a passive's timer) but not while a unit merely walks. Stored in the
+/// public `unit_vitals` table.
+#[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EntityVitals {
+    pub hp: i32,
+    pub shields: i32,
+    pub shot_tick: u64,
+    pub shot_x: f32,
+    pub shot_y: f32,
+    pub damaged_tick: u64,
+    pub passive_ready_tick: u64,
+}
+
+/// Everything only the server reads. Stored in the private `unit_state` table,
+/// so it is never sent to a client.
+#[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EntityState {
+    pub returning: bool,
+    pub next_attack: u64,
+    pub last_attacker: u32,
+    pub contact_tick: u64,
+    pub anchor_x: f32,
+    pub anchor_y: f32,
+    pub anchor_tick: u64,
+}
+
+impl Entity {
+    /// Splits into the three persisted parts. `join` is its exact inverse.
+    pub fn split(&self) -> (EntityCold, EntityMotion, EntityVitals, EntityState) {
+        let e = self.clone();
+        (
+            EntityCold {
+                id: e.id,
+                owner: e.owner,
+                kind: e.kind,
+                order: e.order,
+                queue: e.queue,
+                cargo: e.cargo,
+                cargo_kind: e.cargo_kind,
+                production: e.production,
+                construction_remaining: e.construction_remaining,
+                stock: e.stock,
+                expires_tick: e.expires_tick,
+                max_hp: e.max_hp,
+                max_shields: e.max_shields,
+                warp_tick: e.warp_tick,
+                arrive_tick: e.arrive_tick,
+                energy: e.energy,
+                ability_ready_tick: e.ability_ready_tick,
+                cast: e.cast,
+                kills: e.kills,
+            },
+            EntityMotion { x: e.x, y: e.y },
+            EntityVitals {
+                hp: e.hp,
+                shields: e.shields,
+                shot_tick: e.shot_tick,
+                shot_x: e.shot_x,
+                shot_y: e.shot_y,
+                damaged_tick: e.damaged_tick,
+                passive_ready_tick: e.passive_ready_tick,
+            },
+            EntityState {
+                returning: e.returning,
+                next_attack: e.next_attack,
+                last_attacker: e.last_attacker,
+                contact_tick: e.contact_tick,
+                anchor_x: e.anchor_x,
+                anchor_y: e.anchor_y,
+                anchor_tick: e.anchor_tick,
+            },
+        )
+    }
+
+    pub fn join(
+        cold: EntityCold,
+        motion: EntityMotion,
+        vitals: EntityVitals,
+        state: EntityState,
+    ) -> Entity {
+        Entity {
+            id: cold.id,
+            owner: cold.owner,
+            kind: cold.kind,
+            x: motion.x,
+            y: motion.y,
+            hp: vitals.hp,
+            order: cold.order,
+            queue: cold.queue,
+            cargo: cold.cargo,
+            cargo_kind: cold.cargo_kind,
+            returning: state.returning,
+            next_attack: state.next_attack,
+            shot_tick: vitals.shot_tick,
+            shot_x: vitals.shot_x,
+            shot_y: vitals.shot_y,
+            production: cold.production,
+            construction_remaining: cold.construction_remaining,
+            stock: cold.stock,
+            expires_tick: cold.expires_tick,
+            max_hp: cold.max_hp,
+            shields: vitals.shields,
+            max_shields: cold.max_shields,
+            damaged_tick: vitals.damaged_tick,
+            warp_tick: cold.warp_tick,
+            arrive_tick: cold.arrive_tick,
+            energy: cold.energy,
+            ability_ready_tick: cold.ability_ready_tick,
+            cast: cold.cast,
+            passive_ready_tick: vitals.passive_ready_tick,
+            last_attacker: state.last_attacker,
+            contact_tick: state.contact_tick,
+            kills: cold.kills,
+            anchor_x: state.anchor_x,
+            anchor_y: state.anchor_y,
+            anchor_tick: state.anchor_tick,
+        }
+    }
+}
+
 #[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Node {
@@ -2785,6 +2943,26 @@ impl World {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn entity_split_join_round_trips_every_field() {
+        let e = Entity {
+            id: 7, owner: 2, kind: "soldier".into(), x: 1.5, y: 2.5, hp: 33,
+            order: Order { kind: "move".into(), x: 3.0, y: 4.0, target: 9 },
+            queue: vec![Order { kind: "attack".into(), x: 5.0, y: 6.0, target: 11 }],
+            cargo: 12, cargo_kind: ResourceKind::Catalyst, returning: true,
+            next_attack: 101, shot_tick: 102, shot_x: 7.5, shot_y: 8.5,
+            production: vec![Production { kind: "worker".into(), finish_tick: 500 }],
+            construction_remaining: 13, stock: 3, expires_tick: 900, max_hp: 80,
+            shields: 14, max_shields: 40, damaged_tick: 103, warp_tick: 104,
+            arrive_tick: 105, energy: 55, ability_ready_tick: 106,
+            cast: Some(Cast { kind: "recall".into(), x: 9.5, y: 10.5, complete_tick: 107 }),
+            passive_ready_tick: 108, last_attacker: 21, contact_tick: 109, kills: 4,
+            anchor_x: 11.5, anchor_y: 12.5, anchor_tick: 110,
+        };
+        let (cold, motion, vitals, state) = e.split();
+        assert_eq!(Entity::join(cold, motion, vitals, state), e);
+    }
     use super::*;
 
     /// Stills the starting labour.

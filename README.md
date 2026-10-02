@@ -1,8 +1,11 @@
 # Spacetime RTS
 
 A server-authoritative browser skirmish RTS. Play against the built-in practice
-opponent or 2-4 human players: mine ore, expand a base, research upgrades, field
-mixed armies, and destroy every opposing HQ.
+opponent or 2-4 human players as one of three factions: mine material, extract
+catalyst, expand across a large map, field armies whose units each carry a
+passive ability, and destroy every opposing hub.
+
+**Player guide** (also opened from the Guide link in the game): [The game at a glance](docs/guide/1-overview.md), [How it plays, and why](docs/guide/2-how-it-plays.md) and the [Encyclopedia](docs/guide/3-encyclopedia.md) of every unit, building and number.
 
 The current implementation replaces the original ad hoc prototype. The original
 ideas remain in [MVP-RTS-PLAN.md](MVP-RTS-PLAN.md); implementation decisions and
@@ -54,7 +57,7 @@ with `npm run bot -- --room=123`. `--duration=30` limits a run to 30 seconds.
 ## Controls
 
 - Left click selects; drag selects owned mobile units; Shift adds to selection.
-- Right click ground to move, an enemy to attack, ore to gather, or your HQ to
+- Right click ground to move, an enemy to attack, a material patch to gather, or your HQ to
   return cargo. Mixed selections apply attack only to soldiers and gather only
   to workers. Shift queues an order after its activation delay.
 - Touch uses the Select / Order / Pan segmented controls. Drag selects in
@@ -82,7 +85,7 @@ with `npm run bot -- --room=123`. `--duration=30` limits a run to 30 seconds.
   Stop pauses construction. Select a site and use the trash button to cancel it
   for a 75% refund; destroyed sites yield no refund.
 - Research tab queues faction-wide upgrades in a completed laboratory.
-- Economy (older lines below still say "ore"): three currencies, one purpose each.
+- Economy: three currencies, one purpose each.
   Material (mined, one miner per patch) buys labour, structures and research.
   Catalyst buys the whole army and comes only from a refinery (U) built on a
   catalyst deposit, no workers needed. Terrazine, a share of the material you mine
@@ -97,12 +100,12 @@ with `npm run bot -- --room=123`. `--duration=30` limits a run to 30 seconds.
   spitter (Acid Splash), prowler (Forced March), devourer (Veteran), crusher
   (Regrowth), behemoth (Death Burst). Barracks trains the first four, the factory
   the last two. Details: [ROSTER-PASSIVES.md](docs/honeybadger/ROSTER-PASSIVES.md).
-- Select a production building and right-click ground or ore to set its rally.
+- Select a production building and right-click ground or a material patch to set its rally.
   The flag button also arms rally targeting. Clear it with the crossed-out flag.
-  New workers move to ground rallies or gather at ore rallies; soldiers attack-move
+  New workers move to ground rallies or gather at patch rallies; soldiers attack-move
   to either. Rally changes affect future births, not units already deployed.
 - The production X button cancels all unfinished production and refunds its full
-  ore cost. Completed units are never refunded. It does not cancel train commands
+  cost. Completed units are never refunded. It does not cancel train commands
   that are still waiting for their activation tick.
 - Every player-issued action, including stop, hold, repair, rally, and production
   cancellation, respects the one-second delay. Hold and production controls cannot
@@ -113,30 +116,9 @@ with `npm run bot -- --room=123`. `--duration=30` limits a run to 30 seconds.
 
 ## Roster and Base
 
-| Unit | Ore / Time | Producer | Role |
-| --- | --- | --- | --- |
-| Worker | 50 / 3s | HQ | Mine, construct, repair |
-| Soldier | 100 / 5s | HQ, barracks | Infantry; double damage to scouts |
-| Scout | 80 / 3.5s | Barracks | Fast raiding; 180 movement speed |
-| Siege | 200 / 8s | Factory | 260 range; triple building damage; weak against scouts |
-
-| Structure | Ore / Worker Time | Role |
-| --- | --- | --- |
-| Barracks | 150 / 8s | Infantry/scout production; unlocks factories |
-| Outpost | 100 / 6s | Nearby ore drop-off and expansion anchor |
-| Turret | 125 / 7s | Automatic defense, 210 range |
-| Factory | 250 / 12s | Siege production; completed barracks required |
-| Laboratory | 200 / 10s | Weapons, armor, logistics research |
-
-Build within 500 units of a completed friendly structure. Sites must clear other
-buildings, mobile units, resource nodes, terrain, and map edges. The limit is 16
-structures including HQ. Multiple workers accelerate construction. Sites start
-with 10% HP and gain health as they are built; damage is not erased by completion.
-
-Each technology costs 150 ore and 15 seconds of serial lab research. Weapons adds
-4 base attack damage, armor reduces incoming hits by 3 (minimum 1 damage), and
-logistics increases worker capacity from 25 to 40 and extraction from 5 to 7 ore.
-Completed upgrades persist if the lab is destroyed and apply to existing/new units.
+Units, structures, passive abilities, costs and every other number are in the
+[Encyclopedia](docs/guide/3-encyclopedia.md). It is kept current with the code
+(`server/src/rules.rs`), so they are not repeated here.
 
 ## Rules and Authority
 
@@ -149,19 +131,13 @@ one shared execution tick; the client displays pending markers and interpolates
 received positions, never predicts gameplay. Scheduling under load may run
 slower than wall time; the server tick remains authoritative.
 
-Workers carry 25 ore before logistics and deposit at the nearest completed HQ or
-outpost. Production is serial per building, capped at eight queued items per
-building and 60 mobile units per player, including all reserved production. Resources
-are charged when the delayed train command executes, not when it is sent.
-Soldiers pursue explicit attack targets and automatically shoot nearby enemies.
-Attack-move acquires the closest enemy within detection/weapon range, with
-stable ID tie-breaking, and keeps that target while it remains in radius.
-Workers repair at close range, restoring up to 5 HP every half-second for 1 ore
-(including a final partial repair). Multiple workers share the remaining damage
-budget, cannot overheal, and pause without ore. Repair finishes at full health or
-when the target disappears; carried ore is retained until subsequently returned.
+Economy, production limits, repair and combat rules are described in the
+[player guide](docs/guide/2-how-it-plays.md); numbers are in the
+[Encyclopedia](docs/guide/3-encyclopedia.md). Resources are charged when the
+delayed train command executes, not when it is sent.
 Terrain blocks movement and firing lines. The authoritative 40-unit navigation
-grid uses the `pathfinding` crate's A*, with direct movement on clear routes.
+grid routes with shared, cached route fields (one search per goal), with direct
+movement on clear routes.
 Buildings block movement, and production waits if no clear exit exists.
 Combat is simultaneous hitscan damage with visual tracers. A destroyed HQ
 eliminates its owner's remaining units. The last HQ wins; simultaneous final HQ
@@ -227,9 +203,9 @@ Tests create their own identities/rooms and do not reset the database.
 
 ## Current Limits
 
-This is a playable one-faction, one-map skirmish build for playtesting, not a
+This is a playable three-faction, one-map build for playtesting, not a
 production-ready online service. No fog of war, teams, ranked matchmaking, replay
-storage, campaign, or additional factions. Unit-to-unit separation is lightweight;
+storage, or campaign. Unit-to-unit separation is lightweight;
 large-army congestion and dynamic blocked routes need playtesting. Tables are public;
 match-scoped subscriptions reduce traffic but do not hide enemy data. A custom
 client can read every match in the database, including matches it has not

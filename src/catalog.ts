@@ -1,7 +1,8 @@
 import mapDefinition from "../shared/maps/expanse.json";
 import { mapContentHash } from "./maphash";
 import { Faction } from "./bindings/types";
-import type { Entity, Node, ResourceKind } from "./bindings/types";
+import type { Node, ResourceKind } from "./bindings/types";
+import type { Entity } from "./units";
 
 export const terrain = mapDefinition.terrain;
 /** Each slot's start position on the bundled map, where its HQ is placed. */

@@ -61,7 +61,7 @@ export class Practice {
       const created = await this.bot.act(async connection => {
         if (this.bot.snapshot.me?.matchId !== 0n) await connection.reducers.leaveRoom({});
         await connection.reducers.setName({ name: "Automaton" });
-        await connection.reducers.createRoom({ name: "Practice / Verdant Basin", capacity: 2 });
+        await connection.reducers.createRoom({ name: "Practice / Expanse", capacity: 2 });
         await setFactionOn(connection, pickOpponent(opponent));
         await connection.reducers.setReady({ ready: true });
       });

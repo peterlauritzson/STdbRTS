@@ -1,4 +1,5 @@
-import type { CreepPatch, Entity } from "./bindings/types";
+import type { CreepPatch } from "./bindings/types";
+import type { Entity } from "./units";
 import { clamp } from "./presentation";
 import { TEMPORARY_LIFETIME } from "./catalog";
 

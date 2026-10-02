@@ -43,7 +43,7 @@
 //! Run it in release — a debug timing number means nothing.
 
 use rts_core::maps::MapDefinition;
-use rts_core::simulation::{Order, World};
+use rts_core::simulation::{Entity, Order, World};
 use rts_core::{is_building, Faction, TICKS_PER_SECOND};
 use std::time::Instant;
 
@@ -351,6 +351,52 @@ struct Sample {
     /// Unit rows `save_world` would write per tick: inserted, changed or
     /// deleted by the step (its diff skips unchanged rows).
     rows_per_tick: f64,
+    /// Public rows broadcast per tick after the split (cold + motion + vitals; the
+    /// private state table is never sent), and the estimated BSATN bytes per
+    /// tick before (one whole-entity row) and after (public parts).
+    split_rows_per_tick: f64,
+    bytes_before: f64,
+    bytes_after: f64,
+}
+
+// --- approximate BSATN sizes of the public rows -------------------------------
+// String = 4 + len, Vec = 4 + elements, Option = 1 + payload. Every row also
+// carries its u64 id and u64 match_id. A row update goes over the wire as
+// delete(old) + insert(new); both columns of the comparison count one row per
+// write, so the ratio is unaffected.
+const ROW_KEYS: usize = 16;
+fn s_len(text: &str) -> usize {
+    4 + text.len()
+}
+fn order_len(order: &Order) -> usize {
+    s_len(&order.kind) + 4 + 4 + 4
+}
+fn cold_len(c: &rts_core::simulation::EntityCold) -> usize {
+    4 + 1
+        + s_len(&c.kind)
+        + order_len(&c.order)
+        + 4
+        + c.queue.iter().map(order_len).sum::<usize>()
+        + 4 + 1
+        + 4
+        + c.production.iter().map(|p| s_len(&p.kind) + 8).sum::<usize>()
+        + 8 + 4 + 8 + 4 + 4 + 8 + 8 + 4 + 8
+        + 1
+        + c.cast.as_ref().map_or(0, |cast| s_len(&cast.kind) + 4 + 4 + 8)
+        + 2
+}
+fn motion_len() -> usize {
+    4 + 4
+}
+fn vitals_len() -> usize {
+    4 + 4 + 8 + 4 + 4 + 8 + 8
+}
+fn state_len() -> usize {
+    1 + 8 + 4 + 8 + 4 + 4 + 8
+}
+fn full_len(entity: &Entity) -> usize {
+    let (cold, _, _, _) = entity.split();
+    ROW_KEYS + cold_len(&cold) + motion_len() + vitals_len() + state_len()
 }
 
 fn percentile(sorted: &[f64], fraction: f64) -> f64 {
@@ -377,6 +423,9 @@ fn measure(map: &MapDefinition, players: usize, mobiles: usize, churn: bool) -> 
     let mut costs = Vec::with_capacity(MEASURED_TICKS);
     let mut before: Vec<(u32, f32, f32)> = Vec::new();
     let mut rows_total = 0usize;
+    let mut split_rows = 0usize;
+    let mut bytes_before = 0usize;
+    let mut bytes_after = 0usize;
     for tick in 0..MEASURED_TICKS {
         // A new building changes the routing layout, which invalidates every
         // cached route field: the worst tick a real match sees when someone
@@ -425,6 +474,42 @@ fn measure(map: &MapDefinition, players: usize, mobiles: usize, churn: bool) -> 
                     .map_or(true, |at| rows_before[at] != **unit)
             })
             .count();
+        for unit in &rows_after {
+            let (cold, motion, vitals, _) = unit.split();
+            let parts = ROW_KEYS + cold_len(&cold);
+            match rows_before.binary_search_by_key(&unit.id, |old| old.id) {
+                Err(_) => {
+                    bytes_before += full_len(unit);
+                    split_rows += 3;
+                    bytes_after += parts + 2 * ROW_KEYS + motion_len() + vitals_len();
+                }
+                Ok(at) if rows_before[at] != *unit => {
+                    bytes_before += full_len(unit);
+                    let (old_cold, old_motion, old_vitals, _) = rows_before[at].split();
+                    if old_cold != cold {
+                        split_rows += 1;
+                        bytes_after += parts;
+                    }
+                    if old_motion != motion {
+                        split_rows += 1;
+                        bytes_after += ROW_KEYS + motion_len();
+                    }
+                    if old_vitals != vitals {
+                        split_rows += 1;
+                        bytes_after += ROW_KEYS + vitals_len();
+                    }
+                }
+                Ok(_) => {}
+            }
+        }
+        for old in &rows_before {
+            if rows_after.binary_search_by_key(&old.id, |unit| unit.id).is_err() {
+                bytes_before += full_len(old);
+                let (cold, _, _, _) = old.split();
+                split_rows += 3;
+                bytes_after += ROW_KEYS + cold_len(&cold) + 2 * ROW_KEYS + motion_len() + vitals_len();
+            }
+        }
         let deleted = rows_before
             .iter()
             .filter(|old| rows_after.binary_search_by_key(&old.id, |unit| unit.id).is_err())
@@ -444,6 +529,9 @@ fn measure(map: &MapDefinition, players: usize, mobiles: usize, churn: bool) -> 
         moved_percent: moved_total as f64 / alive_total.max(1) as f64 * 100.0,
         reinforcements,
         rows_per_tick: rows_total as f64 / MEASURED_TICKS as f64,
+        split_rows_per_tick: split_rows as f64 / MEASURED_TICKS as f64,
+        bytes_before: bytes_before as f64 / MEASURED_TICKS as f64,
+        bytes_after: bytes_after as f64 / MEASURED_TICKS as f64,
     }
 }
 
@@ -547,6 +635,17 @@ fn main() {
                 sample.reinforcements,
                 sample.rows_per_tick,
                 if pass { "WITHIN BUDGET" } else { "OVER BUDGET" }
+            );
+            println!(
+                "{:>10} rows/tick {:.0} -> {:.0} (public: cold+motion+vitals); est. bytes/tick {:.0} -> {:.0} ({:.1}x less, {:.0} -> {:.0} KB/s)",
+                "split:",
+                sample.rows_per_tick,
+                sample.split_rows_per_tick,
+                sample.bytes_before,
+                sample.bytes_after,
+                sample.bytes_before / sample.bytes_after.max(1.0),
+                sample.bytes_before * 20.0 / 1024.0,
+                sample.bytes_after * 20.0 / 1024.0,
             );
             if !pass {
                 over.push(format!("{}({:.0}) {players}x{mobiles}", map.id, map.size));

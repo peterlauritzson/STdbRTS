@@ -1,4 +1,5 @@
-import type { CreepPatch, Entity, Node as Deposit, Order } from "./bindings/types";
+import type { CreepPatch, Node as Deposit, Order } from "./bindings/types";
+import type { Entity } from "./units";
 import { Session } from "./network";
 import { clamp, clampToMap, COLORS, countdown, VISUALS, WORLD_SIZE } from "./presentation";
 import { buildSite, cargoCapacity, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isCompletedHub, isVeteran, RALLIES, isLabour, isTemporary, mapIdentity, placementError, starts, terrain, veteranStacks, type FactionName } from "./catalog";

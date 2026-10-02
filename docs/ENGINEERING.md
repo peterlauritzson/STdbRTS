@@ -1,5 +1,7 @@
 # RTS Engineering Record
 
+> **Player guide.** [docs/guide/](guide/1-overview.md) describes the game as built, for players, and must be updated in the same change as anything a player could notice. See the constraint in [HANDOFF.md](honeybadger/HANDOFF.md).
+
 ## Initial Scope and Acceptance Gates
 
 Build a browser RTS vertical slice, not a production service: 2-4 players, one

@@ -10,7 +10,7 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 import {
-  EntityCold,
+  EntityVitals,
 } from "./types";
 
 
@@ -18,6 +18,6 @@ export default __t.row({
   id: __t.u64().primaryKey(),
   matchId: __t.u64().name("match_id"),
   get data() {
-    return EntityCold;
+    return EntityVitals;
   },
 });

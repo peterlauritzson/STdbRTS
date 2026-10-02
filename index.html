@@ -9,6 +9,7 @@
 <body>
   <header class="masthead">
     <a class="brand" href="/" aria-label="Spacetime RTS"><i data-lucide="crosshair"></i><span>SPACETIME <b>RTS</b></span></a>
+    <a class="guide-link" href="guide.html" target="_blank" rel="noopener" title="Player guide (opens in a new tab)"><i data-lucide="book-open"></i><span>Guide</span></a>
     <div class="connection-status"><span id="connection-dot"></span><span id="status" role="status">Connecting</span></div>
     <details id="connection-settings">
       <summary>Connection</summary>
@@ -21,7 +22,7 @@
   </header>
 
   <main id="lobby" class="lobby">
-    <div class="lobby-heading"><div><p class="eyebrow">OPERATIONS / 07</p><h1>Command Room</h1></div><span class="map-label">VERDANT BASIN</span></div>
+    <div class="lobby-heading"><div><p class="eyebrow">OPERATIONS / 07</p><h1>Command Room</h1></div><span class="map-label">EXPANSE</span></div>
     <div class="lobby-layout">
       <aside class="lobby-sidebar">
         <form id="name-form"><label>Callsign<input id="callsign" maxlength="24" required value="Commander" autocomplete="nickname" /></label><button id="save-name" type="submit">Set Callsign</button></form>
@@ -36,7 +37,7 @@
           <label for="practice-opponent">Opponent<select id="practice-opponent" class="faction-select"><option value="random">Random faction</option></select></label>
           <button id="practice" class="primary"><i data-lucide="bot"></i>Practice vs AI</button>
         </div>
-        <dl class="map-facts"><div><dt>Battlefield</dt><dd id="map-size">3200 x 3200</dd></div><div><dt>Command Delay</dt><dd>1.0 seconds</dd></div><div><dt>Unit Capacity</dt><dd>120 / player</dd></div></dl>
+        <dl class="map-facts"><div><dt>Battlefield</dt><dd id="map-size">9600 x 9600</dd></div><div><dt>Command Delay</dt><dd>1.0 seconds</dd></div><div><dt>Unit Capacity</dt><dd id="unit-capacity">400 / player</dd></div></dl>
       </aside>
       <section class="operations">
         <div id="room-browser"><div class="section-heading"><h2>Open Operations</h2><span id="room-count" class="mono">00</span></div><div id="room-list" class="room-list"></div></div>
@@ -48,7 +49,7 @@
           <div class="room-actions"><label class="ready-control"><input type="checkbox" id="ready" />Ready</label><button id="start-match" class="primary"><i data-lucide="play"></i>Deploy</button><button id="leave-lobby"><i data-lucide="log-out"></i>Leave Room</button></div>
           <p id="waiting-status" class="muted" role="status"></p>
         </div>
-        <div class="map-diagram" aria-hidden="true"><div class="contour contour-one"></div><div class="contour contour-two"></div><div class="contour contour-three"></div><span id="map-coordinate" class="coordinate north">N / 3200</span><span class="coordinate south">VERDANT BASIN / 07</span><i class="map-base base-one"></i><i class="map-base base-two"></i><i class="map-base base-three"></i><i class="map-base base-four"></i></div>
+        <div class="map-diagram" aria-hidden="true"><div class="contour contour-one"></div><div class="contour contour-two"></div><div class="contour contour-three"></div><span id="map-coordinate" class="coordinate north">N / 9600</span><span class="coordinate south">EXPANSE / 07</span><i class="map-base base-one"></i><i class="map-base base-two"></i><i class="map-base base-three"></i><i class="map-base base-four"></i></div>
       </section>
     </div>
   </main>
@@ -72,10 +73,11 @@
         </div>
       </div>
       <div id="battle-players" class="battle-players"></div>
-      <div class="camera-tools"><button id="sound" class="icon-button" title="Sound on" aria-label="Sound" aria-pressed="true"><i data-lucide="volume-2"></i></button><button id="camera-home" class="icon-button" title="Center on HQ" aria-label="Center on HQ"><i data-lucide="house"></i></button><button id="camera-fit" class="icon-button" title="Show whole map" aria-label="Show whole map"><i data-lucide="maximize-2"></i></button><button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button><button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button><button id="help-toggle" class="icon-button" title="Controls (?)" aria-label="Controls" aria-expanded="false" aria-controls="help"><i data-lucide="keyboard"></i></button></div>
+      <div class="camera-tools"><button id="sound" class="icon-button" title="Sound on" aria-label="Sound" aria-pressed="true"><i data-lucide="volume-2"></i></button><button id="camera-home" class="icon-button" title="Center on HQ" aria-label="Center on HQ"><i data-lucide="house"></i></button><button id="camera-fit" class="icon-button" title="Show whole map" aria-label="Show whole map"><i data-lucide="maximize-2"></i></button><button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button><button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button><button id="guide-open" class="icon-button" title="Game guide (opens in a new tab)" aria-label="Game guide (opens in a new tab)"><i data-lucide="book-open"></i></button><button id="help-toggle" class="icon-button" title="Controls (?)" aria-label="Controls" aria-expanded="false" aria-controls="help"><i data-lucide="keyboard"></i></button></div>
       <div id="group-bar" class="group-bar" aria-label="Control groups"></div>
       <aside id="help" class="help mono" hidden>
         <h2>Controls</h2>
+        <p class="help-guide">New here? Read the <a href="guide.html" target="_blank" rel="noopener">game guide</a>.</p>
         <dl>
           <div><dt>Left click / drag</dt><dd>Select / box select</dd></div>
           <div><dt>Double-click, Ctrl+click</dt><dd>All of that kind on screen</dd></div>

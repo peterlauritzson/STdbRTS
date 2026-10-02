@@ -1,12 +1,14 @@
 import { connectClient, me, order } from "./client";
 import { chooseOrders } from "./bot-policy";
 import { factionOf } from "../src/catalog";
+import { UnitMerger } from "../src/units";
 
 const roomArgument = process.argv.find(argument => /^--room=/.test(argument))?.split("=")[1];
 const durationArgument = process.argv.find(argument => /^--duration=/.test(argument))?.split("=")[1];
 const duration = durationArgument ? Number(durationArgument) : undefined;
 if (duration !== undefined && (!Number.isFinite(duration) || duration <= 0)) throw new Error("Duration must be positive seconds");
 const { connection } = await connectClient();
+const merger = new UnitMerger();
 let stopped = false;
 let busy = false;
 const started = Date.now();
@@ -38,7 +40,7 @@ const timer = setInterval(async () => {
       if (room.host.isEqual(player.identity) && members.length >= 2 && members.every(member => member.ready && member.online)) await connection.reducers.startMatch({});
       return;
     }
-    const units = [...connection.db.unit.iter()].filter(unit => unit.matchId === room.id).map(unit => unit.data);
+    const units = merger.collect(connection.db, room.id);
     const nodes = [...connection.db.resource_node.iter()].filter(node => node.matchId === room.id).map(node => node.data);
     const creep = [...connection.db.creep_patch.iter()].filter(patch => patch.matchId === room.id).map(patch => patch.data);
     const pending = new Set([...connection.db.command.iter()].filter(command => command.matchId === room.id && command.owner === player.slot && command.status === "scheduled").flatMap(command => command.units));

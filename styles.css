@@ -33,7 +33,10 @@ h2 { font-size: 18px; font-weight: 500; }
 .brand { display: flex; align-items: center; gap: 10px; color: #eef4dc; text-decoration: none; font-size: 16px; font-weight: 700; white-space: nowrap; }
 .brand svg { color: var(--accent); width: 26px; height: 26px; }
 .brand b { color: var(--accent); }
-.connection-status { margin-left: auto; display: flex; gap: 8px; align-items: center; font-size: 12px; }
+.guide-link { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid #586858; border-radius: 4px; color: #edf4e9; font-size: 13px; text-decoration: none; }
+.guide-link:hover { border-color: #a3b692; background: #2b3d33; }
+.guide-link svg { width: 16px; height: 16px; color: var(--accent); }
+.connection-status { margin-left: 16px; display: flex; gap: 8px; align-items: center; font-size: 12px; }
 #connection-dot { width: 6px; height: 6px; background: #edce6d; border-radius: 50%; }
 #connection-dot.online { background: #66dfba; }
 #connection-settings { font-size: 12px; }
@@ -138,6 +141,8 @@ kbd.tab-key { position: static; margin-left: 6px; }
 .group-chip b { color: var(--accent); }
 .group-chip.active { border-color: var(--accent); background: #34482fec; }
 .help { position: absolute; right: 16px; top: 62px; width: min(380px, calc(100% - 32px)); max-height: calc(100% - 78px); overflow: auto; padding: 14px 16px; background: #14231ef4; border: 1px solid #657862; border-radius: 4px; font-size: 11px; z-index: 6; }
+.help-guide { margin: 0 0 8px; font-size: 12px; }
+.help-guide a { color: var(--accent); }
 .help h2 { font: 500 13px "Space Grotesk", sans-serif; margin-bottom: 8px; }
 .help dl { margin: 0; display: grid; gap: 3px; }
 .help dl div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; padding: 3px 0; border-bottom: 1px solid #2c3b33; }

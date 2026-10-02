@@ -68,13 +68,40 @@ pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
     World {
         tick: room.tick,
         next_id: room.next_entity_id,
-        units: ctx
-            .db
-            .unit()
-            .match_id()
-            .filter(room.id)
-            .map(|row| row.data)
-            .collect(),
+        units: {
+            let mut motions: std::collections::HashMap<u64, _> = ctx
+                .db
+                .unit_motion()
+                .match_id()
+                .filter(room.id)
+                .map(|row| (row.id, row.data))
+                .collect();
+            let mut vitals: std::collections::HashMap<u64, _> = ctx
+                .db
+                .unit_vitals()
+                .match_id()
+                .filter(room.id)
+                .map(|row| (row.id, row.data))
+                .collect();
+            let mut states: std::collections::HashMap<u64, _> = ctx
+                .db
+                .unit_state()
+                .match_id()
+                .filter(room.id)
+                .map(|row| (row.id, row.data))
+                .collect();
+            ctx.db
+                .unit()
+                .match_id()
+                .filter(room.id)
+                .filter_map(|row| {
+                    let motion = motions.remove(&row.id)?;
+                    let vital = vitals.remove(&row.id)?;
+                    let state = states.remove(&row.id)?;
+                    Some(rts_core::simulation::Entity::join(row.data, motion, vital, state))
+                })
+                .collect()
+        },
         nodes: ctx
             .db
             .resource_node()
@@ -208,26 +235,57 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
     let mut alive: Vec<u32> = world.units.iter().map(|unit| unit.id).collect();
     alive.sort_unstable();
     for old in ctx.db.unit().match_id().filter(room.id).collect::<Vec<_>>() {
-        if alive.binary_search(&old.data.id).is_err() {
+        if alive.binary_search(&(old.data.id)).is_err() {
             ctx.db.unit().id().delete(old.id);
+            ctx.db.unit_motion().id().delete(old.id);
+            ctx.db.unit_vitals().id().delete(old.id);
+            ctx.db.unit_state().id().delete(old.id);
         }
     }
-    for data in &world.units {
-        let id = (room.id << 32) | data.id as u64;
-        if let Some(old) = ctx.db.unit().id().find(id) {
-            if old.data != *data {
-                ctx.db.unit().id().update(Unit {
-                    id,
-                    match_id: room.id,
-                    data: data.clone(),
-                });
+    // Each persisted part is diffed against its own row, so a unit that only
+    // moved rewrites (and rebroadcasts) just its small motion row.
+    for entity in &world.units {
+        let id = (room.id << 32) | entity.id as u64;
+        let (cold, motion, vitals, state) = entity.split();
+        match ctx.db.unit().id().find(id) {
+            Some(old) => {
+                if old.data != cold {
+                    ctx.db.unit().id().update(Unit { id, match_id: room.id, data: cold });
+                }
             }
-        } else {
-            ctx.db.unit().insert(Unit {
-                id,
-                match_id: room.id,
-                data: data.clone(),
-            });
+            None => {
+                ctx.db.unit().insert(Unit { id, match_id: room.id, data: cold });
+            }
+        }
+        match ctx.db.unit_motion().id().find(id) {
+            Some(old) => {
+                if old.data != motion {
+                    ctx.db.unit_motion().id().update(UnitMotion { id, match_id: room.id, data: motion });
+                }
+            }
+            None => {
+                ctx.db.unit_motion().insert(UnitMotion { id, match_id: room.id, data: motion });
+            }
+        }
+        match ctx.db.unit_vitals().id().find(id) {
+            Some(old) => {
+                if old.data != vitals {
+                    ctx.db.unit_vitals().id().update(UnitVitals { id, match_id: room.id, data: vitals });
+                }
+            }
+            None => {
+                ctx.db.unit_vitals().insert(UnitVitals { id, match_id: room.id, data: vitals });
+            }
+        }
+        match ctx.db.unit_state().id().find(id) {
+            Some(old) => {
+                if old.data != state {
+                    ctx.db.unit_state().id().update(UnitState { id, match_id: room.id, data: state });
+                }
+            }
+            None => {
+                ctx.db.unit_state().insert(UnitState { id, match_id: room.id, data: state });
+            }
         }
     }
     for data in &world.nodes {
@@ -439,6 +497,9 @@ pub fn record_final_sample(ctx: &ReducerContext, match_id: u64, world: &World) {
 pub fn delete_room(ctx: &ReducerContext, match_id: u64) {
     ctx.db.match_sample().match_id().delete(match_id);
     ctx.db.unit().match_id().delete(match_id);
+    ctx.db.unit_motion().match_id().delete(match_id);
+    ctx.db.unit_vitals().match_id().delete(match_id);
+    ctx.db.unit_state().match_id().delete(match_id);
     ctx.db.creep_patch().match_id().delete(match_id);
     ctx.db.resource_node().match_id().delete(match_id);
     ctx.db.command().match_id().delete(match_id);

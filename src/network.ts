@@ -1,6 +1,7 @@
 import { BinaryWriter, ProductType, reducerSchema } from "spacetimedb";
 import { DbConnection, tables, type SubscriptionHandle } from "./bindings";
-import { Faction, type Command, type CreepPatch, type Entity, type MatchSample, type Node, type Order, type Player, type Room } from "./bindings/types";
+import { Faction, type Command, type CreepPatch, type MatchSample, type Node, type Order, type Player, type Room } from "./bindings/types";
+import { UnitMerger, type Entity } from "./units";
 import { factionValue, type FactionName } from "./catalog";
 
 /**
@@ -79,6 +80,7 @@ export class Session {
   private retry: ReturnType<typeof setTimeout> | undefined;
   private retryCount = 0;
   private refreshQueued = false;
+  private merger = new UnitMerger();
 
   connect(host: string, database: string): void {
     const epoch = ++this.epoch;
@@ -150,6 +152,12 @@ export class Session {
       connection.db.unit.onInsert(refresh);
       connection.db.unit.onUpdate(refresh);
       connection.db.unit.onDelete(refresh);
+      connection.db.unit_motion.onInsert(refresh);
+      connection.db.unit_motion.onUpdate(refresh);
+      connection.db.unit_motion.onDelete(refresh);
+      connection.db.unit_vitals.onInsert(refresh);
+      connection.db.unit_vitals.onUpdate(refresh);
+      connection.db.unit_vitals.onDelete(refresh);
       connection.db.resource_node.onInsert(refresh);
       connection.db.resource_node.onUpdate(refresh);
       connection.db.resource_node.onDelete(refresh);
@@ -196,6 +204,8 @@ export class Session {
           .onError(context => { this.matchReady = false; this.onNotice(context.event?.message ?? "Match subscription failed"); this.onChange(); })
           .subscribe([
             tables.unit.where(row => row.matchId.eq(nextMatch)),
+            tables.unit_motion.where(row => row.matchId.eq(nextMatch)),
+            tables.unit_vitals.where(row => row.matchId.eq(nextMatch)),
             tables.resource_node.where(row => row.matchId.eq(nextMatch)),
             tables.command.where(row => row.matchId.eq(nextMatch)),
             tables.match_sample.where(row => row.matchId.eq(nextMatch)),
@@ -205,7 +215,7 @@ export class Session {
     }
     this.snapshot = {
       rooms, players, me, room,
-      units: [...connection.db.unit.iter()].filter(row => row.matchId === nextMatch).map(row => row.data),
+      units: this.merger.collect(connection.db, nextMatch),
       nodes: [...connection.db.resource_node.iter()].filter(row => row.matchId === nextMatch).map(row => row.data),
       commands: [...connection.db.command.iter()].filter(row => row.matchId === nextMatch),
       samples: [...connection.db.match_sample.iter()].filter(row => row.matchId === nextMatch),

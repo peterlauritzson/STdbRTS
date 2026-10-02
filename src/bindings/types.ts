@@ -64,13 +64,10 @@ export const CreepPatchRow = __t.object("CreepPatchRow", {
 });
 export type CreepPatchRow = __Infer<typeof CreepPatchRow>;
 
-export const Entity = __t.object("Entity", {
+export const EntityCold = __t.object("EntityCold", {
   id: __t.u32(),
   owner: __t.u8(),
   kind: __t.string(),
-  x: __t.f32(),
-  y: __t.f32(),
-  hp: __t.i32(),
   get order() {
     return Order;
   },
@@ -81,11 +78,6 @@ export const Entity = __t.object("Entity", {
   get cargoKind() {
     return ResourceKind;
   },
-  returning: __t.bool(),
-  nextAttack: __t.u64(),
-  shotTick: __t.u64(),
-  shotX: __t.f32(),
-  shotY: __t.f32(),
   get production() {
     return __t.array(Production);
   },
@@ -93,9 +85,7 @@ export const Entity = __t.object("Entity", {
   stock: __t.u32(),
   expiresTick: __t.u64(),
   maxHp: __t.i32(),
-  shields: __t.i32(),
   maxShields: __t.i32(),
-  damagedTick: __t.u64(),
   warpTick: __t.u64(),
   arriveTick: __t.u64(),
   energy: __t.i32(),
@@ -103,15 +93,37 @@ export const Entity = __t.object("Entity", {
   get cast() {
     return __t.option(Cast);
   },
-  passiveReadyTick: __t.u64(),
+  kills: __t.u16(),
+});
+export type EntityCold = __Infer<typeof EntityCold>;
+
+export const EntityMotion = __t.object("EntityMotion", {
+  x: __t.f32(),
+  y: __t.f32(),
+});
+export type EntityMotion = __Infer<typeof EntityMotion>;
+
+export const EntityState = __t.object("EntityState", {
+  returning: __t.bool(),
+  nextAttack: __t.u64(),
   lastAttacker: __t.u32(),
   contactTick: __t.u64(),
-  kills: __t.u16(),
   anchorX: __t.f32(),
   anchorY: __t.f32(),
   anchorTick: __t.u64(),
 });
-export type Entity = __Infer<typeof Entity>;
+export type EntityState = __Infer<typeof EntityState>;
+
+export const EntityVitals = __t.object("EntityVitals", {
+  hp: __t.i32(),
+  shields: __t.i32(),
+  shotTick: __t.u64(),
+  shotX: __t.f32(),
+  shotY: __t.f32(),
+  damagedTick: __t.u64(),
+  passiveReadyTick: __t.u64(),
+});
+export type EntityVitals = __Infer<typeof EntityVitals>;
 
 // The tagged union or sum type for the algebraic type `Faction`.
 export const Faction = __t.enum("Faction", {
@@ -243,8 +255,35 @@ export const Unit = __t.object("Unit", {
   id: __t.u64(),
   matchId: __t.u64(),
   get data() {
-    return Entity;
+    return EntityCold;
   },
 });
 export type Unit = __Infer<typeof Unit>;
+
+export const UnitMotion = __t.object("UnitMotion", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  get data() {
+    return EntityMotion;
+  },
+});
+export type UnitMotion = __Infer<typeof UnitMotion>;
+
+export const UnitState = __t.object("UnitState", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  get data() {
+    return EntityState;
+  },
+});
+export type UnitState = __Infer<typeof UnitState>;
+
+export const UnitVitals = __t.object("UnitVitals", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  get data() {
+    return EntityVitals;
+  },
+});
+export type UnitVitals = __Infer<typeof UnitVitals>;
 
