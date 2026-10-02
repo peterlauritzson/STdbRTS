@@ -1,5 +1,5 @@
 import "../styles.css";
-import { createElement, createIcons, Keyboard, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, type IconNode } from "lucide";
+import { createElement, createIcons, Keyboard, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, type IconNode } from "lucide";
 import { ABILITIES, castRefusal, scheduledCasts, type AbilityKind } from "./abilities";
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
@@ -85,7 +85,11 @@ for (const kind of TRAINABLE) {
  * faction's labour is: the server refuses it by name, so a disabled button
  * would only be noise.
  */
-const BUILDABLE = ["barracks", "outpost", "turret", "factory", "lab", "sensor", "relay", "refinery", "bunker", "bastion", "spine"];
+// The order is the build card's hotkey order (Q W E R T Y U I over the visible
+// buttons): faction buildings that are hidden leave no gap, and the refinery
+// lands on U for every faction because each has exactly one building before it
+// (sensor, relay or spine) and the bunker or bastion after it.
+const BUILDABLE = ["barracks", "outpost", "turret", "factory", "lab", "sensor", "relay", "spine", "refinery", "bunker", "bastion"];
 for (const kind of BUILDABLE) {
   const definition = CATALOG[kind];
   const button = catalogButton(`build-${kind}`, definition.label, definition.cost, definition.seconds, definition.icon, describe(kind));

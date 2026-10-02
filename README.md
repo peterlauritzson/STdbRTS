@@ -61,7 +61,8 @@ with `npm run bot -- --room=123`. `--duration=30` limits a run to 30 seconds.
   Select mode; tap a destination in Order mode; drag the map in Pan mode.
 - Scroll wheel or zoom buttons zoom. Middle drag, Space+drag, arrow keys, or
   Pan mode move the camera. The minimap recenters the camera.
-- H centers on HQ at a useful zoom; S stops selected mobile units; D holds army units.
+- Backspace centers on HQ; S stops selected mobile units; H holds army units. Train
+  hotkeys are Q W E R D Z X (labour, then your six army units); B opens the build card.
 - Period or the hard-hat button selects an idle worker. Double-click selects
   owned units of the same type. The army button selects soldiers, scouts, and siege.
 - A (or the crosshair command button) arms attack-move, then click a destination.
@@ -81,6 +82,21 @@ with `npm run bot -- --room=123`. `--duration=30` limits a run to 30 seconds.
   Stop pauses construction. Select a site and use the trash button to cancel it
   for a 75% refund; destroyed sites yield no refund.
 - Research tab queues faction-wide upgrades in a completed laboratory.
+- Economy (older lines below still say "ore"): three currencies, one purpose each.
+  Material (mined, one miner per patch) buys labour, structures and research.
+  Catalyst buys the whole army and comes only from a refinery (U) built on a
+  catalyst deposit, no workers needed. Terrazine, a share of the material you mine
+  (12% Industrial, 10% otherwise), buys static defense: the shared turret and your
+  faction's bunker (Industrial), bastion (Network) or spine (Organic). Labour cannot
+  gather catalyst; right-clicking a deposit with it shows why.
+- Army, six units per faction, each with one passive that fires on its own (hover a
+  button for the line): Industrial soldier (Veteran), scout (Forced March), marksman
+  (Entrenchment), medic (Field Medic), siege (Shrapnel), bulwark (Guardian). Network
+  sentinel (Battle Blink), skimmer (Forced March), arcer (Ricochet), phantom (Phase
+  Shift), lancer (Overwatch), warden (Shield Aura). Organic swarmer (Predator),
+  spitter (Acid Splash), prowler (Forced March), devourer (Veteran), crusher
+  (Regrowth), behemoth (Death Burst). Barracks trains the first four, the factory
+  the last two. Details: [ROSTER-PASSIVES.md](docs/honeybadger/ROSTER-PASSIVES.md).
 - Select a production building and right-click ground or ore to set its rally.
   The flag button also arms rally targeting. Clear it with the crossed-out flag.
   New workers move to ground rallies or gather at ore rallies; soldiers attack-move

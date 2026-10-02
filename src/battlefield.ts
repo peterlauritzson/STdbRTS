@@ -1,7 +1,8 @@
 import type { CreepPatch, Entity, Node as Deposit, Order } from "./bindings/types";
 import { Session } from "./network";
 import { clamp, clampToMap, COLORS, countdown, VISUALS, WORLD_SIZE } from "./presentation";
-import { buildSite, cargoCapacity, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isCompletedHub, RALLIES, isLabour, isTemporary, mapIdentity, placementError, starts, terrain, type FactionName } from "./catalog";
+import { buildSite, cargoCapacity, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isCompletedHub, isVeteran, RALLIES, isLabour, isTemporary, mapIdentity, placementError, starts, terrain, veteranStacks, type FactionName } from "./catalog";
+import { entrenched, FX_MS, passiveEffects, removalEffects, type Fx } from "./passives";
 import { DOUBLE_TAP_MS, edgeDirection, groupAction, UNIT_KEYS } from "./hotkeys";
 import { creepGoneTick, lifetimeFraction, offCreep } from "./creep";
 import { ABILITIES, abilityOf, castingHub, maxEnergy, onCreep, recallable, scheduledCasts, type AbilityKind } from "./abilities";
@@ -74,6 +75,8 @@ export class Battlefield {
   private deaths: { x: number; y: number; radius: number; color: string; building: boolean; at: number }[] = [];
   /** When each unit last lost health, for a brief hit flash. */
   private hurtAt = new Map<number, number>();
+  /** Passive abilities that just fired (blink, splash, ricochet, burst, heal), drawn briefly. */
+  private fx: Fx[] = [];
   /** The previous update's units, to know the kind and owner of one that just vanished. */
   private lastSeen = new Map<number, Entity>();
   /** Id lookups over the current snapshot, rebuilt only when its arrays change. */
@@ -194,6 +197,7 @@ export class Battlefield {
       this.pings = [];
       this.flashes.clear();
       this.deaths = [];
+      this.fx = [];
       this.hurtAt.clear();
       this.lastTick = undefined;
     }
@@ -223,7 +227,18 @@ export class Battlefield {
       this.motions.delete(id);
       const last = this.lastSeen.get(id);
       // A snapshot that empties at once is a reconnect or a reset, not a battle.
-      if (last && units.length) this.deaths.push({ x: motion.to.x, y: motion.to.y, radius: VISUALS[last.kind]?.radius ?? 12, color: COLORS[last.owner] ?? "#ffffff", building: isBuilding(last.kind), at: now });
+      if (last && units.length) {
+        this.deaths.push({ x: motion.to.x, y: motion.to.y, radius: VISUALS[last.kind]?.radius ?? 12, color: COLORS[last.owner] ?? "#ffffff", building: isBuilding(last.kind), at: now });
+        this.fx.push(...removalEffects(last, motion.to, now));
+      }
+    }
+    // Passives that fired since the last update, read off the rows. Skipped on
+    // the first snapshot, which has nothing to compare against.
+    if (!initial) {
+      for (const unit of units) {
+        const before = this.lastSeen.get(unit.id);
+        if (before && before !== unit) this.fx.push(...passiveEffects(before, unit, units, now));
+      }
     }
     this.lastSeen = alive;
     this.pruneSelection();
@@ -827,6 +842,7 @@ export class Battlefield {
       : undefined;
     for (const unit of [...units].sort((left, right) => left.y - right.y)) this.drawUnit(unit, now);
     this.drawDeaths(now);
+    this.drawFx(now);
     this.drawPings(now);
     this.drawCreepCountdowns(now);
     if (this.targeting?.startsWith("build_") && this.pointer && this.session.snapshot.me) {
@@ -838,7 +854,8 @@ export class Battlefield {
       context.fillStyle = error ? "#ed7c8b55" : "#66dfba55";
       context.strokeStyle = error ? "#ed7c8b" : "#66dfba"; context.lineWidth = 2;
       context.fillRect(at.x - 35, at.y - 35, 70, 70); context.strokeRect(at.x - 35, at.y - 35, 70, 70);
-      if (kind === "turret") { context.beginPath(); context.arc(at.x, at.y, 210, 0, Math.PI * 2); context.stroke(); }
+      const reachOf = { turret: 210, bunker: 150, bastion: 190, spine: 170 }[kind];
+      if (reachOf) { context.beginPath(); context.arc(at.x, at.y, reachOf, 0, Math.PI * 2); context.stroke(); }
       // A zone projector previews the ground it will cover.
       const reach = kind === "relay" ? POWER_FIELD_RADIUS : kind === "sensor" ? SENSOR_FIELD_RADIUS : 0;
       if (reach) { context.setLineDash([8, 8]); context.beginPath(); context.arc(at.x, at.y, reach, 0, Math.PI * 2); context.stroke(); context.setLineDash([]); }
@@ -1040,6 +1057,24 @@ export class Battlefield {
     context.globalAlpha = 1;
   }
 
+  /** Passive abilities that just fired: a ring where an area effect landed, a line between two points. */
+  private drawFx(now: number): void {
+    if (!this.fx.length) return;
+    const context = this.context;
+    this.fx = this.fx.filter(effect => now - effect.at < FX_MS);
+    context.lineWidth = 2 / this.camera.zoom;
+    for (const effect of this.fx) {
+      const age = (now - effect.at) / FX_MS;
+      context.globalAlpha = (1 - age) * 0.9;
+      context.strokeStyle = effect.color;
+      context.beginPath();
+      if (effect.kind === "ring") context.arc(effect.x, effect.y, effect.radius * (0.45 + 0.55 * age), 0, Math.PI * 2);
+      else { context.moveTo(effect.x, effect.y); context.lineTo(effect.x2, effect.y2); }
+      context.stroke();
+    }
+    context.globalAlpha = 1;
+  }
+
   /** A unit that just vanished: a ring in its owner's colour and debris flying out. */
   private drawDeaths(now: number): void {
     const context = this.context;
@@ -1183,6 +1218,30 @@ export class Battlefield {
         context.rotate(Math.atan2(unit.shotY - unit.y, unit.shotX - unit.x));
         context.fillStyle = "#d7e2d4"; context.fillRect(0, -6, 38, 12); context.strokeRect(0, -6, 38, 12);
         context.rotate(-Math.atan2(unit.shotY - unit.y, unit.shotX - unit.x));
+      } else if (unit.kind === "bunker") {
+        // Industrial: a low armoured block with a firing slit and a short gun.
+        context.fillStyle = "#4a5750"; context.fillRect(-26, -12, 52, 28); context.strokeRect(-26, -12, 52, 28);
+        context.fillStyle = "#101c19"; context.fillRect(-16, -4, 32, 6);
+        context.fillStyle = color; context.fillRect(-26, -16, 52, 5);
+        const aim = Math.atan2(unit.shotY - unit.y, unit.shotX - unit.x);
+        context.rotate(aim); context.fillStyle = "#d7e2d4"; context.fillRect(0, -4, 28, 8); context.strokeRect(0, -4, 28, 8); context.rotate(-aim);
+        // Fortified: a small plate marker, always on.
+        context.fillStyle = "#e6d38a"; context.strokeStyle = "#243832"; context.lineWidth = 1.5;
+        context.beginPath(); context.moveTo(20, -30); context.lineTo(30, -30); context.lineTo(30, -23); context.lineTo(25, -18); context.lineTo(20, -23); context.closePath(); context.fill(); context.stroke();
+      } else if (unit.kind === "bastion") {
+        // Network: a crystal spire on a ring, the relay's family but armed.
+        context.fillStyle = "#1d3035"; context.beginPath(); context.arc(0, 6, 22, 0, Math.PI * 2); context.fill();
+        context.strokeStyle = color; context.lineWidth = 2; context.stroke();
+        context.fillStyle = "#cfefff"; context.strokeStyle = "#243832"; context.lineWidth = 2;
+        context.beginPath(); context.moveTo(0, -34); context.lineTo(12, -6); context.lineTo(0, 16); context.lineTo(-12, -6); context.closePath(); context.fill(); context.stroke();
+        context.beginPath(); context.moveTo(-18, -2); context.lineTo(-12, -16); context.lineTo(-8, -2); context.closePath(); context.moveTo(18, -2); context.lineTo(12, -16); context.lineTo(8, -2); context.closePath(); context.fill(); context.stroke();
+      } else if (unit.kind === "spine") {
+        // Organic: a cluster of three dark spikes in the owner's edge colour.
+        context.fillStyle = "#2a1f33"; context.strokeStyle = color; context.lineWidth = 2.5;
+        for (const [spikeX, height] of [[-14, 26], [0, 38], [14, 26]]) {
+          context.beginPath(); context.moveTo(spikeX - 9, 18); context.lineTo(spikeX, 18 - height); context.lineTo(spikeX + 9, 18); context.closePath(); context.fill(); context.stroke();
+        }
+        context.fillStyle = color; context.fillRect(-26, 18, 52, 5);
       } else if (unit.kind === "lab") {
         context.fillStyle = "#b5e4e5"; context.beginPath(); context.arc(0, -2, 21, Math.PI, 0); context.fill(); context.stroke();
         context.fillStyle = "#294547"; context.fillRect(-21, -2, 42, 13);
@@ -1305,6 +1364,52 @@ export class Battlefield {
       context.beginPath(); context.moveTo(-7, -14); context.lineTo(-11, -23); context.moveTo(7, -14); context.lineTo(11, -23); context.stroke();
       context.strokeStyle = "#172a26"; context.lineWidth = 2;
       for (const offset of [-7, 0, 7]) { context.beginPath(); context.moveTo(offset, -10); context.lineTo(offset, 6); context.stroke(); }
+    } else if (unit.kind === "marksman") {
+      // Industrial rifle: a narrow body behind a long thin barrel.
+      context.beginPath(); context.moveTo(0, -9); context.lineTo(8, 8); context.lineTo(-8, 8); context.closePath(); context.fill(); context.stroke();
+      context.fillStyle = "#e9eee0"; context.fillRect(-1.5, -26, 3, 20); context.strokeRect(-1.5, -26, 3, 20);
+      // Dug in: a base bar under the feet while Entrenchment is up.
+      if (entrenched(unit, this.session.snapshot.room?.tick ?? 0n)) { context.fillStyle = "#e6d38a"; context.fillRect(-radius, radius - 2, radius * 2, 3); }
+    } else if (unit.kind === "medic") {
+      // Industrial support: a round body with a white cross.
+      context.beginPath(); context.arc(0, 0, 11, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.fillStyle = "#f4fbf1"; context.fillRect(-2.5, -7, 5, 14); context.fillRect(-7, -2.5, 14, 5);
+    } else if (unit.kind === "bulwark") {
+      // Industrial tank: a broad plate with a heavy front shield.
+      context.fillStyle = "#132622"; context.fillRect(-19, -14, 8, 28); context.fillRect(11, -14, 8, 28);
+      context.fillStyle = color; context.fillRect(-13, -12, 26, 24); context.strokeRect(-13, -12, 26, 24);
+      context.fillStyle = "#cdd9cb"; context.beginPath(); context.moveTo(-14, -16); context.lineTo(14, -16); context.lineTo(10, -8); context.lineTo(-10, -8); context.closePath(); context.fill(); context.stroke();
+    } else if (unit.kind === "arcer") {
+      // Network caster: a small body under a three-pronged fork.
+      context.beginPath(); context.moveTo(0, -6); context.lineTo(8, 10); context.lineTo(-8, 10); context.closePath(); context.fill(); context.stroke();
+      context.strokeStyle = "#cfefff"; context.lineWidth = 2;
+      context.beginPath(); context.moveTo(0, -6); context.lineTo(0, -19); context.moveTo(0, -6); context.lineTo(-8, -16); context.moveTo(0, -6); context.lineTo(8, -16); context.stroke();
+    } else if (unit.kind === "phantom") {
+      // Network assassin: a thin, pale diamond with a dashed outline, half there.
+      context.globalAlpha *= 0.8;
+      context.beginPath(); context.moveTo(0, -17); context.lineTo(7, 0); context.lineTo(0, 15); context.lineTo(-7, 0); context.closePath(); context.fill();
+      context.strokeStyle = "#cfefff"; context.lineWidth = 1.5; context.setLineDash([3, 2]); context.stroke(); context.setLineDash([]);
+    } else if (unit.kind === "warden") {
+      // Network support walker: a hexagon with a ring that is its aura.
+      context.beginPath();
+      for (let corner = 0; corner < 6; corner++) { const angle = corner * Math.PI / 3; context.lineTo(Math.cos(angle) * 15, Math.sin(angle) * 15); }
+      context.closePath(); context.fill(); context.stroke();
+      context.strokeStyle = "#cfefff"; context.lineWidth = 2; context.beginPath(); context.arc(0, 0, 7, 0, Math.PI * 2); context.stroke();
+    } else if (unit.kind === "prowler") {
+      // Organic raider: a thin forward-swept blade.
+      context.beginPath(); context.moveTo(-3, -16); context.quadraticCurveTo(12, -2, 4, 13); context.quadraticCurveTo(0, 2, -6, 8); context.closePath(); context.fill(); context.stroke();
+      context.fillStyle = "#e6d9f2"; context.beginPath(); context.arc(-1, -4, 1.8, 0, Math.PI * 2); context.fill();
+    } else if (unit.kind === "devourer") {
+      // Organic bruiser: a round body with a toothed maw.
+      context.beginPath(); context.arc(0, 0, 12, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.fillStyle = "#1d1226"; context.beginPath(); context.arc(0, 3, 7, 0, Math.PI); context.closePath(); context.fill();
+      context.fillStyle = "#e6d9f2";
+      for (const tooth of [-5, -1.5, 2, 5.5]) { context.beginPath(); context.moveTo(tooth - 1.5, 3); context.lineTo(tooth, 7); context.lineTo(tooth + 1.5, 3); context.closePath(); context.fill(); }
+    } else if (unit.kind === "behemoth") {
+      // Organic siege beast: a huge domed shell crowned with spikes.
+      context.beginPath(); context.moveTo(-20, 12); context.bezierCurveTo(-24, -12, -10, -19, 0, -19); context.bezierCurveTo(10, -19, 24, -12, 20, 12); context.closePath(); context.fill(); context.stroke();
+      context.fillStyle = "#e6d9f2";
+      for (const spike of [-12, -4, 4, 12]) { context.beginPath(); context.moveTo(spike - 3, -14); context.lineTo(spike, -26); context.lineTo(spike + 3, -14); context.closePath(); context.fill(); }
     } else if (unit.kind === "scout") {
       context.beginPath(); context.moveTo(0, -18); context.lineTo(10, 12); context.lineTo(0, 6); context.lineTo(-10, 12); context.closePath(); context.fill(); context.stroke();
       context.fillStyle = "#e9eee0"; context.fillRect(-3, -6, 6, 9);
@@ -1342,6 +1447,11 @@ export class Battlefield {
       context.fillStyle = "#12201f"; context.fillRect(-radius, -radius - 15, radius * 2, 4);
       context.fillStyle = health > 0.3 ? color : "#ff8178";
       context.fillRect(-radius, -radius - 15, radius * 2 * clamp(health, 0, 1), 4);
+    }
+    // Veteran: one gold pip per three stacks, under the feet.
+    if (unit.kills > 0 && isVeteran(unit.kind)) {
+      context.fillStyle = "#ffd34d";
+      for (let pip = 0; pip < Math.ceil(veteranStacks(unit.kills) / 3); pip++) context.fillRect(-radius + pip * 4.5, radius + 5, 3, 3);
     }
     // Shields: a second, pale-blue bar directly above health, for Network only.
     // It brightens while regenerating so "coming back" reads without numbers.

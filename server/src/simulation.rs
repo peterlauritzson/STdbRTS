@@ -1155,9 +1155,9 @@ impl World {
                         return Err("HQ cannot receive movement orders".into());
                     }
                 }
-                "train_worker" | "train_drifter" | "train_harvester" | "train_soldier"
-                | "train_scout" | "train_siege" | "train_sentinel" | "train_skimmer"
-                | "train_lancer" | "train_swarmer" | "train_spitter" | "train_crusher" => {
+                // Any trainable kind, read from the rules rather than listed
+                // here, so a unit added to the roster cannot be forgotten.
+                _ if training.is_some_and(|kind| crate::unit_faction(kind).is_some()) => {
                     let trained = training.unwrap();
                     let faction = self.faction(unit.owner);
                     // A drifter can also be trained at any finished structure
@@ -1616,7 +1616,7 @@ impl World {
                         unit.anchor_x = unit.x;
                         unit.anchor_y = unit.y;
                         unit.anchor_tick = self.tick;
-                    } else if self.tick - unit.anchor_tick >= ENTRENCH_HOLD_TICKS {
+                    } else if self.tick.saturating_sub(unit.anchor_tick) >= ENTRENCH_HOLD_TICKS {
                         unit.passive_ready_tick = self.tick + ENTRENCH_LINGER_TICKS;
                     }
                 }
@@ -2361,10 +2361,11 @@ impl World {
                             y: node.y,
                             target: if is_labour(&kind) { node.id } else { 0 },
                         })
-                } else if trains_in_field(&kind) {
-                    // No rally: a drifter goes straight to work on the nearest
-                    // material deposit to where it appeared, which is what
-                    // makes training one at a far relay an expansion.
+                } else if is_labour(&kind) {
+                    // No rally: new labour goes straight to work on the nearest
+                    // material deposit to where it appeared. An idle worker by
+                    // the HQ is never what a player wants, and for a drifter
+                    // trained at a far relay it is what makes that an expansion.
                     self.nodes
                         .iter()
                         .filter(|node| node.kind == ResourceKind::Material && node.amount > 0)
@@ -2894,6 +2895,36 @@ mod tests {
     // measured distance regardless of who owned the field.
     const IN_FIELD: (f32, f32) = (700.0, 300.0);
     const TOWER: (f32, f32) = (600.0, 300.0);
+
+    #[test]
+    fn every_army_kind_of_every_faction_can_be_ordered_at_its_building() {
+        for faction in crate::FACTION_ROTATION {
+            let mut world = World::new_on_with_factions(crate::maps::default_map(), &[(0, faction)]);
+            idle_labour(&mut world);
+            world.balances.insert(0, Balance::new(5000, 5000));
+            let [x, y] = crate::maps::default_map().starts[0];
+            world.spawn(0, "barracks", x + 200.0, y);
+            let barracks = world.units.last().unwrap().id;
+            world.spawn(0, "factory", x, y + 200.0);
+            let factory = world.units.last().unwrap().id;
+            let roster: Vec<&str> = crate::ARMY_KINDS
+                .iter()
+                .copied()
+                .filter(|kind| crate::army_faction(kind) == Some(faction))
+                .collect();
+            assert_eq!(roster.len(), 6, "{faction} fields six army kinds");
+            for kind in roster {
+                let building = if crate::army_building(kind) == Some("factory") {
+                    factory
+                } else {
+                    barracks
+                };
+                world
+                    .validate(&command(1, 0, building, &format!("train_{kind}"), 0))
+                    .unwrap_or_else(|reason| panic!("{faction} cannot train {kind}: {reason}"));
+            }
+        }
+    }
 
     #[test]
     fn an_army_needs_the_building_that_makes_it() {

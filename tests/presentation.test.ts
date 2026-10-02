@@ -14,7 +14,8 @@ import { Faction, ResourceKind, type CreepPatch, type Entity, type Node } from "
 import { creepGoneTick, creepSecondsLeft, lifetimeFraction, offCreep } from "../src/creep";
 import { MAX_QUEUE, scheduledTraining, trainingSite } from "../src/production";
 import { ABILITIES, abilityOf, castingHub, castRefusal, HUB_MAX_ENERGY, maxEnergy, onCreep, recallable } from "../src/abilities";
-import { ARMY, armyBuilding, armyFaction, fights, isArmy, isTemporary, takesSupply, TEMPORARY_LIFETIME } from "../src/catalog";
+import { ARMY, armyBuilding, armyFaction, describe, FACTORY_KINDS, fights, isArmy, isStaticDefense, isTemporary, PASSIVE_OF, PASSIVES, passiveLine, ROSTER, takesSupply, TEMPORARY_LIFETIME, veteranStacks } from "../src/catalog";
+import { entrenched, passiveEffects, patientOf, removalEffects } from "../src/passives";
 
 test("client renders the same map matches are actually played on", () => {
   // The server freezes this id into every new room, so a mismatch here means
@@ -126,7 +127,7 @@ test("resource kinds map to the currency a deposit or a load actually holds", ()
 
 function unit(id: number, owner: number, kind: string, stock = 0): Entity {
   const hp = kind === "hq" ? 1200 : 60;
-  return { id, owner, kind, x: 220, y: 220, hp, maxHp: hp, shields: 0, maxShields: 0, damagedTick: 0n, warpTick: 0n, arriveTick: 0n, order: { kind: "stop", x: 0, y: 0, target: 0 }, queue: [], cargo: 0, cargoKind: ResourceKind.Material, returning: false, nextAttack: 0n, shotTick: 0n, shotX: 0, shotY: 0, production: [], constructionRemaining: 0n, stock, expiresTick: 0n, energy: 0, abilityReadyTick: 0n, cast: undefined };
+  return { id, owner, kind, x: 220, y: 220, hp, maxHp: hp, shields: 0, maxShields: 0, damagedTick: 0n, warpTick: 0n, arriveTick: 0n, order: { kind: "stop", x: 0, y: 0, target: 0 }, queue: [], cargo: 0, cargoKind: ResourceKind.Material, returning: false, nextAttack: 0n, shotTick: 0n, shotX: 0, shotY: 0, production: [], constructionRemaining: 0n, stock, expiresTick: 0n, energy: 0, abilityReadyTick: 0n, cast: undefined, passiveReadyTick: 0n, lastAttacker: 0, contactTick: 0n, kills: 0, anchorX: 220, anchorY: 220, anchorTick: 0n };
 }
 
 function deposit(id: number, x: number, y: number, amount: number, currency: Currency = "material"): Node {
@@ -866,7 +867,7 @@ test("power fields come from Network relays and hubs only, and only once finishe
   assert.ok(!powered(1, 200, 200, fields), "owner only");
   assert.ok(!powered(0, 1000, 200, fields), "an unfinished relay projects nothing");
   assert.ok(!powered(1, 2400, 2000, fields), "a sensor field is not power");
-  assert.deepEqual(BUILDING_FACTION, { sensor: "industrial", relay: "network" });
+  assert.deepEqual(BUILDING_FACTION, { sensor: "industrial", relay: "network", bunker: "industrial", bastion: "network", spine: "organic" });
 });
 
 test("a drifter trains at any finished structure in its owner's field; nothing else changes", () => {
@@ -1041,4 +1042,108 @@ test("no command-card key collides with a unit command key", () => {
   // The build card owns its keys only while it is open, so T and Y may repeat
   // teleport and rally there; it must never take attack, stop or hold.
   for (const key of BUILD_KEYS) assert.ok(![UNIT_KEYS.attackMove, UNIT_KEYS.stop, UNIT_KEYS.hold].includes(key as never));
+});
+
+// --- Roster and passives -----------------------------------------------------
+
+test("every roster kind is priced in catalyst, trained at the right building, and states one passive", () => {
+  for (const faction of FACTIONS) {
+    assert.equal(ROSTER[faction].length, 6);
+    assert.deepEqual(ARMY[faction], [ROSTER[faction][0], ROSTER[faction][1], ROSTER[faction][4]], "the original trio is still the trio");
+    for (const kind of ROSTER[faction]) {
+      const definition = CATALOG[kind];
+      assert.ok(definition.cost.catalyst > 0 && definition.cost.material === 0 && definition.cost.terrazine === 0, `${kind} costs catalyst only`);
+      assert.equal(armyFaction(kind), faction);
+      assert.equal(armyBuilding(kind), FACTORY_KINDS.includes(kind) ? "factory" : "barracks");
+      assert.ok(canProduce(kind, armyBuilding(kind)!, faction), `${faction} trains ${kind}`);
+      for (const other of FACTIONS) if (other !== faction) assert.ok(!canProduce(kind, armyBuilding(kind)!, other), `${other} trained ${kind}`);
+      assert.ok(PASSIVES[PASSIVE_OF[kind]], `${kind} has a passive`);
+      assert.ok(describe(kind).includes(passiveLine(kind)!), `${kind} tooltip states its passive`);
+      assert.ok(describe(kind).length < 220, `${kind} tooltip stays short`);
+    }
+    // Labour plus the roster must each get a key, with none repeated.
+    assert.ok(TRAIN_KEYS.length >= 1 + ROSTER[faction].length);
+  }
+  assert.equal(new Set(TRAIN_KEYS).size, TRAIN_KEYS.length);
+  assert.equal(CATALOG.medic.cost.catalyst, 100);
+  assert.ok(isArmy("medic") && fights("medic"));
+});
+
+test("static defenses are terrazine-priced, faction-gated, and each faction sees at most one button per build key", () => {
+  for (const [kind, faction] of [["bunker", "industrial"], ["bastion", "network"], ["spine", "organic"]] as const) {
+    assert.ok(isStaticDefense(kind) && CATALOG[kind].building);
+    assert.deepEqual(CATALOG[kind].cost, { material: 0, catalyst: 0, terrazine: 125 });
+    assert.equal(BUILDING_FACTION[kind], faction);
+  }
+  const shared = ["barracks", "outpost", "turret", "factory", "lab", "refinery"];
+  for (const faction of FACTIONS) {
+    const visible = [...shared, ...Object.keys(BUILDING_FACTION).filter(kind => BUILDING_FACTION[kind] === faction)];
+    assert.ok(visible.length <= BUILD_KEYS.length, `${faction} has ${visible.length} build buttons for ${BUILD_KEYS.length} keys`);
+  }
+});
+
+test("passive tooltips come from one table and every passive id is used", () => {
+  const used = new Set(Object.values(PASSIVE_OF));
+  for (const id of Object.keys(PASSIVES)) assert.ok(used.has(id), `${id} is unused`);
+  for (const id of used) assert.ok(PASSIVES[id], `${id} has no text`);
+  assert.equal(passiveLine("worker"), undefined);
+  assert.equal(describe("worker"), CATALOG.worker.role);
+  assert.equal(veteranStacks(40), 15);
+});
+
+test("passive feedback is derived from how a row changed", () => {
+  const now = 1000;
+  const sentinel = { ...unit(1, 0, "sentinel"), x: 100, y: 100 };
+  // Blink: the cooldown restarted and the unit is far from where it was.
+  const blinked = passiveEffects(sentinel, { ...sentinel, x: 260, passiveReadyTick: 1240n }, [], now);
+  assert.deepEqual(blinked.map(effect => effect.kind).sort(), ["line", "ring"]);
+  assert.equal(blinked.find(effect => effect.kind === "line")!.x, 100);
+  assert.equal(passiveEffects(sentinel, { ...sentinel, x: 101 }, [], now).length, 0, "an ordinary step is nothing");
+  // Splash and ricochet: a new shot draws the area at the target.
+  const siege = unit(2, 0, "siege");
+  const shelled = passiveEffects(siege, { ...siege, shotTick: 50n, shotX: 400, shotY: 300 }, [], now);
+  assert.deepEqual(shelled.map(effect => [effect.kind, effect.x, effect.y, effect.radius]), [["ring", 400, 300, 45]]);
+  const arcer = unit(3, 0, "arcer");
+  assert.equal(passiveEffects(arcer, { ...arcer, shotTick: 9n }, [], now)[0].radius, 70);
+  assert.equal(passiveEffects(arcer, arcer, [], now).length, 0);
+  // Death burst on removal; nothing for other kinds.
+  assert.equal(removalEffects(unit(4, 0, "behemoth"), { x: 5, y: 6 }, now)[0].radius, 70);
+  assert.equal(removalEffects(unit(5, 0, "soldier"), { x: 5, y: 6 }, now).length, 0);
+  // Medic: a green line to the most-damaged friendly within 90, never the medic, a building or an enemy.
+  const medic = { ...unit(6, 0, "medic"), x: 0, y: 0, hp: 10 };
+  const hurt = { ...unit(7, 0, "soldier"), x: 30, y: 0, hp: 20 };
+  const worse = { ...unit(8, 0, "soldier"), x: 0, y: 40, hp: 5 };
+  const far = { ...unit(9, 0, "soldier"), x: 200, y: 0, hp: 1 };
+  const foe = { ...unit(10, 1, "soldier"), x: 10, y: 0, hp: 1 };
+  assert.equal(patientOf(medic, [medic, hurt, worse, far, foe])!.id, 8);
+  const healed = passiveEffects(medic, { ...medic, passiveReadyTick: 10n }, [medic, hurt, worse], now);
+  assert.deepEqual(healed.map(effect => [effect.kind, effect.x2, effect.y2]), [["line", 0, 40]]);
+  // Entrenchment: a marker while the bonus runs.
+  assert.ok(entrenched({ kind: "marksman", passiveReadyTick: 100n }, 99n));
+  assert.ok(!entrenched({ kind: "marksman", passiveReadyTick: 100n }, 100n));
+  assert.ok(!entrenched({ kind: "soldier", passiveReadyTick: 100n }, 0n));
+});
+
+test("the practice bot fields the new roster and builds its faction's defense once terrazine allows", () => {
+  const defenses = { industrial: "bunker", network: "bastion", organic: "spine" } as const;
+  for (const faction of FACTIONS) {
+    const kind = LABOUR[faction];
+    const gathering = (id: number): Entity => ({ ...unit(id, 0, kind), order: { kind: "gather", x: 0, y: 0, target: 1 } });
+    const done = (id: number, building: string): Entity => ({ ...unit(id, 0, building), x: 400 + id * 3, y: 220 });
+    const base: Entity[] = [hubWith(1, 0, "hq", HUB_STOCK_CAP), ...[2, 3, 4, 5, 6, 7].map(gathering), done(20, "barracks"), done(21, "barracks"), done(22, "factory"), done(23, "outpost"), ...[30, 31, 32].map(id => unit(id, 0, ARMY[faction][0]))];
+    const deposits = [deposit(1, 300, 300, 4000)];
+    const poor = chooseOrders(0, faction, purse(0, 0, 124), base, deposits, new Set());
+    assert.ok(!poor.some(decision => decision.order.kind === `build_${defenses[faction]}`), `${faction} built a defense it cannot afford`);
+    const rich = chooseOrders(0, faction, purse(0, 0, 125), base, deposits, new Set());
+    assert.ok(rich.some(decision => decision.order.kind === `build_${defenses[faction]}`), `${faction} did not build its ${defenses[faction]}`);
+    // A big army: both barracks and the factory ask for the new units too.
+    const grown = [...base, ...Array.from({ length: 12 }, (_, index) => unit(100 + index, 0, ARMY[faction][0]))];
+    const asked = new Set<string>();
+    for (let round = 0; round < 6; round++) {
+      const extra = [...grown, ...Array.from({ length: round * 3 }, (_, index) => unit(200 + index, 0, ROSTER[faction][round % 2 ? 2 : 1]))];
+      for (const decision of chooseOrders(0, faction, purse(0, 4000), extra, deposits, new Set())) if (decision.order.kind.startsWith("train_")) asked.add(decision.order.kind.slice(6));
+    }
+    assert.ok(asked.has(ROSTER[faction][2]) || asked.has(ROSTER[faction][5]), `${faction} never trained a new unit: ${[...asked]}`);
+    for (const trained of asked) assert.ok(ROSTER[faction].includes(trained) || trained === LABOUR[faction], `${faction} trained ${trained}`);
+  }
 });

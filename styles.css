@@ -260,7 +260,11 @@ body.no-touch .targeting-state { bottom: 14px; }
 button[aria-pressed="true"] { border-color: var(--accent); background: #4a603d; }
 .targeting-state { position: absolute; bottom: 68px; left: 50%; transform: translateX(-50%); color: #e7f5b4; background: #14231eec; border-bottom: 2px solid var(--accent); padding: 9px 12px; font-size: 11px; pointer-events: none; white-space: nowrap; }
 .production-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
-#building-buttons { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* Three columns for training too: with six army kinds per faction plus
+   labour, two columns pushed the last row out of the deck. */
+#building-buttons, #training-buttons { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.production-section { overflow-y: auto; }
+#training-buttons button { min-height: 36px; padding-block: 2px; line-height: 1.15; }
 .production-buttons button { position: relative; min-height: 44px; }
 .production-buttons button, .production-buttons button span { min-width: 0; overflow-wrap: anywhere; }
 .industry-tabs { display: flex; gap: 4px; margin-bottom: 6px; }

@@ -1,8 +1,11 @@
 import type { CreepPatch, Entity, Node, Order } from "../src/bindings/types";
 import { abilityOf, castingHub, onCreep, recallable } from "../src/abilities";
-import { affords, ARMY, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isCompletedHub, isHub, isLabour, LABOUR, MAX_UNITS, placementError, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, type Cost, type FactionName } from "../src/catalog";
+import { affords, ARMY, ROSTER, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isCompletedHub, isHub, isLabour, LABOUR, MAX_UNITS, placementError, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, type Cost, type FactionName } from "../src/catalog";
 
 export interface Decision { units: number[]; order: Order }
+
+/** Each faction's own static defense, bought with terrazine once it allows. */
+const FACTION_DEFENSE: Readonly<Record<FactionName, string>> = { industrial: "bunker", network: "bastion", organic: "spine" };
 
 /** What the bot needs to cast hub abilities; without it, it casts nothing. */
 export interface AbilityView { tick: bigint; creep: readonly CreepPatch[] }
@@ -151,6 +154,7 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
   const count = (kind: string) => owned.filter(unit => unit.kind === kind).length;
   const ready = (kind: string) => owned.some(unit => unit.kind === kind && unit.constructionRemaining === 0n);
   const refineries = count("refinery");
+  const defense = FACTION_DEFENSE[faction];
   const refineryAt = refinerySite(hq, owner, units, nodes);
   const desired = refineryAt && refineries < REFINERIES_FIRST ? "refinery"
     : workers.length >= 4 && !has("barracks") ? "barracks"
@@ -160,9 +164,11 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
     // floated thousands of material by 3:00 that it had nowhere to spend.
     : has("factory") && count("barracks") < 2 ? "barracks"
     : refineryAt && has("barracks") && refineries < REFINERIES_WANTED ? "refinery"
-    // Turrets cost terrazine, a by-product of mining that only builds up over
-    // time: one is built when it is affordable, never waited for.
-    : soldiers.length >= 3 && !has("turret") && affords(available, CATALOG.turret.cost) ? "turret"
+    // Static defense costs terrazine, a by-product of mining that only builds
+    // up over time: each is built when it is affordable, never waited for. The
+    // faction's own defense comes first and the shared turret after it.
+    : soldiers.length >= 3 && !has(defense) && affords(available, CATALOG[defense].cost) ? defense
+    : soldiers.length >= 3 && has(defense) && !has("turret") && affords(available, CATALOG.turret.cost) ? "turret"
     : ready("factory") && !has("lab") ? "lab" : undefined;
   // Command-card construction: the order names the HQ and the site raises
   // itself, so no labour is taken off mining. A command still scheduled for
@@ -224,9 +230,14 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
   // exactly as currency is.
   const stockLeft = new Map(owned.filter(unit => isHub(unit.kind)).map(unit => [unit.id, unit.stock]));
   // The bot fields its own faction's army: a fighter, some raiders, and the
-  // factory's heavy unit.
+  // factory's heavy unit, with one more barracks unit and one more factory unit
+  // mixed in so the new roster (and its passives) is actually played.
   const [fighter, raider, heavy] = ARMY[faction];
+  const [, , barracksExtra, , , factoryExtra] = ROSTER[faction];
   const scouts = soldiers.filter(unit => unit.kind === raider).length;
+  const extras = soldiers.filter(unit => unit.kind === barracksExtra).length;
+  const heavies = soldiers.filter(unit => unit.kind === heavy).length;
+  const factoryExtras = soldiers.filter(unit => unit.kind === factoryExtra).length;
   // What each building would make this pass, or nothing. Every answer is
   // checked against `canProduce`, the mirror of `rules::producer`, so the bot
   // never spends an order on something the server refuses: a hub trains only
@@ -234,8 +245,8 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
   // one not at all), a barracks soldiers and scouts, a factory siege.
   const wantedFrom = (building: string): string | undefined => {
     const kind = isHub(building) ? (labourCount < labourTarget ? labour : undefined)
-      : building === "barracks" ? (scouts < soldiers.length / 4 ? raider : fighter)
-      : building === "factory" ? heavy : undefined;
+      : building === "barracks" ? (scouts < soldiers.length / 4 ? raider : extras < soldiers.length / 4 ? barracksExtra : fighter)
+      : building === "factory" ? (factoryExtras < heavies ? factoryExtra : heavy) : undefined;
     return kind && canProduce(kind, building, faction) ? kind : undefined;
   };
   for (const producer of owned.filter(unit => unit.constructionRemaining === 0n && isBuilding(unit.kind) && !assigned.has(unit.id))) {

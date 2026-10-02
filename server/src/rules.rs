@@ -558,6 +558,14 @@ pub fn is_army(kind: &str) -> bool {
 
 /// The faction an army unit belongs to, or `None` for anything that is not
 /// army. Nobody can train another faction's army.
+/// Every army kind, all factions. Must list exactly the kinds
+/// [`army_faction`] accepts; a test checks every one can be ordered.
+pub const ARMY_KINDS: [&str; 18] = [
+    "soldier", "scout", "siege", "marksman", "medic", "bulwark", "sentinel", "skimmer", "lancer",
+    "arcer", "phantom", "warden", "swarmer", "spitter", "crusher", "prowler", "devourer",
+    "behemoth",
+];
+
 pub fn army_faction(kind: &str) -> Option<Faction> {
     match kind {
         "soldier" | "scout" | "siege" | "marksman" | "medic" | "bulwark" => {
