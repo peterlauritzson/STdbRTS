@@ -1,5 +1,6 @@
 pub mod maps;
 pub mod navigation;
+pub mod spatial;
 pub mod simulation;
 
 /// Identity of the frozen rules surface. Bump this whenever anything a running
@@ -8,7 +9,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 13;
+pub const RULESET_VERSION: u32 = 16;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -108,20 +109,24 @@ impl std::fmt::Display for Faction {
 }
 
 // ---------------------------------------------------------------------------
-// Economy: two currencies
+// Economy: three currencies, one purpose each
 // ---------------------------------------------------------------------------
 
-/// Which of the two spendable currencies a deposit yields and a worker carries.
-///
-/// `Material` funds expansion, workers and the basic army and is widely
-/// distributed; `Catalyst` funds technology and specialists and comes from
-/// fewer, more contested sites. There is no conversion between them.
+/// Which of the three spendable currencies. One currency per purpose, by the
+/// author's decision (2026-09-29): `Material` buys labour, structures and
+/// research and is mined by labour, one miner to a patch; `Catalyst` buys the
+/// army and is extracted only by a refinery standing on a deposit; `Terrazine`
+/// buys static defense and is earned as a by-product of material mined.
+/// There is no conversion between them.
 #[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ResourceKind {
     Material,
     Catalyst,
+    /// Static-defense currency. Never a deposit: it is only ever paid out as a
+    /// by-product of material mined (see [`terrazine_owed`]).
+    Terrazine,
 }
 
 impl Default for ResourceKind {
@@ -137,6 +142,7 @@ impl ResourceKind {
         match self {
             Self::Material => "material",
             Self::Catalyst => "catalyst",
+            Self::Terrazine => "terrazine",
         }
     }
 }
@@ -153,28 +159,54 @@ impl std::fmt::Display for ResourceKind {
 pub struct Cost {
     pub material: u32,
     pub catalyst: u32,
+    pub terrazine: u32,
 }
 
 impl Cost {
     pub const ZERO: Self = Self::new(0, 0);
 
+    /// A price in material and catalyst; use [`Cost::terrazine`] for the third.
     pub const fn new(material: u32, catalyst: u32) -> Self {
-        Self { material, catalyst }
+        Self {
+            material,
+            catalyst,
+            terrazine: 0,
+        }
     }
 
-    /// A price that costs no catalyst at all.
+    /// A price that costs material only.
     pub const fn material(material: u32) -> Self {
         Self::new(material, 0)
     }
 
+    /// A price that costs catalyst only: every army unit.
+    pub const fn catalyst(catalyst: u32) -> Self {
+        Self::new(0, catalyst)
+    }
+
+    /// A price that costs terrazine only: static defense.
+    pub const fn terrazine(terrazine: u32) -> Self {
+        Self {
+            material: 0,
+            catalyst: 0,
+            terrazine,
+        }
+    }
+
     pub const fn is_free(self) -> bool {
-        self.material == 0 && self.catalyst == 0
+        self.material == 0 && self.catalyst == 0 && self.terrazine == 0
+    }
+
+    /// Sum of every currency, for rules keyed on how big a price is.
+    pub const fn total(self) -> u32 {
+        self.material + self.catalyst + self.terrazine
     }
 
     pub const fn amount(self, kind: ResourceKind) -> u32 {
         match kind {
             ResourceKind::Material => self.material,
             ResourceKind::Catalyst => self.catalyst,
+            ResourceKind::Terrazine => self.terrazine,
         }
     }
 
@@ -182,7 +214,11 @@ impl Cost {
     /// arithmetic only: no balance ever carries a fractional unit.
     pub fn percent(self, percent: u32) -> Self {
         let share = |value: u32| (value as u64 * percent as u64 / 100) as u32;
-        Self::new(share(self.material), share(self.catalyst))
+        Self {
+            material: share(self.material),
+            catalyst: share(self.catalyst),
+            terrazine: share(self.terrazine),
+        }
     }
 }
 
@@ -190,10 +226,11 @@ impl std::ops::Add for Cost {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        Self::new(
-            self.material.saturating_add(other.material),
-            self.catalyst.saturating_add(other.catalyst),
-        )
+        Self {
+            material: self.material.saturating_add(other.material),
+            catalyst: self.catalyst.saturating_add(other.catalyst),
+            terrazine: self.terrazine.saturating_add(other.terrazine),
+        }
     }
 }
 
@@ -208,23 +245,36 @@ impl std::iter::Sum for Cost {
 pub struct Balance {
     pub material: u32,
     pub catalyst: u32,
+    pub terrazine: u32,
 }
 
 impl Balance {
     pub const fn new(material: u32, catalyst: u32) -> Self {
-        Self { material, catalyst }
+        Self {
+            material,
+            catalyst,
+            terrazine: 0,
+        }
+    }
+
+    /// The same holdings with `terrazine` set.
+    pub const fn with_terrazine(self, terrazine: u32) -> Self {
+        Self { terrazine, ..self }
     }
 
     pub const fn amount(self, kind: ResourceKind) -> u32 {
         match kind {
             ResourceKind::Material => self.material,
             ResourceKind::Catalyst => self.catalyst,
+            ResourceKind::Terrazine => self.terrazine,
         }
     }
 
-    /// True only when *both* currencies cover the price.
+    /// True only when *every* currency covers the price.
     pub const fn covers(self, cost: Cost) -> bool {
-        self.material >= cost.material && self.catalyst >= cost.catalyst
+        self.material >= cost.material
+            && self.catalyst >= cost.catalyst
+            && self.terrazine >= cost.terrazine
     }
 
     /// All-or-nothing payment: a price that is not fully covered leaves the
@@ -235,18 +285,21 @@ impl Balance {
         }
         self.material -= cost.material;
         self.catalyst -= cost.catalyst;
+        self.terrazine -= cost.terrazine;
         true
     }
 
     pub fn credit(&mut self, cost: Cost) {
         self.material = self.material.saturating_add(cost.material);
         self.catalyst = self.catalyst.saturating_add(cost.catalyst);
+        self.terrazine = self.terrazine.saturating_add(cost.terrazine);
     }
 
     pub fn credit_kind(&mut self, kind: ResourceKind, amount: u32) {
         match kind {
             ResourceKind::Material => self.material = self.material.saturating_add(amount),
             ResourceKind::Catalyst => self.catalyst = self.catalyst.saturating_add(amount),
+            ResourceKind::Terrazine => self.terrazine = self.terrazine.saturating_add(amount),
         }
     }
 
@@ -256,14 +309,72 @@ impl Balance {
             Some(ResourceKind::Material)
         } else if self.catalyst < cost.catalyst {
             Some(ResourceKind::Catalyst)
+        } else if self.terrazine < cost.terrazine {
+            Some(ResourceKind::Terrazine)
         } else {
             None
         }
     }
 }
 
+/// Starting catalyst, so the opening fighter is not the only army a player can
+/// have before their first refinery has paid anything. 100 buys one basic
+/// fighter. **Experimental.**
+pub const STARTING_CATALYST: u32 = 100;
+
+/// Terrazine price of a turret. **Experimental.**
+pub const TURRET_TERRAZINE_COST: u32 = 100;
+/// Terrazine price of a faction static defense (bunker, bastion, spine).
+/// **Experimental.**
+pub const FACTION_DEFENSE_TERRAZINE_COST: u32 = 125;
+/// Material price of a refinery. **Experimental.**
+pub const REFINERY_MATERIAL_COST: u32 = 75;
+
 /// What every player starts a match holding.
-pub const STARTING_BALANCE: Balance = Balance::new(250, 0);
+pub const STARTING_BALANCE: Balance = Balance::new(250, STARTING_CATALYST);
+
+// --- Terrazine and the refinery ---------------------------------------------
+//
+// Every value is **experimental**.
+
+/// Share of the material a player mines that is also paid as terrazine.
+pub const TERRAZINE_BYPRODUCT_PERCENT: u32 = 10;
+/// The Industrial share: the settled "+20%" of the base rate (10 * 1.2).
+pub const TERRAZINE_BYPRODUCT_PERCENT_INDUSTRIAL: u32 = 12;
+
+/// The by-product percentage a player of `faction` earns.
+pub const fn terrazine_percent(faction: Faction) -> u32 {
+    match faction {
+        Faction::Industrial => TERRAZINE_BYPRODUCT_PERCENT_INDUSTRIAL,
+        _ => TERRAZINE_BYPRODUCT_PERCENT,
+    }
+}
+
+/// Terrazine a player is owed in total for `collected_material` mined so far.
+/// Derived from the cumulative figure rather than per delivery, so rounding
+/// never loses a remainder: the caller pays the difference between this and what
+/// it has already paid.
+pub fn terrazine_owed(collected_material: u32, faction: Faction) -> u32 {
+    (collected_material as u64 * terrazine_percent(faction) as u64 / 100) as u32
+}
+
+/// A refinery extracts this much catalyst from its deposit...
+pub const REFINERY_YIELD: u32 = 4;
+/// ...every this many ticks (4 per 10 ticks is 24 a minute per refinery).
+pub const REFINERY_INTERVAL_TICKS: u64 = 10;
+/// How far from a catalyst deposit a refinery may be ordered and still snap
+/// onto it. Generous, so a click near the deposit works.
+pub const REFINERY_SNAP_DISTANCE: f32 = 60.0;
+
+// --- One miner per patch -----------------------------------------------------
+
+/// A labour unit that finds its material patch taken looks for a free patch
+/// within this distance of **the unit** (the same base), else waits. Measured
+/// from the unit and not from the taken patch: the expanse and crossfire
+/// mineral arcs are about 420 across, so a radius around one patch left the
+/// far end of a line unreachable and workers piled up waiting while patches
+/// there stood free.
+pub const MINER_RETARGET_RADIUS: f32 = 450.0;
 
 /// Material charged per repair pulse (see `World::step`).
 pub const REPAIR_COST: Cost = Cost::material(1);
@@ -287,7 +398,8 @@ pub fn death_refund(kind: &str) -> Cost {
 // --- Opening stipend --------------------------------------------------------
 //
 // Every player is paid material on a fixed schedule so that an opening does not
-// depend solely on worker travel. Accumulated in whole units against the tick
+// depend solely on worker travel. After the two opening phases the second rate
+// continues permanently as base income. Accumulated in whole units against the tick
 // counter: no float ever reaches a balance.
 
 pub const STIPEND_FIRST_RATE_PER_MINUTE: u32 = 200;
@@ -297,7 +409,8 @@ pub const STIPEND_SECOND_PHASE_SECONDS: u64 = 90;
 
 /// Last tick of the 200/minute phase.
 pub const STIPEND_FIRST_PHASE_END_TICK: u64 = STIPEND_FIRST_PHASE_SECONDS * TICKS_PER_SECOND;
-/// Last tick of the 100/minute phase; nothing is paid afterwards.
+/// Last tick of the 100/minute second phase; the same rate then continues
+/// forever as permanent base income.
 pub const STIPEND_SECOND_PHASE_END_TICK: u64 =
     STIPEND_FIRST_PHASE_END_TICK + STIPEND_SECOND_PHASE_SECONDS * TICKS_PER_SECOND;
 /// One material every this many ticks during the first phase (1200/200 = 6).
@@ -315,10 +428,9 @@ pub fn stipend_payment(tick: u64) -> u32 {
         return 0;
     } else if tick <= STIPEND_FIRST_PHASE_END_TICK {
         STIPEND_FIRST_INTERVAL_TICKS
-    } else if tick <= STIPEND_SECOND_PHASE_END_TICK {
-        STIPEND_SECOND_INTERVAL_TICKS
     } else {
-        return 0;
+        // Permanent base income: the second-phase rate never ends.
+        STIPEND_SECOND_INTERVAL_TICKS
     };
     u32::from(tick % interval == 0)
 }
@@ -328,9 +440,7 @@ pub fn stipend_payment(tick: u64) -> u32 {
 /// `stipend_payment`.
 pub fn stipend_total(tick: u64) -> u64 {
     let first = tick.min(STIPEND_FIRST_PHASE_END_TICK) / STIPEND_FIRST_INTERVAL_TICKS;
-    let capped = tick.min(STIPEND_SECOND_PHASE_END_TICK);
-    let second =
-        capped.saturating_sub(STIPEND_FIRST_PHASE_END_TICK) / STIPEND_SECOND_INTERVAL_TICKS;
+    let second = tick.saturating_sub(STIPEND_FIRST_PHASE_END_TICK) / STIPEND_SECOND_INTERVAL_TICKS;
     first + second
 }
 
@@ -354,11 +464,11 @@ pub const NAV_CELL_SIZE: f32 = 40.0;
 /// smaller cannot hold four starts 220 apart with their margins.
 pub const MIN_WORLD_SIZE: f32 = WORLD_SIZE;
 
-/// Largest accepted map extent. The static validator's BFS is O(cells) and the
-/// runtime grid is rebuilt every tick, so the ceiling is a cost bound rather
-/// than a geometric one. Note that 4096 is itself *not* a multiple of
-/// `NAV_CELL_SIZE`: the largest extent that satisfies both rules is 4080.
-pub const MAX_WORLD_SIZE: f32 = 4096.0;
+/// Largest accepted map extent. The static validator's BFS and every runtime
+/// route field are O(cells), so the ceiling is a cost bound rather
+/// than a geometric one. 9600 (3x crossfire, the `expanse` map) is a whole
+/// number of `NAV_CELL_SIZE` cells, so the ceiling is itself a legal extent.
+pub const MAX_WORLD_SIZE: f32 = 9600.0;
 
 /// Accepts a map's declared extent, or says why it cannot be simulated.
 ///
@@ -383,15 +493,32 @@ pub fn validate_world_size(size: f32) -> Result<f32, String> {
     Ok(size)
 }
 
-pub const MAX_UNITS: usize = 120;
+pub const MAX_UNITS: usize = 400;
 pub const MAX_QUEUE: usize = 8;
-pub const MAX_BUILDINGS: usize = 16;
+pub const MAX_BUILDINGS: usize = 150;
 
 pub fn is_building(kind: &str) -> bool {
     matches!(
         kind,
-        "hq" | "barracks" | "factory" | "turret" | "outpost" | "lab" | "sensor" | "relay"
+        "hq" | "barracks"
+            | "factory"
+            | "turret"
+            | "outpost"
+            | "lab"
+            | "sensor"
+            | "relay"
+            | "refinery"
+            | "bunker"
+            | "bastion"
+            | "spine"
     )
+}
+
+/// A building that shoots: the shared turret and each faction's own static
+/// defense. Every one is bought with terrazine and fires through the same
+/// code path in `step_on`, which is the one place that asks this.
+pub fn is_static_defense(kind: &str) -> bool {
+    matches!(kind, "turret" | "bunker" | "bastion" | "spine")
 }
 
 /// The faction a building belongs to, or `None` for one every faction may
@@ -403,7 +530,9 @@ pub fn is_building(kind: &str) -> bool {
 pub fn building_faction(kind: &str) -> Option<Faction> {
     match kind {
         "sensor" => Some(Faction::Industrial),
-        "relay" => Some(Faction::Network),
+        "relay" | "bastion" => Some(Faction::Network),
+        "bunker" => Some(Faction::Industrial),
+        "spine" => Some(Faction::Organic),
         _ => None,
     }
 }
@@ -431,9 +560,15 @@ pub fn is_army(kind: &str) -> bool {
 /// army. Nobody can train another faction's army.
 pub fn army_faction(kind: &str) -> Option<Faction> {
     match kind {
-        "soldier" | "scout" | "siege" => Some(Faction::Industrial),
-        "sentinel" | "skimmer" | "lancer" => Some(Faction::Network),
-        "swarmer" | "spitter" | "crusher" => Some(Faction::Organic),
+        "soldier" | "scout" | "siege" | "marksman" | "medic" | "bulwark" => {
+            Some(Faction::Industrial)
+        }
+        "sentinel" | "skimmer" | "lancer" | "arcer" | "phantom" | "warden" => {
+            Some(Faction::Network)
+        }
+        "swarmer" | "spitter" | "crusher" | "prowler" | "devourer" | "behemoth" => {
+            Some(Faction::Organic)
+        }
         _ => None,
     }
 }
@@ -453,11 +588,12 @@ pub const fn basic_fighter(faction: Faction) -> &'static str {
     }
 }
 
-/// The building an army kind is trained at: the factory for the three
-/// anti-structure units, the barracks for everything else.
+/// The building an army kind is trained at: the factory for the heavy unit of
+/// each faction (the anti-structure unit and the tank, support walker or siege
+/// beast beside it), the barracks for everything else.
 pub fn army_building(kind: &str) -> Option<&'static str> {
     match kind {
-        "siege" | "lancer" | "crusher" => Some("factory"),
+        "siege" | "lancer" | "crusher" | "bulwark" | "warden" | "behemoth" => Some("factory"),
         _ if is_army(kind) => Some("barracks"),
         _ => None,
     }
@@ -502,9 +638,7 @@ pub fn fights(kind: &str) -> bool {
 /// Total cost of a known kind in both currencies, the figure death spawns are
 /// keyed on. Unknown kinds are 0.
 fn total_cost(kind: &str) -> u32 {
-    stats(kind).map_or(0, |definition| {
-        definition.cost.material + definition.cost.catalyst
-    })
+    stats(kind).map_or(0, |definition| definition.cost.total())
 }
 
 /// Below this total cost a death on creep spawns nothing.
@@ -515,7 +649,7 @@ pub const DEATH_SPAWN_BRUTE_COST: u32 = 200;
 /// What one of the creep owner's own units spawns when it dies on that owner's
 /// creep: `(kind, count)`, or `None` for nothing.
 ///
-/// Keyed on total cost (material + catalyst): under 50 nothing (the free
+/// Keyed on total cost (every currency): under 50 nothing (the free
 /// harvester, the drifter), 50 to 199 one `brood`, 200 and up one `brute`.
 /// Buildings, research and temporary units never spawn — the last is what
 /// makes recursion impossible.
@@ -707,11 +841,11 @@ pub struct Stats {
     pub training_ticks: u64,
 }
 
-/// Experimental first-pass prices for the dual-currency economy. These are
-/// starting points for playtesting, not balanced values. Material funds
-/// expansion, workers and the basic army; catalyst gates the factory, the lab,
-/// siege units and every technology. Training times and hit points are
-/// unchanged from the single-currency skirmish.
+/// Experimental first-pass prices for the three-currency economy. These are
+/// starting points for playtesting, not balanced values. One currency per
+/// purpose: labour, structures and research cost material only; every army unit
+/// costs catalyst only (its former material and catalyst parts summed); the
+/// turret costs terrazine only. Training times and hit points are unchanged.
 pub fn stats(kind: &str) -> Option<Stats> {
     match kind {
         "research_weapons" | "research_armor" | "research_logistics" => Some(Stats {
@@ -720,34 +854,63 @@ pub fn stats(kind: &str) -> Option<Stats> {
             range: 0.0,
             damage: 0,
             cooldown: 0,
-            cost: Cost::new(100, 50),
+            cost: Cost::material(150),
             training_ticks: 300,
         }),
-        "barracks" | "factory" | "turret" | "outpost" | "lab" | "sensor" | "relay" => {
+        "barracks" | "factory" | "turret" | "bunker" | "bastion" | "spine" | "outpost" | "lab"
+        | "sensor" | "relay" | "refinery" => {
             let (hp, cost, training_ticks) = match kind {
                 "barracks" => (700, Cost::material(150), 160),
-                "factory" => (900, Cost::new(200, 50), 240),
-                "turret" => (500, Cost::material(125), 140),
+                "factory" => (900, Cost::material(250), 240),
+                // Static defense is bought with terrazine alone, the by-product
+                // of mining, never with material.
+                "turret" => (500, Cost::terrazine(TURRET_TERRAZINE_COST), 140),
+                // Faction static defense: terrazine, like the turret. The
+                // bunker trades range for hit points, the bastion is a
+                // Network structure (half shields) and the spine an Organic
+                // one that feeds on what it hits.
+                "bunker" => (800, Cost::terrazine(FACTION_DEFENSE_TERRAZINE_COST), 160),
+                "bastion" => (500, Cost::terrazine(FACTION_DEFENSE_TERRAZINE_COST), 150),
+                "spine" => (600, Cost::terrazine(FACTION_DEFENSE_TERRAZINE_COST), 150),
+                // Extracts catalyst from the deposit it stands on, with no
+                // workers. Material only, like every structure.
+                "refinery" => (400, Cost::material(REFINERY_MATERIAL_COST), 120),
                 "outpost" => (650, Cost::material(100), 120),
                 // Industrial's territory projector. A support structure, not a
                 // fortress: it has the least health of any building, it cannot
                 // shoot, produce or receive cargo, and the only thing it does
                 // is stand somewhere useful. Catalyst-gated at the same 50 as
                 // the lab and the factory, because territory is technology.
-                "sensor" => (450, Cost::new(125, 50), 140),
+                "sensor" => (450, Cost::material(175), 140),
                 // Network's territory projector, and the pylon of this game:
                 // cheap, quick, fragile, and the thing the whole faction's
                 // mobility hangs off. Material only, unlike the sensor,
                 // because a Network player needs one before anything else.
                 "relay" => (300, Cost::material(75), 100),
-                _ => (650, Cost::new(150, 50), 200),
+                _ => (650, Cost::material(200), 200),
             };
             Some(Stats {
                 hp,
                 speed: 0.0,
-                range: if kind == "turret" { 210.0 } else { 0.0 },
-                damage: if kind == "turret" { 16 } else { 0 },
-                cooldown: 18,
+                range: match kind {
+                    "turret" => 210.0,
+                    "bunker" => 150.0,
+                    "bastion" => 190.0,
+                    "spine" => 170.0,
+                    _ => 0.0,
+                },
+                damage: match kind {
+                    "turret" => 16,
+                    "bunker" => 20,
+                    "bastion" => 14,
+                    "spine" => 12,
+                    _ => 0,
+                },
+                cooldown: match kind {
+                    "bastion" => 14,
+                    "spine" => 12,
+                    _ => 18,
+                },
                 cost,
                 training_ticks,
             })
@@ -758,7 +921,7 @@ pub fn stats(kind: &str) -> Option<Stats> {
             range: 85.0,
             damage: 10,
             cooldown: 10,
-            cost: Cost::material(80),
+            cost: Cost::catalyst(80),
             training_ticks: 70,
         }),
         "siege" => Some(Stats {
@@ -767,7 +930,7 @@ pub fn stats(kind: &str) -> Option<Stats> {
             range: 260.0,
             damage: 32,
             cooldown: 50,
-            cost: Cost::new(150, 50),
+            cost: Cost::catalyst(200),
             training_ticks: 160,
         }),
         "hq" => Some(Stats {
@@ -819,7 +982,7 @@ pub fn stats(kind: &str) -> Option<Stats> {
             range: 115.0,
             damage: 26,
             cooldown: 13,
-            cost: Cost::material(150),
+            cost: Cost::catalyst(150),
             training_ticks: 130,
         }),
         // Network raider: the fastest unit in the game, fragile, and triple
@@ -830,7 +993,7 @@ pub fn stats(kind: &str) -> Option<Stats> {
             range: 75.0,
             damage: 8,
             cooldown: 8,
-            cost: Cost::material(90),
+            cost: Cost::catalyst(90),
             training_ticks: 70,
         }),
         // Network anti-structure: long range, slow, triple against buildings.
@@ -840,7 +1003,7 @@ pub fn stats(kind: &str) -> Option<Stats> {
             range: 250.0,
             damage: 36,
             cooldown: 40,
-            cost: Cost::new(175, 75),
+            cost: Cost::catalyst(250),
             training_ticks: 180,
         }),
         // Organic. A swarmer is cheap, fast melee meant to come in numbers.
@@ -852,7 +1015,7 @@ pub fn stats(kind: &str) -> Option<Stats> {
             range: 20.0,
             damage: 7,
             cooldown: 8,
-            cost: Cost::material(50),
+            cost: Cost::catalyst(50),
             training_ticks: 45,
         }),
         // Organic support: out-ranges every fighter, from behind the swarm.
@@ -862,7 +1025,7 @@ pub fn stats(kind: &str) -> Option<Stats> {
             range: 150.0,
             damage: 15,
             cooldown: 16,
-            cost: Cost::material(90),
+            cost: Cost::catalyst(90),
             training_ticks: 80,
         }),
         // Organic anti-structure: heavy melee, triple against buildings, and
@@ -873,7 +1036,7 @@ pub fn stats(kind: &str) -> Option<Stats> {
             range: 28.0,
             damage: 30,
             cooldown: 18,
-            cost: Cost::new(175, 75),
+            cost: Cost::catalyst(250),
             training_ticks: 180,
         }),
         "soldier" => Some(Stats {
@@ -882,8 +1045,100 @@ pub fn stats(kind: &str) -> Option<Stats> {
             range: 105.0,
             damage: 18,
             cooldown: 12,
-            cost: Cost::material(100),
+            cost: Cost::catalyst(100),
             training_ticks: 100,
+        }),
+        // ---- The second tier of each faction's roster (ROSTER-PASSIVES.md).
+        // Industrial. A long-range rifle that is fragile until it digs in.
+        "marksman" => Some(Stats {
+            hp: 100,
+            speed: 100.0,
+            range: 170.0,
+            damage: 24,
+            cooldown: 18,
+            cost: Cost::catalyst(125),
+            training_ticks: 110,
+        }),
+        // Industrial support: no weapon at all. Its passive is the whole unit.
+        "medic" => Some(Stats {
+            hp: 90,
+            speed: 110.0,
+            range: 0.0,
+            damage: 0,
+            cooldown: 0,
+            cost: Cost::catalyst(100),
+            training_ticks: 90,
+        }),
+        // Industrial tank: slow, tough, a weak gun, and it soaks for its friends.
+        "bulwark" => Some(Stats {
+            hp: 420,
+            speed: 80.0,
+            range: 90.0,
+            damage: 14,
+            cooldown: 14,
+            cost: Cost::catalyst(225),
+            training_ticks: 170,
+        }),
+        // Network chain caster: modest hits that jump between clustered enemies.
+        "arcer" => Some(Stats {
+            hp: 90,
+            speed: 100.0,
+            range: 130.0,
+            damage: 20,
+            cooldown: 16,
+            cost: Cost::catalyst(140),
+            training_ticks: 110,
+        }),
+        // Network assassin: fast, hits hard at close range, and ignores the
+        // first blow of every fight.
+        "phantom" => Some(Stats {
+            hp: 100,
+            speed: 150.0,
+            range: 40.0,
+            damage: 30,
+            cooldown: 14,
+            cost: Cost::catalyst(160),
+            training_ticks: 120,
+        }),
+        // Network support walker: barely armed, it keeps its neighbours' shields up.
+        "warden" => Some(Stats {
+            hp: 300,
+            speed: 85.0,
+            range: 100.0,
+            damage: 10,
+            cooldown: 16,
+            cost: Cost::catalyst(250),
+            training_ticks: 180,
+        }),
+        // Organic raider: the cheapest and fastest of the Organic barracks units.
+        "prowler" => Some(Stats {
+            hp: 70,
+            speed: 170.0,
+            range: 20.0,
+            damage: 9,
+            cooldown: 9,
+            cost: Cost::catalyst(80),
+            training_ticks: 60,
+        }),
+        // Organic bruiser: tougher than a swarmer, and it grows with every kill.
+        "devourer" => Some(Stats {
+            hp: 130,
+            speed: 120.0,
+            range: 24.0,
+            damage: 14,
+            cooldown: 12,
+            cost: Cost::catalyst(120),
+            training_ticks: 85,
+        }),
+        // Organic siege beast: heavy, slow, and it takes a crowd with it.
+        "behemoth" => Some(Stats {
+            hp: 450,
+            speed: 80.0,
+            range: 60.0,
+            damage: 28,
+            cooldown: 24,
+            cost: Cost::catalyst(275),
+            training_ticks: 190,
         }),
         // Temporary units spawned by a death on creep (see `death_spawn`).
         // Never trained, so no training time; free, so `lost`, `killed` and
@@ -922,10 +1177,13 @@ pub fn stats(kind: &str) -> Option<Stats> {
 /// does (author's decision, 2026-09-25): every structure and the drifter are
 /// half and half (nexus, pylon, cannon, probe), the skimmer too (adept 70/70),
 /// while the sentinel and the lancer are a third shields (zealot 100/50,
-/// immortal 200/100). A kind not listed here gets half.
+/// immortal 200/100). A kind not listed here gets half. Of the roster
+/// expansion, the arcer and the phantom (light casters and assassins) keep the
+/// half-and-half default and the warden (a heavy walker like the lancer) takes
+/// a third.
 pub fn network_shield_percent(kind: &str) -> i32 {
     match kind {
-        "sentinel" | "lancer" => 33,
+        "sentinel" | "lancer" | "warden" => 33,
         _ => 50,
     }
 }
@@ -961,6 +1219,267 @@ pub fn vitals(kind: &str, faction: Faction) -> (i32, i32) {
 /// where 100 is outside any field. Integer arithmetic, so every machine agrees.
 pub const fn shield_regen(percent: i32) -> i32 {
     SHIELD_REGEN_PER_INTERVAL * percent / 100
+}
+
+// ---------------------------------------------------------------------------
+// Passives: one ability per kind that fires on its own
+// ---------------------------------------------------------------------------
+//
+// Nothing here is ordered and nothing needs a hotkey. Every passive is decided
+// inside `step_on` from start-of-tick state, in unit-id order, so replays stay
+// deterministic; every radius query goes through the per-tick spatial index;
+// every bit of passive state lives on the entity (see `Entity`). A passive
+// never targets or affects buildings unless its doc says so, and temporary
+// units have none. Every number is **experimental** (ROSTER-PASSIVES.md).
+
+/// The passive ability of a kind. The one table the client and the tests read:
+/// `passive(kind)` below is the only place a kind is bound to one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Passive {
+    /// Kills raise attack rate and move speed, up to a cap.
+    Veteran,
+    /// Faster after a long spell out of combat.
+    ForcedMarch,
+    /// A share of each hit lands on other enemies around the target.
+    Splash,
+    /// Holding one spot grants armour and range.
+    Entrenchment,
+    /// Heals the most-damaged friendly nearby on a timer.
+    FieldMedic,
+    /// Takes a share of the damage dealt to friendly units nearby.
+    Guardian,
+    /// Teleports away from the attacker when nearly dead.
+    BattleBlink,
+    /// The first attack after a long rest hits harder.
+    Overwatch,
+    /// Hits jump to further enemies near the target.
+    Ricochet,
+    /// The first hit of every few seconds is absorbed whole.
+    PhaseShift,
+    /// Friendly shields nearby regenerate even under fire.
+    ShieldAura,
+    /// Heals itself by a share of the damage it deals.
+    Predator,
+    /// Regenerates hit points after a spell without damage.
+    Regrowth,
+    /// Damages every enemy around it as it dies.
+    DeathBurst,
+    /// Always armoured.
+    Fortified,
+}
+
+/// The one passive of `kind`, or `None` for labour, temporary units and the
+/// buildings that have none. Each kind has exactly one; duplicates across
+/// factions are allowed.
+pub fn passive(kind: &str) -> Option<Passive> {
+    match kind {
+        "soldier" | "devourer" => Some(Passive::Veteran),
+        "scout" | "skimmer" | "prowler" => Some(Passive::ForcedMarch),
+        "siege" | "spitter" => Some(Passive::Splash),
+        "marksman" => Some(Passive::Entrenchment),
+        "medic" => Some(Passive::FieldMedic),
+        "bulwark" => Some(Passive::Guardian),
+        "sentinel" => Some(Passive::BattleBlink),
+        "lancer" => Some(Passive::Overwatch),
+        "arcer" | "bastion" => Some(Passive::Ricochet),
+        "phantom" => Some(Passive::PhaseShift),
+        "warden" => Some(Passive::ShieldAura),
+        "swarmer" | "spine" => Some(Passive::Predator),
+        "crusher" => Some(Passive::Regrowth),
+        "behemoth" => Some(Passive::DeathBurst),
+        "bunker" => Some(Passive::Fortified),
+        _ => None,
+    }
+}
+
+// --- Veteran -----------------------------------------------------------------
+
+/// Attack rate and move speed gained per stack, in percent.
+pub const VETERAN_PERCENT_PER_STACK: u32 = 3;
+/// Most stacks a unit can hold. A stack is one kill (see `Entity::kills`).
+pub const VETERAN_MAX_STACKS: u32 = 15;
+
+/// Stacks held after `kills` kills, capped.
+pub const fn veteran_stacks(kills: u16) -> u32 {
+    if kills as u32 > VETERAN_MAX_STACKS {
+        VETERAN_MAX_STACKS
+    } else {
+        kills as u32
+    }
+}
+
+/// Percent of base speed and attack rate a veteran has: 100 with no stacks.
+pub const fn veteran_percent(kills: u16) -> u32 {
+    100 + VETERAN_PERCENT_PER_STACK * veteran_stacks(kills)
+}
+
+/// A cooldown shortened to the veteran's attack rate: a rate of `p`% means a
+/// cooldown of `100 / p` of the base, rounded to the nearest whole tick and
+/// never below one.
+pub const fn veteran_cooldown(cooldown: u64, kills: u16) -> u64 {
+    let percent = veteran_percent(kills) as u64;
+    let shortened = (cooldown * 100 + percent / 2) / percent;
+    if shortened < 1 {
+        1
+    } else {
+        shortened
+    }
+}
+
+// --- Forced March ------------------------------------------------------------
+
+/// Ticks without dealing or taking damage before the march speed-up applies.
+pub const FORCED_MARCH_IDLE_TICKS: u64 = 10 * TICKS_PER_SECOND;
+/// Move speed while marching, in percent of base.
+pub const FORCED_MARCH_SPEED_PERCENT: u32 = 140;
+
+// --- Shrapnel and Acid Splash ------------------------------------------------
+
+/// Percent of a hit that lands on each other enemy within the splash radius.
+pub const SPLASH_PERCENT: i32 = 50;
+
+/// Splash radius around the target: siege shells (Shrapnel) are wider than a
+/// spitter's glob (Acid Splash). `None` for kinds without the passive.
+pub fn splash_radius(kind: &str) -> Option<f32> {
+    match kind {
+        "siege" => Some(45.0),
+        "spitter" => Some(35.0),
+        _ => None,
+    }
+}
+
+// --- Entrenchment ------------------------------------------------------------
+
+/// Ticks of holding within [`ENTRENCH_RADIUS`] of one spot before it applies.
+pub const ENTRENCH_HOLD_TICKS: u64 = 150;
+/// How far the unit may drift from its anchor and still count as holding.
+pub const ENTRENCH_RADIUS: f32 = 30.0;
+/// Armour while entrenched.
+pub const ENTRENCH_ARMOUR: i32 = 2;
+/// Extra weapon range while entrenched.
+pub const ENTRENCH_RANGE: f32 = 25.0;
+/// Ticks the bonus lingers after the unit moves off its anchor.
+pub const ENTRENCH_LINGER_TICKS: u64 = 2 * TICKS_PER_SECOND;
+
+// --- Field Medic -------------------------------------------------------------
+
+/// Ticks between heals.
+pub const MEDIC_INTERVAL_TICKS: u64 = 10;
+/// Reach of the heal.
+pub const MEDIC_RANGE: f32 = 90.0;
+/// Hit points restored per heal.
+pub const MEDIC_HEAL: i32 = 3;
+
+// --- Guardian ----------------------------------------------------------------
+
+/// Friendly units this close to a bulwark are guarded.
+pub const GUARDIAN_RADIUS: f32 = 90.0;
+/// Percent of each hit on a guarded unit that lands on the bulwark instead,
+/// rounded down per hit, so the two shares always sum to the original hit.
+pub const GUARDIAN_PERCENT: i32 = 30;
+
+// --- Battle Blink ------------------------------------------------------------
+
+/// Blink when hit points plus shields fall to this percent of the maximum.
+pub const BLINK_THRESHOLD_PERCENT: i32 = 30;
+/// How far the blink carries the unit from where it stood.
+pub const BLINK_DISTANCE: f32 = 160.0;
+/// Ticks before the unit can blink again.
+pub const BLINK_COOLDOWN_TICKS: u64 = 12 * TICKS_PER_SECOND;
+
+// --- Overwatch ---------------------------------------------------------------
+
+/// Ticks without attacking before the next attack opens an overwatch window.
+pub const OVERWATCH_IDLE_TICKS: u64 = 10 * TICKS_PER_SECOND;
+/// How long the window lasts once it opens.
+pub const OVERWATCH_WINDOW_TICKS: u64 = TICKS_PER_SECOND;
+/// Damage dealt inside the window, in percent of normal.
+pub const OVERWATCH_PERCENT: i32 = 150;
+
+// --- Ricochet ----------------------------------------------------------------
+
+/// How far from the previous target a bounce may reach.
+pub const RICOCHET_RADIUS: f32 = 70.0;
+/// Percent of the hit each successive bounce deals.
+pub const RICOCHET_PERCENTS: [i32; 2] = [50, 25];
+
+/// How many bounces a hit makes: the arcer two, the bastion one.
+pub fn ricochet_bounces(kind: &str) -> usize {
+    match kind {
+        "arcer" => 2,
+        "bastion" => 1,
+        _ => 0,
+    }
+}
+
+// --- Phase Shift -------------------------------------------------------------
+
+/// Ticks before the phantom's next hit is absorbed.
+pub const PHASE_COOLDOWN_TICKS: u64 = 8 * TICKS_PER_SECOND;
+
+// --- Shield Aura -------------------------------------------------------------
+
+/// Reach of the aura.
+pub const SHIELD_AURA_RADIUS: f32 = 110.0;
+/// Shields restored per [`SHIELD_REGEN_INTERVAL_TICKS`] under the aura, with no
+/// damage delay. One per interval is 2 per second. Several wardens do not stack.
+pub const SHIELD_AURA_PER_INTERVAL: i32 = 1;
+
+// --- Predator ----------------------------------------------------------------
+
+/// Percent of damage dealt that heals the attacker: hit points first, the
+/// overflow into shields if (and only if) it has any.
+pub const PREDATOR_PERCENT: i32 = 30;
+
+// --- Regrowth ----------------------------------------------------------------
+
+/// Ticks without taking damage before regrowth starts.
+pub const REGROWTH_DELAY_TICKS: u64 = 5 * TICKS_PER_SECOND;
+/// Percent of maximum hit points restored each second once it has started.
+pub const REGROWTH_PERCENT_PER_SECOND: i32 = 2;
+
+// --- Death Burst -------------------------------------------------------------
+
+/// Reach of the burst.
+pub const DEATH_BURST_RADIUS: f32 = 70.0;
+/// Damage to each enemy non-building inside it, before armour.
+pub const DEATH_BURST_DAMAGE: i32 = 80;
+
+// --- Fortified ---------------------------------------------------------------
+
+/// Armour a bunker always has.
+pub const FORTIFIED_ARMOUR: i32 = 2;
+
+/// Armour a bunker has from its own passive: the constant part. Entrenchment is
+/// stateful and is added by the simulation.
+pub fn fortified_armour(kind: &str) -> i32 {
+    if passive(kind) == Some(Passive::Fortified) {
+        FORTIFIED_ARMOUR
+    } else {
+        0
+    }
+}
+
+/// One-line description of each kind's passive for tooltips and docs: name and
+/// effect. The client keeps its own copy keyed the same way (`catalog.ts`).
+pub fn passive_name(passive: Passive) -> &'static str {
+    match passive {
+        Passive::Veteran => "Veteran",
+        Passive::ForcedMarch => "Forced March",
+        Passive::Splash => "Splash",
+        Passive::Entrenchment => "Entrenchment",
+        Passive::FieldMedic => "Field Medic",
+        Passive::Guardian => "Guardian",
+        Passive::BattleBlink => "Battle Blink",
+        Passive::Overwatch => "Overwatch",
+        Passive::Ricochet => "Ricochet",
+        Passive::PhaseShift => "Phase Shift",
+        Passive::ShieldAura => "Shield Aura",
+        Passive::Predator => "Predator",
+        Passive::Regrowth => "Regrowth",
+        Passive::DeathBurst => "Death Burst",
+        Passive::Fortified => "Fortified",
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1676,11 +2195,29 @@ pub const MOVEMENT_OVERLAP_IS_STRONGEST: bool = true;
 /// the movement concept — the sensor bonus and creep's off-creep slow — and a
 /// soldier's speed must not walk the dozens of creep patches an Organic player
 /// spreads. Only a creep-dependent unit's speed visits creep at all.
+///
+/// An effect carried by many zones — a carpet of sensors or relays — is also
+/// bucketed by area (`by_area`), so a point query visits only the zones whose
+/// circle can reach its bucket rather than every zone on the map. Buckets hold
+/// positions in ascending order, and every query folds order-independently, so
+/// the bucketed answer is the linear one.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ZoneField {
     zones: Vec<Zone>,
     by_concept: [Vec<usize>; ZoneConcept::ALL.len()],
     by_effect: [Vec<usize>; ZoneEffect::SLOTS],
+    by_area: [Option<std::collections::BTreeMap<(i32, i32), Vec<usize>>>; ZoneEffect::SLOTS],
+}
+
+/// Side of a `ZoneField::by_area` bucket.
+const ZONE_BUCKET: f32 = 256.0;
+/// An effect is bucketed once more zones than this carry it.
+const ZONE_BUCKET_THRESHOLD: usize = 16;
+/// Zones wider than this are never bucketed (they would fill too many buckets).
+const ZONE_BUCKET_MAX_RADIUS: f32 = 2048.0;
+
+fn zone_bucket(x: f32, y: f32) -> (i32, i32) {
+    ((x / ZONE_BUCKET).floor() as i32, (y / ZONE_BUCKET).floor() as i32)
 }
 
 impl ZoneField {
@@ -1706,10 +2243,40 @@ impl ZoneField {
                 }
             }
         }
+        let by_area = std::array::from_fn(|slot| {
+            let list: &Vec<usize> = &by_effect[slot];
+            if list.len() <= ZONE_BUCKET_THRESHOLD
+                || list.iter().any(|at| {
+                    let zone = &zones[*at];
+                    !(zone.radius.is_finite()
+                        && zone.x.is_finite()
+                        && zone.y.is_finite()
+                        && zone.radius <= ZONE_BUCKET_MAX_RADIUS)
+                })
+            {
+                return None;
+            }
+            let mut buckets = std::collections::BTreeMap::<(i32, i32), Vec<usize>>::new();
+            for at in list {
+                let zone = &zones[*at];
+                // One unit of slack, so rounding at a bucket edge never drops
+                // a zone from a bucket its circle reaches.
+                let reach = zone.radius.max(0.0) + 1.0;
+                let (left, top) = zone_bucket(zone.x - reach, zone.y - reach);
+                let (right, bottom) = zone_bucket(zone.x + reach, zone.y + reach);
+                for row in top..=bottom {
+                    for column in left..=right {
+                        buckets.entry((column, row)).or_default().push(*at);
+                    }
+                }
+            }
+            Some(buckets)
+        });
         Self {
             zones,
             by_concept,
             by_effect,
+            by_area,
         }
     }
 
@@ -1748,7 +2315,13 @@ impl ZoneField {
     /// so an effect nothing has declared yields nothing rather than
     /// accidentally matching, and a query never visits another effect's zones.
     fn active(&self, slot: usize, subject: u8, x: f32, y: f32) -> impl Iterator<Item = &Zone> {
-        self.by_effect[slot]
+        let candidates: &[usize] = match &self.by_area[slot] {
+            Some(buckets) => buckets
+                .get(&zone_bucket(x, y))
+                .map_or(&[][..], Vec::as_slice),
+            None => &self.by_effect[slot],
+        };
+        candidates
             .iter()
             .map(move |at| &self.zones[*at])
             .filter(move |zone| zone.applies_to(subject) && zone.contains(x, y))
@@ -1947,6 +2520,59 @@ pub fn validate_command_delay(delay: u64) -> Result<u64, CommandDelayError> {
 mod tests {
     use super::*;
 
+    /// A field with many sensors, relays and creep patches answers every point
+    /// query identically whether it walks its area buckets or every zone.
+    #[test]
+    fn bucketed_zone_queries_match_the_linear_walk() {
+        let mut state = 0x1234_5678_9abc_def1u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 40) as f32 / (1u64 << 24) as f32
+        };
+        let mut zones = Vec::new();
+        for source in 1..=180u32 {
+            let owner = (source % 3) as u8;
+            let (x, y) = (next() * 3200.0, next() * 3200.0);
+            let template = match source % 3 {
+                0 => zone_template("sensor").unwrap(),
+                1 => power_field(),
+                _ => creep_zone(),
+            };
+            let radius = if source % 3 == 2 { next() * 300.0 } else { template.radius };
+            zones.push(Zone { source, owner, x, y, radius, template });
+        }
+        let bucketed = ZoneField::from_sources(zones.into_iter());
+        assert!(bucketed.by_area.iter().filter(|slot| slot.is_some()).count() >= 3);
+        let mut linear = bucketed.clone();
+        linear.by_area = Default::default();
+        for _ in 0..20_000 {
+            let (x, y) = (next() * 3400.0 - 100.0, next() * 3400.0 - 100.0);
+            for subject in 0..3u8 {
+                for kind in ["soldier", "harvester"] {
+                    assert_eq!(
+                        bucketed.movement_multiplier(subject, kind, x, y).to_bits(),
+                        linear.movement_multiplier(subject, kind, x, y).to_bits()
+                    );
+                }
+                assert_eq!(bucketed.powered(subject, x, y), linear.powered(subject, x, y));
+                assert_eq!(
+                    bucketed.spawns_on_death(subject, x, y),
+                    linear.spawns_on_death(subject, x, y)
+                );
+                assert_eq!(
+                    bucketed.shield_regen_percent(subject, x, y),
+                    linear.shield_regen_percent(subject, x, y)
+                );
+                assert_eq!(
+                    bucketed.restores_on_death(subject, x, y),
+                    linear.restores_on_death(subject, x, y)
+                );
+            }
+        }
+    }
+
     #[test]
     fn rejects_nonfinite_and_out_of_bounds_destinations() {
         for (x, y) in [
@@ -1976,7 +2602,7 @@ mod tests {
 
     #[test]
     fn world_size_is_a_bounded_multiple_of_the_navigation_cell() {
-        for accepted in [1600.0, 1640.0, 2000.0, 3200.0, 4080.0] {
+        for accepted in [1600.0, 1640.0, 2000.0, 3200.0, 4080.0, 9600.0] {
             assert_eq!(validate_world_size(accepted), Ok(accepted));
         }
         // Below the floor, above the ceiling, not a whole cell, not a number.
@@ -1984,7 +2610,7 @@ mod tests {
             1560.0,
             0.0,
             -3200.0,
-            4120.0,
+            9640.0,
             3210.0,
             3200.5,
             f32::NAN,
@@ -1995,11 +2621,8 @@ mod tests {
                 "{rejected} should be rejected"
             );
         }
-        // 4096 is the inclusive ceiling but is not itself a whole number of
-        // 40-unit cells, so it fails the second rule rather than the first.
-        assert!(validate_world_size(MAX_WORLD_SIZE)
-            .unwrap_err()
-            .contains("navigation cell"));
+        // The ceiling is inclusive and is itself a whole number of 40-unit cells.
+        assert_eq!(validate_world_size(MAX_WORLD_SIZE), Ok(MAX_WORLD_SIZE));
         assert!(validate_world_size(MIN_WORLD_SIZE - NAV_CELL_SIZE)
             .unwrap_err()
             .contains("between"));
@@ -2354,7 +2977,7 @@ mod tests {
                 "worker" => Some(("brood", 1)),
                 // 100 and 80.
                 "soldier" | "scout" => Some(("brood", 1)),
-                // 150 + 50 catalyst = 200.
+                // 200 catalyst.
                 "siege" => Some(("brute", 1)),
                 // Drifter 40 and harvester 0 are under 50; buildings, research
                 // and the temporary kinds never spawn.
@@ -2399,30 +3022,48 @@ mod tests {
         // teleport cooldown. 10: primary-hub victory. 11: outposts train
         // labour. 12: hub energy, Network recall and Organic bloom.
         // 13: orders run at the client's stamped tick, within the allowance.
-        assert_eq!(RULESET_VERSION, 13);
+        // 14: three currencies, one miner per patch, refineries, permanent
+        // base income. 15: unit cap 400 and building cap 150, and routes from
+        // shared breadth-first fields (equally short routes may tie-break
+        // differently from the old per-unit A*).
+        assert_eq!(RULESET_VERSION, 16);
         assert!(RULESET_VERSION > 0);
     }
 
     #[test]
     fn experimental_price_list_is_exactly_the_documented_table() {
-        for (kind, material, catalyst) in [
-            ("worker", 50, 0),
-            ("soldier", 100, 0),
-            ("scout", 80, 0),
-            ("siege", 150, 50),
-            ("barracks", 150, 0),
-            ("turret", 125, 0),
-            ("outpost", 100, 0),
-            ("factory", 200, 50),
-            ("lab", 150, 50),
-            ("sensor", 125, 50),
-            ("research_weapons", 100, 50),
-            ("research_armor", 100, 50),
-            ("research_logistics", 100, 50),
+        // (kind, material, catalyst, terrazine): one currency per purpose.
+        for (kind, material, catalyst, terrazine) in [
+            ("worker", 50, 0, 0),
+            ("drifter", 40, 0, 0),
+            ("soldier", 0, 100, 0),
+            ("scout", 0, 80, 0),
+            ("siege", 0, 200, 0),
+            ("sentinel", 0, 150, 0),
+            ("skimmer", 0, 90, 0),
+            ("lancer", 0, 250, 0),
+            ("swarmer", 0, 50, 0),
+            ("spitter", 0, 90, 0),
+            ("crusher", 0, 250, 0),
+            ("barracks", 150, 0, 0),
+            ("turret", 0, 0, 100),
+            ("outpost", 100, 0, 0),
+            ("factory", 250, 0, 0),
+            ("lab", 200, 0, 0),
+            ("sensor", 175, 0, 0),
+            ("relay", 75, 0, 0),
+            ("refinery", 75, 0, 0),
+            ("research_weapons", 150, 0, 0),
+            ("research_armor", 150, 0, 0),
+            ("research_logistics", 150, 0, 0),
         ] {
             assert_eq!(
                 stats(kind).unwrap().cost,
-                Cost::new(material, catalyst),
+                Cost {
+                    material,
+                    catalyst,
+                    terrazine
+                },
                 "{kind}"
             );
         }
@@ -2431,24 +3072,46 @@ mod tests {
     }
 
     #[test]
-    fn catalyst_gates_technology_and_specialists_only() {
-        for basic in [
-            "worker", "soldier", "scout", "barracks", "turret", "outpost",
+    fn every_currency_has_exactly_one_purpose() {
+        for kind in [
+            "soldier", "scout", "siege", "sentinel", "skimmer", "lancer", "swarmer", "spitter",
+            "crusher",
         ] {
-            assert_eq!(stats(basic).unwrap().cost.catalyst, 0, "{basic}");
+            assert!(is_army(kind));
+            let cost = stats(kind).unwrap().cost;
+            assert!(
+                cost.catalyst > 0 && cost.material == 0 && cost.terrazine == 0,
+                "{kind}"
+            );
         }
-        for advanced in [
-            "siege",
+        for kind in [
+            "worker",
+            "drifter",
+            "barracks",
             "factory",
+            "outpost",
             "lab",
             "sensor",
+            "relay",
+            "refinery",
             "research_weapons",
             "research_armor",
             "research_logistics",
         ] {
-            assert!(stats(advanced).unwrap().cost.catalyst > 0, "{advanced}");
-            assert!(stats(advanced).unwrap().cost.material > 0, "{advanced}");
+            let cost = stats(kind).unwrap().cost;
+            assert!(
+                cost.material > 0 && cost.catalyst == 0 && cost.terrazine == 0,
+                "{kind}"
+            );
         }
+        let turret = stats("turret").unwrap().cost;
+        assert!(turret.terrazine > 0 && turret.material == 0 && turret.catalyst == 0);
+        assert!(is_building("refinery"));
+        assert_eq!(
+            building_faction("refinery"),
+            None,
+            "every faction may build one"
+        );
     }
 
     #[test]
@@ -2484,6 +3147,16 @@ mod tests {
         assert!(rich.pay(price));
         assert_eq!(rich, Balance::new(0, 0));
 
+        // Terrazine is a third, independent leg of the same rule.
+        let tower = Cost::terrazine(100);
+        let mut short = Balance::new(10_000, 10_000).with_terrazine(99);
+        assert!(!short.pay(tower));
+        assert_eq!(short, Balance::new(10_000, 10_000).with_terrazine(99));
+        assert_eq!(short.shortfall(tower), Some(ResourceKind::Terrazine));
+        short.credit_kind(ResourceKind::Terrazine, 1);
+        assert!(short.pay(tower));
+        assert_eq!(short, Balance::new(10_000, 10_000));
+
         // Material alone is enough, catalyst is one short: nothing moves.
         let mut lopsided = Balance::new(10_000, 49);
         assert!(!lopsided.covers(price));
@@ -2510,10 +3183,10 @@ mod tests {
     }
 
     #[test]
-    fn army_deaths_refund_half_of_both_currencies_and_nothing_else_does() {
-        assert_eq!(death_refund("siege"), Cost::new(75, 25));
-        assert_eq!(death_refund("soldier"), Cost::material(50));
-        assert_eq!(death_refund("scout"), Cost::material(40));
+    fn army_deaths_refund_half_of_the_catalyst_price_and_nothing_else_does() {
+        assert_eq!(death_refund("siege"), Cost::catalyst(100));
+        assert_eq!(death_refund("soldier"), Cost::catalyst(50));
+        assert_eq!(death_refund("scout"), Cost::catalyst(40));
         for ineligible in [
             "worker", "hq", "barracks", "factory", "turret", "outpost", "lab", "sensor",
         ] {
@@ -2528,6 +3201,7 @@ mod tests {
         assert_eq!(Cost::new(101, 51).percent(50), Cost::new(50, 25));
         assert_eq!(Cost::new(1, 1).percent(50), Cost::ZERO);
         assert_eq!(Cost::new(150, 50).percent(75), Cost::new(112, 37));
+        assert_eq!(Cost::terrazine(101).percent(50), Cost::terrazine(50));
         assert_eq!(
             Cost::new(u32::MAX, u32::MAX).percent(50),
             Cost::new(u32::MAX / 2, u32::MAX / 2)
@@ -2535,7 +3209,7 @@ mod tests {
     }
 
     #[test]
-    fn stipend_pays_the_documented_totals_at_both_boundaries_and_then_stops() {
+    fn stipend_pays_the_documented_totals_at_both_boundaries_and_then_continues() {
         assert_eq!(STIPEND_FIRST_PHASE_END_TICK, 1800);
         assert_eq!(STIPEND_SECOND_PHASE_END_TICK, 3600);
         assert_eq!(STIPEND_FIRST_INTERVAL_TICKS, 6);
@@ -2557,7 +3231,8 @@ mod tests {
         // 200/minute for 1.5 minutes, then 100/minute for 1.5 minutes.
         assert_eq!(at_ninety, 300);
         assert_eq!(at_one_eighty, 450);
-        assert_eq!(paid, 450, "nothing is paid after the second phase");
+        // 4200 is 600 ticks (30s, 50 material) past the second boundary.
+        assert_eq!(paid, 500, "the second-phase rate is permanent base income");
         assert_eq!(stipend_payment(0), 0);
         assert_eq!(stipend_payment(STIPEND_FIRST_INTERVAL_TICKS), 1);
         assert_eq!(stipend_payment(STIPEND_FIRST_INTERVAL_TICKS - 1), 0);
@@ -2566,8 +3241,12 @@ mod tests {
         assert_eq!(stipend_payment(1806), 0);
         assert_eq!(stipend_payment(1812), 1);
         assert_eq!(stipend_payment(STIPEND_SECOND_PHASE_END_TICK), 1);
-        assert_eq!(stipend_payment(STIPEND_SECOND_PHASE_END_TICK + 12), 0);
-        assert_eq!(stipend_total(u64::MAX), 450);
+        assert_eq!(stipend_payment(STIPEND_SECOND_PHASE_END_TICK + 12), 1);
+        assert_eq!(stipend_payment(STIPEND_SECOND_PHASE_END_TICK + 6), 0);
+        assert_eq!(
+            stipend_total(STIPEND_SECOND_PHASE_END_TICK + 12 * 100),
+            450 + 100
+        );
     }
 
     #[test]
@@ -2587,9 +3266,32 @@ mod tests {
     }
 
     #[test]
-    fn starting_balance_is_material_only() {
-        assert_eq!(STARTING_BALANCE, Balance::new(250, 0));
-        assert!(!STARTING_BALANCE.covers(Cost::new(0, 1)));
+    fn starting_balance_holds_material_and_opening_catalyst_but_no_terrazine() {
+        assert_eq!(STARTING_BALANCE, Balance::new(250, STARTING_CATALYST));
+        assert_eq!(STARTING_CATALYST, 100);
+        assert!(STARTING_BALANCE.covers(stats("soldier").unwrap().cost));
+        assert!(!STARTING_BALANCE.covers(Cost::terrazine(1)));
+    }
+
+    #[test]
+    fn terrazine_by_product_is_exact_and_industrial_earns_a_fifth_more() {
+        assert_eq!(terrazine_percent(Faction::Network), 10);
+        assert_eq!(terrazine_percent(Faction::Organic), 10);
+        assert_eq!(terrazine_percent(Faction::Industrial), 12);
+        // 12 / 10 is the settled "+20%".
+        assert_eq!(
+            TERRAZINE_BYPRODUCT_PERCENT_INDUSTRIAL * 100 / TERRAZINE_BYPRODUCT_PERCENT,
+            120
+        );
+        assert_eq!(terrazine_owed(0, Faction::Industrial), 0);
+        assert_eq!(terrazine_owed(9, Faction::Network), 0);
+        assert_eq!(terrazine_owed(10, Faction::Network), 1);
+        assert_eq!(terrazine_owed(1000, Faction::Network), 100);
+        assert_eq!(terrazine_owed(1000, Faction::Industrial), 120);
+        assert_eq!(
+            terrazine_owed(u32::MAX, Faction::Industrial),
+            (u32::MAX as u64 * 12 / 100) as u32
+        );
     }
 
     // --- factions and asymmetric labour ------------------------------------
@@ -2700,8 +3402,8 @@ mod tests {
         let [sentinel, soldier, swarmer] =
             ["sentinel", "soldier", "swarmer"].map(|kind| stats(kind).unwrap());
         // Network: fewer, stronger. Organic: cheaper, faster, weaker.
-        assert!(sentinel.cost.material > soldier.cost.material && sentinel.hp > soldier.hp);
-        assert!(swarmer.cost.material < soldier.cost.material && swarmer.speed > soldier.speed);
+        assert!(sentinel.cost.catalyst > soldier.cost.catalyst && sentinel.hp > soldier.hp);
+        assert!(swarmer.cost.catalyst < soldier.cost.catalyst && swarmer.speed > soldier.speed);
         assert!(swarmer.hp < soldier.hp);
         // The raiders: the skimmer is the fastest thing on the map and hunts labour.
         let fastest = [
@@ -2722,7 +3424,7 @@ mod tests {
         assert_eq!(death_spawn("swarmer"), Some(("brood", 1)));
         assert_eq!(death_spawn("crusher"), Some(("brute", 1)));
         // Every army unit refunds half, the new ones included.
-        assert_eq!(death_refund("lancer"), Cost::new(87, 37));
+        assert_eq!(death_refund("lancer"), Cost::catalyst(125));
     }
 
     #[test]

@@ -1,7 +1,7 @@
-import type { CreepPatch, Entity, Order } from "./bindings/types";
+import type { CreepPatch, Entity, Node as Deposit, Order } from "./bindings/types";
 import { Session } from "./network";
 import { clamp, clampToMap, COLORS, countdown, VISUALS, WORLD_SIZE } from "./presentation";
-import { cargoCapacity, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isCompletedHub, RALLIES, isLabour, isTemporary, mapIdentity, placementError, starts, terrain, type FactionName } from "./catalog";
+import { buildSite, cargoCapacity, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isCompletedHub, RALLIES, isLabour, isTemporary, mapIdentity, placementError, starts, terrain, type FactionName } from "./catalog";
 import { DOUBLE_TAP_MS, edgeDirection, groupAction, UNIT_KEYS } from "./hotkeys";
 import { creepGoneTick, lifetimeFraction, offCreep } from "./creep";
 import { ABILITIES, abilityOf, castingHub, maxEnergy, onCreep, recallable, scheduledCasts, type AbilityKind } from "./abilities";
@@ -19,6 +19,11 @@ const DEATH_MS = 650;
 const HIT_MS = 140;
 const OWN_RING = "#7cf0b0";
 const ENEMY_RING = "#ff7a86";
+/** Longest side, in pixels, of the pre-painted ground buffer (3200 = crossfire at 1:1, ~41MB). */
+const TERRAIN_BUFFER_MAX = 3200;
+const TERRAIN_SCALE = Math.min(1, TERRAIN_BUFFER_MAX / WORLD_SIZE);
+/** Keyboard and edge panning is in screen speed; larger maps pan faster so crossing them is not a chore. */
+const PAN_SCALE = Math.max(1, Math.sqrt(WORLD_SIZE / 3200));
 
 /**
  * One colour per intent, as in SC2: green goes, red fights, gold works, cyan
@@ -71,6 +76,9 @@ export class Battlefield {
   private hurtAt = new Map<number, number>();
   /** The previous update's units, to know the kind and owner of one that just vanished. */
   private lastSeen = new Map<number, Entity>();
+  /** Id lookups over the current snapshot, rebuilt only when its arrays change. */
+  private unitIndex: { source: readonly Entity[]; byId: Map<number, Entity> } = { source: [], byId: new Map() };
+  private nodeIndex: { source: readonly Deposit[]; byId: Map<number, Deposit> } = { source: [], byId: new Map() };
   /** Units the box being dragged would select, highlighted before release. */
   private boxPreview: Set<number> | undefined;
   /** Measured milliseconds per server tick, so motion spans the real gap between updates. */
@@ -109,7 +117,7 @@ export class Battlefield {
       event.preventDefault();
       const point = this.local(event);
       const before = this.world(point);
-      this.camera.zoom = clamp(this.camera.zoom * Math.exp(-event.deltaY * 0.001), 0.18, 2.2);
+      this.camera.zoom = clamp(this.camera.zoom * Math.exp(-event.deltaY * 0.001), this.minZoom(), 2.2);
       const after = this.world(point);
       this.camera.x += before.x - after.x;
       this.camera.y += before.y - after.y;
@@ -352,7 +360,13 @@ export class Battlefield {
     this.camera = { x: WORLD_SIZE / 2, y: WORLD_SIZE / 2, zoom: Math.min(this.width, this.height) / WORLD_SIZE * 0.97 };
   }
 
-  zoom(amount: number): void { this.camera.zoom = clamp(this.camera.zoom * amount, 0.18, 2.2); this.boundCamera(); }
+  /**
+   * The widest view allowed: the old 0.18 floor, or the whole map fitting the
+   * window if that is wider, so a 9600 map can still be zoomed out to overview.
+   */
+  private minZoom(): number { return Math.min(0.18, Math.min(this.width, this.height) / WORLD_SIZE * 0.97); }
+
+  zoom(amount: number): void { this.camera.zoom = clamp(this.camera.zoom * amount, this.minZoom(), 2.2); this.boundCamera(); }
 
   arm(kind: TargetMode): void {
     const allowed = kind === "rally"
@@ -375,7 +389,25 @@ export class Battlefield {
   }
 
   private pruneSelection(): void {
-    for (const id of this.selected) if (!this.session.snapshot.units.some(unit => unit.id === id)) this.selected.delete(id);
+    const units = this.unitsById();
+    for (const id of this.selected) if (!units.has(id)) this.selected.delete(id);
+  }
+
+  /**
+   * The snapshot's units by id. With 800-1600 units a per-unit `find` inside a
+   * per-unit draw loop is a million comparisons a frame; this is one map per
+   * snapshot.
+   */
+  private unitsById(): Map<number, Entity> {
+    const units = this.session.snapshot.units;
+    if (this.unitIndex.source !== units) this.unitIndex = { source: units, byId: new Map(units.map(unit => [unit.id, unit])) };
+    return this.unitIndex.byId;
+  }
+
+  private nodesById(): Map<number, Deposit> {
+    const nodes = this.session.snapshot.nodes;
+    if (this.nodeIndex.source !== nodes) this.nodeIndex = { source: nodes, byId: new Map(nodes.map(node => [node.id, node])) };
+    return this.nodeIndex.byId;
   }
 
   private position(unit: Entity, now: number): Point {
@@ -523,7 +555,11 @@ export class Battlefield {
 
   private contextOrder(point: Point, queued: boolean): void {
     const { units, nodes, me } = this.session.snapshot;
-    const node = nodes.find(node => node.amount > 0 && Math.hypot(point.x - node.x, point.y - node.y) < 35);
+    const clicked = nodes.find(node => node.amount > 0 && Math.hypot(point.x - node.x, point.y - node.y) < 35);
+    // Labour only ever works material. Catalyst is extracted by a refinery
+    // standing on the deposit, so a catalyst deposit is never a gather or
+    // rally-gather target; clicking one with labour explains why instead.
+    const node = clicked && currencyOf(clicked.kind) === "material" ? clicked : undefined;
     const owned = this.ownedSelection();
     if (this.targeting?.startsWith("build_") && me) {
       const kind = this.targeting.slice(6);
@@ -534,8 +570,12 @@ export class Battlefield {
       // command must name one of your units.
       const issuer = this.issuer();
       if (issuer) {
-        void this.session.order([issuer.id], { kind: this.targeting, x: point.x, y: point.y, target: 0 });
-        this.acknowledge(this.targeting, point);
+        // A refinery snaps onto its deposit; the order carries the snapped site.
+        const site = buildSite(kind, point.x, point.y, units, nodes);
+        void this.session.order([issuer.id], { kind: this.targeting, x: site.x, y: site.y, target: 0 });
+        // A refusal from an earlier attempt is answered by this one.
+        this.session.onNotice("");
+        this.acknowledge(this.targeting, site);
         this.spend(queued);
       }
       return;
@@ -584,6 +624,13 @@ export class Battlefield {
       order.kind = "repair"; order.target = friendly.id; selected = selected.filter(unit => isLabour(unit.kind) && unit.id !== friendly.id);
     }
     else if (enemy) { order.kind = "attack"; order.target = enemy.id; selected = selected.filter(unit => fights(unit.kind)); }
+    else if (clicked && !node && selected.some(unit => isLabour(unit.kind))) {
+      // A catalyst deposit: labour cannot work it, so it is never sent (alone
+      // or in a mixed selection); anything else in the selection moves there.
+      this.session.onNotice("Catalyst is extracted by a refinery; labour cannot gather it. Build a refinery on the deposit");
+      selected = selected.filter(unit => !isLabour(unit.kind));
+      if (!selected.length) return;
+    }
     else if (node) { order.kind = "gather"; order.target = node.id; selected = selected.filter(unit => isLabour(unit.kind)); }
     // Dropping a load at a hub is a carrier's order. A drifter told to return is
     // refused by name on the server, so it is never included here.
@@ -606,9 +653,12 @@ export class Battlefield {
    * only its quarter of tiles, so crossfire's ground looked empty and wrong.
    */
   private paintTerrain(): void {
-    this.terrain.width = WORLD_SIZE;
-    this.terrain.height = WORLD_SIZE;
+    // Painted at no more than TERRAIN_BUFFER_MAX pixels a side: a 9600 map at
+    // 1:1 would be a ~370MB canvas. Drawing stays in world units; the context
+    // scale maps them, and draw() stretches the buffer back to world size.
+    this.terrain.width = this.terrain.height = Math.ceil(WORLD_SIZE * TERRAIN_SCALE);
     const context = this.terrain.getContext("2d")!;
+    context.scale(TERRAIN_SCALE, TERRAIN_SCALE);
     context.fillStyle = "#283c37";
     context.fillRect(0, 0, WORLD_SIZE, WORLD_SIZE);
     const cells = Math.ceil(WORLD_SIZE / 40);
@@ -653,7 +703,7 @@ export class Battlefield {
     const elapsed = Math.min(now - this.lastFrame, 50);
     this.lastFrame = now;
     if (this.canvas.clientWidth && this.canvas.clientHeight) {
-      const speed = elapsed * 0.6 / this.camera.zoom;
+      const speed = elapsed * 0.6 * PAN_SCALE / this.camera.zoom;
       if (this.keys.has("ArrowLeft")) this.camera.x -= speed;
       if (this.keys.has("ArrowRight")) this.camera.x += speed;
       if (this.keys.has("ArrowUp")) this.camera.y -= speed;
@@ -687,7 +737,7 @@ export class Battlefield {
     context.translate(this.width / 2, this.height / 2);
     context.scale(this.camera.zoom, this.camera.zoom);
     context.translate(-this.camera.x, -this.camera.y);
-    context.drawImage(this.terrain, 0, 0);
+    context.drawImage(this.terrain, 0, 0, WORLD_SIZE, WORLD_SIZE);
     const { units, nodes, commands, room } = this.session.snapshot;
     const fields = this.fields();
     this.drawFields(fields, now);
@@ -782,15 +832,18 @@ export class Battlefield {
     if (this.targeting?.startsWith("build_") && this.pointer && this.session.snapshot.me) {
       const kind = this.targeting.slice(6);
       const error = placementError(kind, this.pointer.x, this.pointer.y, this.session.snapshot.me.slot, units, nodes);
+      // The preview is drawn where the building will stand: a refinery snaps
+      // onto the catalyst deposit it is aimed at, and refuses everywhere else.
+      const at = buildSite(kind, this.pointer.x, this.pointer.y, units, nodes);
       context.fillStyle = error ? "#ed7c8b55" : "#66dfba55";
       context.strokeStyle = error ? "#ed7c8b" : "#66dfba"; context.lineWidth = 2;
-      context.fillRect(this.pointer.x - 35, this.pointer.y - 35, 70, 70); context.strokeRect(this.pointer.x - 35, this.pointer.y - 35, 70, 70);
-      if (kind === "turret") { context.beginPath(); context.arc(this.pointer.x, this.pointer.y, 210, 0, Math.PI * 2); context.stroke(); }
+      context.fillRect(at.x - 35, at.y - 35, 70, 70); context.strokeRect(at.x - 35, at.y - 35, 70, 70);
+      if (kind === "turret") { context.beginPath(); context.arc(at.x, at.y, 210, 0, Math.PI * 2); context.stroke(); }
       // A zone projector previews the ground it will cover.
       const reach = kind === "relay" ? POWER_FIELD_RADIUS : kind === "sensor" ? SENSOR_FIELD_RADIUS : 0;
-      if (reach) { context.setLineDash([8, 8]); context.beginPath(); context.arc(this.pointer.x, this.pointer.y, reach, 0, Math.PI * 2); context.stroke(); context.setLineDash([]); }
+      if (reach) { context.setLineDash([8, 8]); context.beginPath(); context.arc(at.x, at.y, reach, 0, Math.PI * 2); context.stroke(); context.setLineDash([]); }
       context.fillStyle = "#efffea"; context.textAlign = "center"; context.font = "13px 'IBM Plex Mono'";
-      context.fillText(error ?? VISUALS[kind].label, this.pointer.x, this.pointer.y - 48);
+      context.fillText(error ?? VISUALS[kind].label, at.x, at.y - 48);
     }
     if (this.targeting === "teleport" && this.pointer && this.session.snapshot.me) {
       const ok = powered(this.session.snapshot.me.slot, this.pointer.x, this.pointer.y, fields);
@@ -943,11 +996,12 @@ export class Battlefield {
     const context = this.context;
     const color = orderColor(kind);
     const zoom = this.camera.zoom;
-    const ids = new Set(unitIds.slice(0, 40));
+    const units = this.unitsById();
     context.strokeStyle = `${color}55`; context.lineWidth = 1.25 / zoom;
     context.beginPath();
-    for (const unit of this.session.snapshot.units) {
-      if (!ids.has(unit.id) || isBuilding(unit.kind)) continue;
+    for (const id of new Set(unitIds.slice(0, 40))) {
+      const unit = units.get(id);
+      if (!unit || isBuilding(unit.kind)) continue;
       const from = this.position(unit, now);
       context.moveTo(from.x, from.y); context.lineTo(target.x, target.y);
     }
@@ -1028,7 +1082,8 @@ export class Battlefield {
     context.fillStyle = "#ed7c8b1c";
     context.beginPath();
     for (const [left, top, width, height] of terrain) context.rect(left - 50, top - 50, width + 100, height + 100);
-    for (const node of nodes) { context.moveTo(node.x + 75, node.y); context.arc(node.x, node.y, 75, 0, Math.PI * 2); }
+    // A refinery stands on a deposit, so deposits do not obstruct it.
+    if (this.targeting !== "build_refinery") for (const node of nodes) { context.moveTo(node.x + 75, node.y); context.arc(node.x, node.y, 75, 0, Math.PI * 2); }
     for (const unit of units) {
       const building = isBuilding(unit.kind);
       if (!building && (!this.pointer || Math.hypot(unit.x - this.pointer.x, unit.y - this.pointer.y) > 300)) continue;
@@ -1036,13 +1091,22 @@ export class Battlefield {
       context.moveTo(unit.x + reach, unit.y); context.arc(unit.x, unit.y, reach, 0, Math.PI * 2);
     }
     context.fill();
+    // Placing a refinery: ring every catalyst deposit that can still take one.
+    if (this.targeting === "build_refinery") {
+      context.strokeStyle = "#c79bff"; context.lineWidth = 2; context.setLineDash([6, 5]);
+      for (const node of nodes) {
+        if (currencyOf(node.kind) !== "catalyst" || node.amount === 0 || units.some(unit => unit.kind === "refinery" && Math.hypot(unit.x - node.x, unit.y - node.y) < 1)) continue;
+        context.beginPath(); context.arc(node.x, node.y, 44, 0, Math.PI * 2); context.stroke();
+      }
+      context.setLineDash([]);
+    }
   }
 
   private orderTarget(order: Order): Point | undefined {
     if (order.kind.startsWith("build_")) return order;
     if (["move", "attack_move", "rally_move", "teleport", "recall", "bloom"].includes(order.kind)) return order;
-    if (["gather", "rally_gather"].includes(order.kind)) return this.session.snapshot.nodes.find(node => node.id === order.target);
-    if (["attack", "repair"].includes(order.kind)) return this.session.snapshot.units.find(unit => unit.id === order.target);
+    if (["gather", "rally_gather"].includes(order.kind)) return this.nodesById().get(order.target);
+    if (["attack", "repair"].includes(order.kind)) return this.unitsById().get(order.target);
     return undefined;
   }
 
@@ -1139,6 +1203,12 @@ export class Battlefield {
         context.beginPath(); context.moveTo(-10, 16); context.lineTo(0, -8); context.lineTo(10, 16); context.stroke();
         context.fillStyle = color; context.strokeStyle = "#243832"; context.lineWidth = 2;
         context.beginPath(); context.ellipse(0, -14, 16, 8, -0.4, 0, Math.PI * 2); context.fill(); context.stroke();
+      } else if (unit.kind === "refinery") {
+        // Two violet tanks on a pump: the catalyst colour, over the deposit.
+        context.fillStyle = "#3c2c5c"; context.fillRect(-26, -20, 52, 36);
+        context.fillStyle = "#a878ea"; context.beginPath(); context.arc(-11, -2, 11, 0, Math.PI * 2); context.arc(11, -2, 11, 0, Math.PI * 2); context.fill();
+        context.fillStyle = "#d3a6ff"; context.fillRect(-14, -8, 6, 14); context.fillRect(8, -8, 6, 14);
+        context.fillStyle = color; context.fillRect(-26, 16, 52, 5);
       } else if (unit.kind === "outpost") {
         context.fillStyle = "#dac16b"; context.fillRect(-18, -13, 15, 22); context.fillRect(3, -13, 15, 22);
         context.strokeRect(-18, -13, 36, 22);
@@ -1172,7 +1242,7 @@ export class Battlefield {
         // Coloured by the deposit it is working, not by `cargoKind`: a drifter
         // never carries, so its cargo kind stays at the default forever and
         // would have painted a catalyst drifter gold.
-        const worked = this.session.snapshot.nodes.find(node => node.id === unit.order.target);
+        const worked = this.nodesById().get(unit.order.target);
         context.fillStyle = worked && currencyOf(worked.kind) === "catalyst" ? "#c79bff" : "#f3d570";
         context.fillRect(-2, -20 - phase * 8, 4, 5);
         context.globalAlpha = unit.constructionRemaining > 0n ? 0.6 : 1;

@@ -46,6 +46,9 @@ pub struct Player {
     // and specialists, and neither converts into the other.
     pub material: u32,
     pub catalyst: u32,
+    /// The third currency, static defense only, earned as a by-product of
+    /// material mined.
+    pub terrazine: u32,
     // --- match history, cumulative for the life of the match ---------------
     //
     // These ride beside the balances and round-trip through `load_world` /
@@ -57,12 +60,17 @@ pub struct Player {
     /// `World::collected`.
     pub collected_material: u32,
     pub collected_catalyst: u32,
+    /// Terrazine paid so far; also the running total the by-product is derived
+    /// from (see `simulation::credit_mined`).
+    pub collected_terrazine: u32,
     /// List price of this player's own entities that were destroyed.
     pub lost_material: u32,
     pub lost_catalyst: u32,
+    pub lost_terrazine: u32,
     /// List price of other players' entities this player destroyed.
     pub killed_material: u32,
     pub killed_catalyst: u32,
+    pub killed_terrazine: u32,
     /// Which economy this player is playing. Assigned from the slot when the
     /// room is created or joined, so a four-player room holds all three, and
     /// carried into the simulation at `start_match`. There is no lobby control
@@ -165,9 +173,11 @@ pub struct MatchSample {
     /// Banked: spendable right now.
     pub material: u32,
     pub catalyst: u32,
+    pub terrazine: u32,
     /// Cumulative mined, stipend and refunds excluded.
     pub collected_material: u32,
     pub collected_catalyst: u32,
+    pub collected_terrazine: u32,
     /// List price of the living army — labour and buildings excluded.
     pub army_value_material: u32,
     pub army_value_catalyst: u32,
@@ -178,6 +188,7 @@ pub struct MatchSample {
     /// Cumulative list price of this player's entities destroyed.
     pub lost_material: u32,
     pub lost_catalyst: u32,
+    pub lost_terrazine: u32,
 }
 
 #[spacetimedb::table(accessor = tick_schedule, scheduled(crate::game::game_tick))]

@@ -103,6 +103,13 @@ export const Entity = __t.object("Entity", {
   get cast() {
     return __t.option(Cast);
   },
+  passiveReadyTick: __t.u64(),
+  lastAttacker: __t.u32(),
+  contactTick: __t.u64(),
+  kills: __t.u16(),
+  anchorX: __t.f32(),
+  anchorY: __t.f32(),
+  anchorTick: __t.u64(),
 });
 export type Entity = __Infer<typeof Entity>;
 
@@ -121,8 +128,10 @@ export const MatchSample = __t.object("MatchSample", {
   slot: __t.u8(),
   material: __t.u32(),
   catalyst: __t.u32(),
+  terrazine: __t.u32(),
   collectedMaterial: __t.u32(),
   collectedCatalyst: __t.u32(),
+  collectedTerrazine: __t.u32(),
   armyValueMaterial: __t.u32(),
   armyValueCatalyst: __t.u32(),
   labour: __t.u32(),
@@ -130,6 +139,7 @@ export const MatchSample = __t.object("MatchSample", {
   buildings: __t.u32(),
   lostMaterial: __t.u32(),
   lostCatalyst: __t.u32(),
+  lostTerrazine: __t.u32(),
 });
 export type MatchSample = __Infer<typeof MatchSample>;
 
@@ -141,6 +151,7 @@ export const Node = __t.object("Node", {
   get kind() {
     return ResourceKind;
   },
+  miner: __t.u32(),
 });
 export type Node = __Infer<typeof Node>;
 
@@ -159,12 +170,16 @@ export const Player = __t.object("Player", {
   slot: __t.u8(),
   material: __t.u32(),
   catalyst: __t.u32(),
+  terrazine: __t.u32(),
   collectedMaterial: __t.u32(),
   collectedCatalyst: __t.u32(),
+  collectedTerrazine: __t.u32(),
   lostMaterial: __t.u32(),
   lostCatalyst: __t.u32(),
+  lostTerrazine: __t.u32(),
   killedMaterial: __t.u32(),
   killedCatalyst: __t.u32(),
+  killedTerrazine: __t.u32(),
   get faction() {
     return Faction;
   },
@@ -186,6 +201,7 @@ export type Production = __Infer<typeof Production>;
 export const ResourceKind = __t.enum("ResourceKind", {
   Material: __t.unit(),
   Catalyst: __t.unit(),
+  Terrazine: __t.unit(),
 });
 export type ResourceKind = __Infer<typeof ResourceKind>;
 

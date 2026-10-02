@@ -112,13 +112,13 @@ export function keySwatch(slot: number): SVGSVGElement {
   return svg;
 }
 
-/** "1,240 MAT" and, only when there is any, "80 CAT" — never one summed number. */
+/** "1,240 MAT" and, only when there is any, "80 CAT" and "40 TER" — never one summed number. */
 export function currencyCell(cost: Cost): HTMLElement {
   const holder = html("span", "", "score-cost");
   holder.title = CURRENCIES.map(currency => `${formatValue(cost[currency])} ${currency}`).join(" + ");
   for (const currency of CURRENCIES) {
-    if (currency === "catalyst" && cost.catalyst === 0) continue;
-    holder.append(html("span", `${formatValue(cost[currency])} ${currency === "material" ? "MAT" : "CAT"}`, `cost-part ${currency}`));
+    if (currency !== "material" && cost[currency] === 0) continue;
+    holder.append(html("span", `${formatValue(cost[currency])} ${currency === "material" ? "MAT" : currency === "catalyst" ? "CAT" : "TER"}`, `cost-part ${currency}`));
   }
   return holder;
 }
@@ -157,7 +157,7 @@ interface Live {
   geometry: Geometry;
 }
 
-const NOTHING: Cost = { material: 0, catalyst: 0 };
+const NOTHING: Cost = { material: 0, catalyst: 0, terrazine: 0 };
 
 /**
  * The post-match score screen: who won, what each commander's economy and army
@@ -216,7 +216,7 @@ export class ScoreScreen {
     this.redraw = () => this.render(state);
     this.board.hidden = false;
     for (const player of state.players) this.names.set(player.slot, player.name);
-    const roster = state.players.map(player => `${player.slot}/${player.name}/${player.faction}/${player.killed?.material ?? -1}/${player.killed?.catalyst ?? -1}`).join(",");
+    const roster = state.players.map(player => `${player.slot}/${player.name}/${player.faction}/${player.killed?.material ?? -1}/${player.killed?.catalyst ?? -1}/${player.killed?.terrazine ?? -1}`).join(",");
     const signature = `${state.matchId}:${state.winner}:${state.samples.length}:${this.incomeMode}:${roster}`;
     if (signature !== this.signature) {
       this.signature = signature;
@@ -474,7 +474,7 @@ export class ScoreScreen {
 
   private drawNotes(board: Scoreboard): void {
     this.notes.replaceChildren(
-      html("p", "Material and catalyst are drawn apart and never added together: each has its own axis, because no amount of one is worth any of the other.", "score-note"),
+      html("p", "Material, catalyst and terrazine are drawn apart and never added together: each has its own axis, because no amount of one is worth any of the other.", "score-note"),
       html("p", "Last hits credit the whole value of a kill to whoever struck last, so a unit worn down by one commander and finished by another counts entirely to the finisher.", "score-note"),
     );
     if (board.seconds.length) {

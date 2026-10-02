@@ -85,10 +85,10 @@ export class Practice {
       // for "worker" left a Network or Organic player's opening units standing
       // idle at the hub with no way to know why.
       for (const worker of this.human.snapshot.units.filter(unit => unit.owner === this.human.snapshot.me?.slot && isLabour(unit.kind))) {
-        // The opening goes to material: catalyst deposits sit in contested
-        // ground and are a decision the player makes, not a default.
+        // The opening goes to material: labour can only ever mine material,
+        // catalyst is extracted by refineries.
         const reachable = this.human.snapshot.nodes.filter(node => node.amount > 0 && currencyOf(node.kind) === "material");
-        const node = [...(reachable.length ? reachable : this.human.snapshot.nodes)].sort((left, right) => Math.hypot(left.x - worker.x, left.y - worker.y) - Math.hypot(right.x - worker.x, right.y - worker.y))[0];
+        const node = [...reachable].sort((left, right) => Math.hypot(left.x - worker.x, left.y - worker.y) - Math.hypot(right.x - worker.x, right.y - worker.y))[0];
         if (node) await this.human.order([worker.id], { kind: "gather", x: 0, y: 0, target: node.id });
       }
     } catch (error) {
@@ -115,7 +115,7 @@ export class Practice {
       const decide = async () => {
         const busy = new Set(commands.filter(command => command.owner === me.slot && command.status === "scheduled").flatMap(command => command.units));
         for (const pending of this.bot.pending.values()) for (const id of pending.units) busy.add(id);
-        for (const decision of chooseOrders(me.slot, factionOf(me.faction), { material: me.material, catalyst: me.catalyst, research: me.research }, units, nodes, busy, room.tick < PRACTICE_FIRST_PUSH_TICK, { tick: room.tick, creep })) await this.bot.order(decision.units, decision.order);
+        for (const decision of chooseOrders(me.slot, factionOf(me.faction), { material: me.material, catalyst: me.catalyst, terrazine: me.terrazine, research: me.research }, units, nodes, busy, room.tick < PRACTICE_FIRST_PUSH_TICK, { tick: room.tick, creep })) await this.bot.order(decision.units, decision.order);
       };
       if (navigator.locks) await navigator.locks.request(`practice-ai:${this.activeKey}`, { ifAvailable: true }, async lock => { if (lock) await decide(); });
       else await decide();

@@ -54,7 +54,7 @@
   </main>
 
   <main id="match" class="match" hidden>
-    <div class="match-bar"><div class="operation-name"><span class="live-tag">OPERATION</span><strong id="match-name"></strong></div><div class="match-metrics"><span id="material-readout" class="readout material" title="Material / expansion, workers and the basic army"><i data-lucide="boxes"></i><span class="readout-name"><span class="long">MATERIAL</span><span class="short">MAT</span></span><b id="material">250</b></span><span id="catalyst-readout" class="readout catalyst" title="Catalyst / scarce: technology, factory, laboratory and siege"><i data-lucide="gem"></i><span class="readout-name"><span class="long">CATALYST</span><span class="short">CAT</span></span><b id="catalyst">0</b></span><span id="stock-readout" class="readout stock" title="Harvester stock / regenerates 1 every 60 ticks up to 7" hidden><i data-lucide="sprout"></i><span class="readout-name"><span class="long">STOCK</span><span class="short">STK</span></span><b id="stock">0 / 7</b></span><span id="faction-readout" class="readout faction industrial" title="Your faction"><span class="readout-name"><span class="long">FACTION</span><span class="short">FAC</span></span><b id="faction-name">INDUSTRIAL</b></span><span>UNITS <b id="unit-count">0 / 120</b></span><span id="match-clock" class="mono">00:00</span></div><button id="leave-match" class="icon-button danger" title="Surrender and leave" aria-label="Surrender and leave"><i data-lucide="log-out"></i></button></div>
+    <div class="match-bar"><div class="operation-name"><span class="live-tag">OPERATION</span><strong id="match-name"></strong></div><div class="match-metrics"><span id="material-readout" class="readout material" title="Material / labour, structures and research; mined one miner to a patch"><i data-lucide="boxes"></i><span class="readout-name"><span class="long">MATERIAL</span><span class="short">MAT</span></span><b id="material">250</b></span><span id="catalyst-readout" class="readout catalyst" title="Catalyst / the army; extracted by refineries built on catalyst deposits"><i data-lucide="gem"></i><span class="readout-name"><span class="long">CATALYST</span><span class="short">CAT</span></span><b id="catalyst">0</b></span><span id="terrazine-readout" class="readout terrazine" title="Terrazine / static defense; a by-product of material mined (10%, Industrial 12%)"><i data-lucide="hexagon"></i><span class="readout-name"><span class="long">TERRAZINE</span><span class="short">TER</span></span><b id="terrazine">0</b></span><span id="stock-readout" class="readout stock" title="Harvester stock / regenerates 1 every 60 ticks up to 7" hidden><i data-lucide="sprout"></i><span class="readout-name"><span class="long">STOCK</span><span class="short">STK</span></span><b id="stock">0 / 7</b></span><span id="faction-readout" class="readout faction industrial" title="Your faction"><span class="readout-name"><span class="long">FACTION</span><span class="short">FAC</span></span><b id="faction-name">INDUSTRIAL</b></span><span>UNITS <b id="unit-count">0 / 120</b></span><span id="match-clock" class="mono">00:00</span></div><button id="leave-match" class="icon-button danger" title="Surrender and leave" aria-label="Surrender and leave"><i data-lucide="log-out"></i></button></div>
     <section class="battlefield-wrap">
       <canvas id="battlefield" tabindex="0" aria-label="Battlefield"></canvas>
       <div id="targeting-state" class="targeting-state mono" role="status" hidden></div>
@@ -79,13 +79,13 @@
         <dl>
           <div><dt>Left click / drag</dt><dd>Select / box select</dd></div>
           <div><dt>Double-click, Ctrl+click</dt><dd>All of that kind on screen</dd></div>
-          <div><dt>Right click</dt><dd>Move, attack, gather, rally (Shift queues)</dd></div>
+          <div><dt>Right click</dt><dd>Move, attack, mine material, rally (Shift queues)</dd></div>
           <div><dt>Minimap</dt><dd>Left drag: camera / right: order</dd></div>
           <div><dt>Screen edge, arrows</dt><dd>Scroll camera</dd></div>
           <div><dt>Middle drag, Space+drag</dt><dd>Pan camera</dd></div>
           <div><dt>Wheel</dt><dd>Zoom</dd></div>
           <div><dt>Q W E R</dt><dd>Train labour / fighter / raider / heavy</dd></div>
-          <div><dt>B then Q..U</dt><dd>Build (the key is on each button)</dd></div>
+          <div><dt>B then Q..I</dt><dd>Build (the key is on each button)</dd></div>
           <div><dt>A / S / H</dt><dd>Attack-move / stop / hold</dd></div>
           <div><dt>F / G / Y</dt><dd>Repair / return cargo / set rally</dd></div>
           <div><dt>T / C</dt><dd>Teleport / faction ability</dd></div>

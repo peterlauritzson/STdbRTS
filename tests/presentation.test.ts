@@ -9,7 +9,7 @@ import { mapContentHash } from "../src/maphash";
 import { BUILD_KEYS, edgeDirection, groupAction, TRAIN_KEYS, UNIT_KEYS } from "../src/hotkeys";
 import skirmishMap from "../shared/maps/skirmish.json";
 import { clampToMap, WORLD_SIZE } from "../src/presentation";
-import { isCompletedHub, affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, MAP_HASH, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
+import { buildSite, isCompletedHub, affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, MAP_HASH, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
 import { Faction, ResourceKind, type CreepPatch, type Entity, type Node } from "../src/bindings/types";
 import { creepGoneTick, creepSecondsLeft, lifetimeFraction, offCreep } from "../src/creep";
 import { MAX_QUEUE, scheduledTraining, trainingSite } from "../src/production";
@@ -19,9 +19,9 @@ import { ARMY, armyBuilding, armyFaction, fights, isArmy, isTemporary, takesSupp
 test("client renders the same map matches are actually played on", () => {
   // The server freezes this id into every new room, so a mismatch here means
   // the client would draw terrain the simulation does not have.
-  assert.deepEqual(mapIdentity, { id: "crossfire", version: 1 });
-  assert.equal(WORLD_SIZE, 3200);
-  assert.equal(terrain.length, 28);
+  assert.deepEqual(mapIdentity, { id: "expanse", version: 1 });
+  assert.equal(WORLD_SIZE, 9600);
+  assert.equal(terrain.length, 72);
   // Four-fold rotational symmetry: every rectangle has its 90-degree image.
   const key = (r: readonly number[]) => r.join(",");
   const present = new Set(terrain.map(key));
@@ -42,8 +42,8 @@ test("an order is clamped to the map being played, not to the old 1600 extent", 
   // The bug this pins: `clamp(value, 16, 1584)` was written out by hand in the
   // order dispatch, so on a 3200 map every move and rally was forced into the
   // top-left quarter — you could not command the other three quadrants at all.
-  assert.equal(WORLD_SIZE, 3200);
-  for (const beyond of [1585, 1600, 2400, 3183]) {
+  assert.equal(WORLD_SIZE, 9600);
+  for (const beyond of [1585, 1600, 2400, 3183, 4800, 9583]) {
     assert.equal(clampToMap(beyond), beyond, `${beyond} is on the map and must survive untouched`);
   }
   // It still keeps a point on the battlefield at both ends.
@@ -65,47 +65,61 @@ test("presentation coordinates stay on the battlefield", () => {
 test("the command card prices everything exactly as the ruleset does", () => {
   // The table in docs/honeybadger/DECISIONS.md, which server/src/rules.rs
   // implements. A client that quotes a different price sends orders the server
-  // refuses, so this is pinned rather than inferred.
-  const expected: [string, number, number][] = [
-    ["worker", 50, 0], ["drifter", 40, 0], ["harvester", 0, 0], ["soldier", 100, 0], ["scout", 80, 0], ["siege", 150, 50],
-    ["barracks", 150, 0], ["turret", 125, 0], ["outpost", 100, 0], ["factory", 200, 50], ["lab", 150, 50],
+  // refuses, so this is pinned rather than inferred. One currency per purpose:
+  // labour, structures and research are material, the army is catalyst, the
+  // turret is terrazine.
+  const expected: [string, number, number, number][] = [
+    ["worker", 50, 0, 0], ["drifter", 40, 0, 0], ["harvester", 0, 0, 0],
+    ["soldier", 0, 100, 0], ["scout", 0, 80, 0], ["siege", 0, 200, 0],
+    ["sentinel", 0, 150, 0], ["skimmer", 0, 90, 0], ["lancer", 0, 250, 0],
+    ["swarmer", 0, 50, 0], ["spitter", 0, 90, 0], ["crusher", 0, 250, 0],
+    ["barracks", 150, 0, 0], ["turret", 0, 0, 100], ["outpost", 100, 0, 0], ["factory", 250, 0, 0], ["lab", 200, 0, 0],
+    ["sensor", 175, 0, 0], ["relay", 75, 0, 0], ["refinery", 75, 0, 0],
   ];
-  for (const [kind, material, catalyst] of expected) assert.deepEqual(CATALOG[kind].cost, { material, catalyst }, kind);
-  for (const kind of ["research_weapons", "research_armor", "research_logistics"]) assert.deepEqual(costOf(kind), { material: 100, catalyst: 50 }, kind);
+  for (const [kind, material, catalyst, terrazine] of expected) assert.deepEqual(CATALOG[kind].cost, { material, catalyst, terrazine }, kind);
+  for (const kind of ["research_weapons", "research_armor", "research_logistics"]) assert.deepEqual(costOf(kind), { material: 150, catalyst: 0, terrazine: 0 }, kind);
   assert.deepEqual(costOf("worker"), CATALOG.worker.cost);
-  // Only specialists and technology reach for catalyst.
-  for (const kind of ["worker", "drifter", "harvester", "soldier", "scout", "barracks", "turret", "outpost"]) assert.equal(CATALOG[kind].cost.catalyst, 0, kind);
-  for (const kind of ["siege", "factory", "lab"]) assert.ok(CATALOG[kind].cost.catalyst > 0 && CATALOG[kind].cost.material > 0, kind);
+  // Every army unit is catalyst only.
+  for (const kind of ["soldier", "scout", "siege", "sentinel", "skimmer", "lancer", "swarmer", "spitter", "crusher"]) {
+    const cost = CATALOG[kind].cost;
+    assert.ok(cost.catalyst > 0 && cost.material === 0 && cost.terrazine === 0, kind);
+  }
+  assert.ok(CATALOG.turret.cost.terrazine > 0 && CATALOG.turret.cost.material === 0);
 });
 
-test("a multi-resource cost renders both currencies and never sums them", () => {
+test("a multi-resource cost renders every currency and never sums them", () => {
   assert.equal(formatCost(CATALOG.worker.cost), "50 material");
-  assert.equal(formatCost(CATALOG.siege.cost), "150 material + 50 catalyst");
-  assert.equal(formatCost(RESEARCH_COST), "100 material + 50 catalyst");
-  assert.equal(formatCost({ material: 0, catalyst: 50 }), "50 catalyst");
-  assert.equal(formatCost({ material: 0, catalyst: 0 }), "nothing");
+  assert.equal(formatCost(CATALOG.siege.cost), "200 catalyst");
+  assert.equal(formatCost(CATALOG.turret.cost), "100 terrazine");
+  assert.equal(formatCost(RESEARCH_COST), "150 material");
+  assert.equal(formatCost({ material: 150, catalyst: 50, terrazine: 0 }), "150 material + 50 catalyst");
+  assert.equal(formatCost({ material: 0, catalyst: 50, terrazine: 20 }), "50 catalyst + 20 terrazine");
+  assert.equal(formatCost({ material: 0, catalyst: 0, terrazine: 0 }), "nothing");
 });
 
-test("affordability needs both currencies and names the one that is missing", () => {
-  const price = CATALOG.siege.cost;
-  assert.ok(affords({ material: 150, catalyst: 50 }, price));
-  assert.equal(shortfall({ material: 150, catalyst: 50 }, price), undefined);
-  // Material alone is not enough, and catalyst cannot be paid in material.
-  assert.equal(shortfall({ material: 9000, catalyst: 20 }, price), "catalyst");
-  assert.equal(shortfall({ material: 149, catalyst: 9000 }, price), "material");
-  // Material is checked first, matching Balance::shortfall on the server.
-  assert.equal(shortfall({ material: 0, catalyst: 0 }, price), "material");
-  assert.ok(!affords({ material: 150, catalyst: 49 }, price));
+test("affordability needs every currency and names the one that is missing", () => {
+  const price = { material: 150, catalyst: 50, terrazine: 20 };
+  assert.ok(affords({ material: 150, catalyst: 50, terrazine: 20 }, price));
+  assert.equal(shortfall({ material: 150, catalyst: 50, terrazine: 20 }, price), undefined);
+  // One currency alone is not enough, and none can be paid in another.
+  assert.equal(shortfall({ material: 9000, catalyst: 20, terrazine: 9000 }, price), "catalyst");
+  assert.equal(shortfall({ material: 149, catalyst: 9000, terrazine: 9000 }, price), "material");
+  assert.equal(shortfall({ material: 9000, catalyst: 9000, terrazine: 19 }, price), "terrazine");
+  // Material is checked first, then catalyst, matching Balance::shortfall on the server.
+  assert.equal(shortfall(purse(0), price), "material");
+  assert.ok(!affords({ material: 150, catalyst: 49, terrazine: 20 }, price));
   // Word for word what World::afford would have answered.
-  assert.equal(shortfallReason({ material: 9000, catalyst: 20 }, price), "Insufficient catalyst: 50 needed, 20 available");
-  assert.equal(shortfallReason({ material: 100, catalyst: 0 }, CATALOG.barracks.cost), "Insufficient material: 150 needed, 100 available");
-  assert.equal(shortfallReason({ material: 150, catalyst: 50 }, price), undefined);
-  assert.deepEqual(spend({ material: 250, catalyst: 60 }, price), { material: 100, catalyst: 10 });
+  assert.equal(shortfallReason({ material: 9000, catalyst: 20, terrazine: 0 }, price), "Insufficient catalyst: 50 needed, 20 available");
+  assert.equal(shortfallReason(purse(100), CATALOG.barracks.cost), "Insufficient material: 150 needed, 100 available");
+  assert.equal(shortfallReason(purse(9000, 9000, 99), CATALOG.turret.cost), "Insufficient terrazine: 100 needed, 99 available");
+  assert.equal(shortfallReason({ material: 150, catalyst: 50, terrazine: 20 }, price), undefined);
+  assert.deepEqual(spend({ material: 250, catalyst: 60, terrazine: 30 }, price), { material: 100, catalyst: 10, terrazine: 10 });
 });
 
 test("resource kinds map to the currency a deposit or a load actually holds", () => {
   assert.equal(currencyOf(ResourceKind.Material), "material");
   assert.equal(currencyOf(ResourceKind.Catalyst), "catalyst");
+  assert.equal(currencyOf(ResourceKind.Terrazine), "terrazine");
 });
 
 // --- Practice opponent ------------------------------------------------------
@@ -116,10 +130,10 @@ function unit(id: number, owner: number, kind: string, stock = 0): Entity {
 }
 
 function deposit(id: number, x: number, y: number, amount: number, currency: Currency = "material"): Node {
-  return { id, x, y, amount, kind: currency === "catalyst" ? ResourceKind.Catalyst : ResourceKind.Material };
+  return { id, x, y, amount, miner: 0, kind: currency === "catalyst" ? ResourceKind.Catalyst : ResourceKind.Material };
 }
 
-const purse = (material: number, catalyst = 0): Cost => ({ material, catalyst });
+const purse = (material: number, catalyst = 0, terrazine = 0): Cost => ({ material, catalyst, terrazine });
 
 test("bot respects ownership, funds, pending orders and depleted nodes", () => {
   const units = [unit(1, 0, "hq"), unit(2, 0, "worker"), unit(3, 1, "worker")];
@@ -147,18 +161,20 @@ test("bot reserves repair funds, assigns one worker and uses attack-move", () =>
 });
 
 test("placement previews reject occupied, remote, terrain and prerequisite sites", () => {
-  // Sited on the crossfire main hub, since that is where a match now starts.
+  // Sited near the expanse main hub (850, 850), since that is where a match
+  // now starts.
   const hub = { ...unit(1, 0, "hq"), x: 600, y: 600 };
   const units = [hub];
   assert.equal(placementError("barracks", 600, 400, 0, units, []), undefined);
   assert.equal(placementError("barracks", 600, 600, 0, units, []), "Site occupied");
-  // Inside the inner jaw of the natural choke, rect [820, 620, 110, 270].
-  assert.equal(placementError("barracks", 870, 700, 0, units, []), "Terrain obstructed");
-  assert.equal(placementError("barracks", 1800, 1800, 0, units, []), "Outside build radius");
+  // Against the main's wall, rect [860, 1540, 40, 320].
+  assert.equal(placementError("barracks", 880, 1600, 0, units, []), "Terrain obstructed");
+  assert.equal(placementError("barracks", 1300, 1300, 0, units, []), "Outside build radius");
   // The map boundary follows the map: this is legal ground on a 3200 map and
   // would have been rejected outright while the 1540 limit was hardcoded.
   assert.notEqual(placementError("barracks", 2600, 2600, 0, units, []), "Map boundary");
   assert.equal(placementError("factory", 600, 400, 0, units, []), "Barracks required");
+  assert.equal(placementError("lab", 600, 400, 0, units, []), "Barracks required");
   assert.ok(canProduce("scout", "barracks", "industrial"));
   assert.ok(!canProduce("siege", "hq", "industrial"));
 });
@@ -177,65 +193,94 @@ test("bot builds from the command card, never taking labour off its work", () =>
   assert.ok(!chooseOrders(0, "industrial", purse(250), units, [deposit(1, 360, 360, 4000)], new Set([1])).some(decision => decision.order.kind.startsWith("build_")));
 });
 
-test("bot posts a share of its workers to catalyst once the opening is up", () => {
-  const catalyst = deposit(7, 600, 800, 1200, "catalyst");
-  const material = deposit(1, 360, 360, 4000);
-  const opening = [unit(1, 0, "hq"), ...[2, 3, 4].map(id => unit(id, 0, "worker"))];
-  // Three workers is still the opening: every one of them mines material, which
-  // is what the early build order is actually paid in.
-  const early = chooseOrders(0, "industrial", purse(250), opening, [material, catalyst], new Set()).filter(decision => decision.order.kind === "gather");
-  assert.equal(early.length, 3);
-  assert.ok(early.every(decision => decision.order.target === material.id));
+test("a refinery is placed on a catalyst deposit, snaps onto it and refuses everywhere else", () => {
+  const hub = { ...unit(1, 0, "hq"), x: 600, y: 600 };
+  const catalyst = deposit(1, 477, 776, 2500, "catalyst");
+  const material = deposit(2, 419, 716, 1500);
+  const units = [hub];
+  // Aimed within snap distance of the deposit: legal, and it lands on the deposit.
+  assert.equal(placementError("refinery", 500, 760, 0, units, [catalyst, material]), undefined);
+  assert.deepEqual(buildSite("refinery", 500, 760, units, [catalyst, material]), { x: 477, y: 776 });
+  // Not near a catalyst deposit, or on a material patch: refused with the reason.
+  assert.equal(placementError("refinery", 600, 400, 0, units, [catalyst, material]), "A refinery must be built on a catalyst deposit");
+  assert.equal(placementError("refinery", 419, 716, 0, units, [catalyst, material]), "A refinery must be built on a catalyst deposit");
+  // Other buildings are not snapped, and still keep clear of deposits.
+  assert.deepEqual(buildSite("barracks", 500, 760, units, [catalyst, material]), { x: 500, y: 760 });
+  assert.equal(placementError("barracks", 500, 760, 0, units, [catalyst, material]), "Site occupied");
+  // One refinery to a deposit, and none on an empty one.
+  const built = { ...unit(9, 0, "refinery"), x: 477, y: 776 };
+  assert.equal(placementError("refinery", 477, 776, 0, [hub, built], [catalyst]), "That catalyst deposit is empty or already has a refinery");
+  assert.equal(placementError("refinery", 477, 776, 0, units, [{ ...catalyst, amount: 0 }]), "That catalyst deposit is empty or already has a refinery");
+  assert.ok(CATALOG.refinery.building && CATALOG.refinery.cost.material === 75);
+});
 
-  const grown = [unit(1, 0, "hq"), ...[2, 3, 4, 5].map(id => unit(id, 0, "worker"))];
-  const decisions = chooseOrders(0, "industrial", purse(250), grown, [material, catalyst], new Set());
+test("bot builds a refinery first, a second later, and never sends labour to catalyst", () => {
+  const near = deposit(7, 477, 776, 2500, "catalyst");
+  const far = deposit(8, 776, 477, 2500, "catalyst");
+  const material = deposit(1, 360, 360, 4000);
+  const hub = { ...unit(1, 0, "hq"), x: 600, y: 600 };
+  const opening = [hub, ...[2, 3].map(id => ({ ...unit(id, 0, "worker"), x: 600, y: 600 }))];
+  const decisions = chooseOrders(0, "industrial", purse(250), opening, [material, near, far], new Set());
+  const refinery = decisions.find(decision => decision.order.kind === "build_refinery")!;
+  assert.ok(refinery, "the first build is a refinery");
+  // On the catalyst deposit nearest the HQ, ordered in the HQ's name.
+  assert.deepEqual([refinery.order.x, refinery.order.y], [477, 776]);
+  assert.deepEqual(refinery.units, [1]);
+  // Every gather goes to material, and none to a catalyst deposit.
   const gathers = decisions.filter(decision => decision.order.kind === "gather");
-  // No worker is taken by the barracks; of the four, exactly two go to
-  // catalyst — enough to reach the tech that needs it, not enough to starve the
-  // material economy that pays for the army.
-  assert.equal(gathers.filter(decision => decision.order.target === catalyst.id).length, 2);
-  assert.equal(gathers.filter(decision => decision.order.target === material.id).length, 2);
-  // Workers already on catalyst are counted, so the posting does not grow.
-  const posted = grown.map(worker => worker.kind === "worker" && worker.id > 3 ? { ...worker, order: { kind: "gather", x: 0, y: 0, target: catalyst.id } } : worker);
-  const resent = chooseOrders(0, "industrial", purse(250), posted, [material, catalyst], new Set()).filter(decision => decision.order.kind === "gather");
-  assert.ok(resent.every(decision => decision.order.target === material.id));
-  // A map with no catalyst left must not idle the workforce.
-  const drained = chooseOrders(0, "industrial", purse(250), grown, [material, { ...catalyst, amount: 0 }], new Set()).filter(decision => decision.order.kind === "gather");
+  assert.equal(gathers.length, 2);
+  assert.ok(gathers.every(decision => decision.order.target === material.id));
+  // Pending command: not placed twice. Nothing placed without the money.
+  assert.ok(!chooseOrders(0, "industrial", purse(250), opening, [material, near, far], new Set([1])).some(decision => decision.order.kind.startsWith("build_")));
+  assert.ok(!chooseOrders(0, "industrial", purse(74), opening, [material, near, far], new Set()).some(decision => decision.order.kind === "build_refinery"));
+  // A refinery already standing takes the first slot; with a barracks up the
+  // second goes on the next deposit, and a third is never wanted.
+  const first = { ...unit(9, 0, "refinery"), x: 477, y: 776 };
+  const grown = [hub, first, ...[2, 3, 4, 5].map(id => ({ ...unit(id, 0, "worker"), x: 600, y: 600 })), { ...unit(10, 0, "barracks"), x: 600, y: 400 }];
+  const second = chooseOrders(0, "industrial", purse(500), grown, [material, near, far], new Set()).find(decision => decision.order.kind === "build_refinery");
+  assert.ok(second && second.order.x === 776 && second.order.y === 477, "the second refinery goes on the next deposit");
+  const both = [...grown, { ...unit(11, 0, "refinery"), x: 776, y: 477 }];
+  assert.ok(!chooseOrders(0, "industrial", purse(500), both, [material, near, far], new Set()).some(decision => decision.order.kind === "build_refinery"));
+  // Idle labour never goes to catalyst even when it is the only deposit left.
+  const idleOnly = chooseOrders(0, "industrial", purse(0), [hub, unit(2, 0, "worker")], [near], new Set());
+  assert.ok(!idleOnly.some(decision => decision.order.kind === "gather"));
+  // No catalyst left on the map must not idle the workforce.
+  const drained = chooseOrders(0, "industrial", purse(250), grown, [material, { ...near, amount: 0 }], new Set()).filter(decision => decision.order.kind === "gather");
   assert.equal(drained.length, 4);
   assert.ok(drained.every(decision => decision.order.target === material.id));
 });
 
-test("bot will not order a specialist it cannot pay the catalyst for", () => {
+test("bot will not order an army unit it cannot pay the catalyst for", () => {
   // The second barracks is still going up and the lab is busy, so nothing in
   // the build order competes with the siege for this purse.
   const units = [unit(1, 0, "hq"), unit(2, 0, "barracks"), unit(3, 0, "factory"), { ...unit(4, 0, "barracks"), constructionRemaining: 10n }, unit(5, 0, "lab")];
-  const starved = chooseOrders(0, "industrial", purse(400, 49), units, [], new Set([5]));
+  // A soldier (100) comes off the same catalyst first, leaving 199 for a siege.
+  const starved = chooseOrders(0, "industrial", purse(400, 299), units, [], new Set([5]));
   assert.ok(!starved.some(decision => decision.order.kind === "train_siege"));
   // Material was plentiful the whole time: it is the catalyst that stopped it.
-  assert.equal(shortfall(purse(400, 49), CATALOG.siege.cost), "catalyst");
-  const funded = chooseOrders(0, "industrial", purse(400, 50), units, [], new Set([5]));
+  assert.equal(shortfall(purse(400, 199), CATALOG.siege.cost), "catalyst");
+  const funded = chooseOrders(0, "industrial", purse(400, 300), units, [], new Set([5]));
   assert.ok(funded.some(decision => decision.order.kind === "train_siege"));
-  // 400/50 buys a worker, a soldier and the siege exactly; nothing is ordered
-  // twice out of the same coin.
+  // 400 material and 300 catalyst buy a worker, a soldier and the siege
+  // exactly; nothing is ordered twice out of the same coin.
   assert.deepEqual(funded.map(decision => decision.order.kind), ["train_worker", "train_soldier", "train_siege"]);
 });
 
-test("bot buys catalyst-gated technology as soon as both currencies cover it", () => {
+test("bot buys technology as soon as the material covers it", () => {
   const units = [unit(1, 0, "hq"), unit(2, 0, "lab")];
-  const starved = chooseOrders(0, "industrial", purse(100, 49), units, [], new Set());
+  const starved = chooseOrders(0, "industrial", purse(149), units, [], new Set());
   assert.ok(!starved.some(decision => decision.order.kind.startsWith("research_")));
-  // A catalyst shortage must not freeze the rest of the economy: the material
-  // it cannot spend on technology still buys units, so the bot keeps playing.
+  // The opening labour is never held back, so the bot keeps playing while it saves.
   assert.deepEqual(starved.map(decision => decision.order.kind), ["train_worker"]);
-  const decisions = chooseOrders(0, "industrial", purse(100, 50), units, [], new Set());
+  const decisions = chooseOrders(0, "industrial", purse(150), units, [], new Set());
   assert.equal(decisions.length, 1);
   assert.equal(decisions[0].order.kind, "research_weapons");
   assert.deepEqual(decisions[0].units, [2]);
   // With the technology paid for, the bot goes back to producing units.
-  const rich = chooseOrders(0, "industrial", purse(300, 50), units, [], new Set());
+  const rich = chooseOrders(0, "industrial", purse(300), units, [], new Set());
   assert.deepEqual(rich.map(decision => decision.order.kind), ["research_weapons", "train_worker"]);
   // A technology already owned is not bought twice.
-  const done = { ...purse(300, 50), research: ["research_weapons", "research_armor", "research_logistics"] };
+  const done = { ...purse(300), research: ["research_weapons", "research_armor", "research_logistics"] };
   assert.ok(!chooseOrders(0, "industrial", done, units, [], new Set()).some(decision => decision.order.kind.startsWith("research_")));
 });
 
@@ -349,7 +394,7 @@ test("only the drifter carries nothing and the harvester carries least", () => {
   assert.equal(CATALOG.drifter.seconds, 2.5);
   assert.equal(CATALOG.harvester.seconds, 2);
   // Free is not free of everything: a harvester costs one point of hub stock.
-  assert.deepEqual(CATALOG.harvester.cost, { material: 0, catalyst: 0 });
+  assert.deepEqual(CATALOG.harvester.cost, { material: 0, catalyst: 0, terrazine: 0 });
   assert.equal(formatCost(CATALOG.harvester.cost), "nothing");
   assert.equal(formatCost(CATALOG.drifter.cost), "40 material");
   // The three are told apart by silhouette size as well as by shape: each one
@@ -432,22 +477,29 @@ test("the bot spends harvester stock and stops when the hub is empty", () => {
   assert.ok(chooseOrders(0, "industrial", purse(250), industrial, deposits, new Set()).filter(decision => decision.units.includes(3)).every(decision => decision.order.kind === "train_worker"));
 });
 
-test("every faction still builds, mines catalyst and attacks, so it plays as an opponent", () => {
+test("every faction still builds, extracts catalyst and attacks, so it plays as an opponent", () => {
   const material = deposit(1, 360, 360, 4000);
-  const catalyst = deposit(7, 600, 800, 1200, "catalyst");
+  const catalyst = deposit(7, 360, 420, 1200, "catalyst");
   for (const faction of FACTIONS) {
     const kind = LABOUR[faction];
-    const base: Entity[] = [hubWith(1, 0, "hq", HUB_STOCK_CAP), ...[2, 3, 4, 5].map(id => unit(id, 0, kind))];
+    // Its first move is a refinery on the nearest catalyst deposit, which is
+    // what pays for the whole army.
+    const opening: Entity[] = [hubWith(1, 0, "hq", HUB_STOCK_CAP), ...[2, 3].map(id => unit(id, 0, kind))];
+    const first = chooseOrders(0, faction, purse(250), opening, [material, catalyst], new Set()).find(decision => decision.order.kind === "build_refinery");
+    assert.ok(first, `${faction} never builds a refinery`);
+    assert.deepEqual([first!.order.x, first!.order.y], [catalyst.x, catalyst.y], faction);
+    const refinery = { ...unit(30, 0, "refinery"), x: catalyst.x, y: catalyst.y };
+    const base: Entity[] = [hubWith(1, 0, "hq", HUB_STOCK_CAP), refinery, ...[2, 3, 4, 5].map(id => unit(id, 0, kind))];
     const decisions = chooseOrders(0, faction, purse(250), base, [material, catalyst], new Set());
     // Four labour is the barracks threshold for every faction alike, and the
     // site it picks is a legal one.
     const build = decisions.find(decision => decision.order.kind === "build_barracks");
     assert.ok(build, `${faction} never builds a barracks`);
     assert.equal(placementError("barracks", build!.order.x, build!.order.y, 0, base, []), undefined, faction);
-    // A share of the workforce goes to catalyst, or the faction can never buy a
-    // factory, a laboratory, siege or any technology at all.
+    // Labour only mines material; the refinery does the catalyst.
     const gathers = decisions.filter(decision => decision.order.kind === "gather");
-    assert.equal(gathers.filter(decision => decision.order.target === catalyst.id).length, 2, faction);
+    assert.equal(gathers.filter(decision => decision.order.target === catalyst.id).length, 0, faction);
+    assert.equal(gathers.filter(decision => decision.order.target === material.id).length, 4, faction);
     // And it attacks with its army, never with labour.
     const army: Entity[] = [hubWith(1, 0, "hq", HUB_STOCK_CAP), ...[2, 3, 4, 5].map(id => unit(id, 0, "soldier")), { ...unit(9, 1, "hq"), x: 1380 }];
     const attack = chooseOrders(0, faction, purse(50), army, [], new Set()).find(decision => decision.order.kind === "attack_move");
@@ -498,7 +550,7 @@ test("the bot never asks a hub for an army unit, and a saturated hub orders noth
     const barracks = { ...unit(20, 0, "barracks"), x: 440, y: 220 };
     const outpost = { ...hubWith(21, 0, "outpost", HUB_STOCK_CAP), x: 220, y: 580 };
     const grown: Entity[] = [...opening, barracks, outpost];
-    const trained = chooseOrders(0, faction, purse(600), grown, deposits, new Set()).filter(decision => decision.order.kind.startsWith("train_"));
+    const trained = chooseOrders(0, faction, purse(600, 600), grown, deposits, new Set()).filter(decision => decision.order.kind.startsWith("train_"));
     for (const decision of trained) {
       const producer = grown.find(entity => entity.id === decision.units[0])!;
       assert.ok(canProduce(decision.order.kind.slice("train_".length), producer.kind, faction), `${faction}: ${decision.order.kind} at ${producer.kind}`);
@@ -510,7 +562,7 @@ test("the bot never asks a hub for an army unit, and a saturated hub orders noth
 
     // A saturated workforce: every hub goes quiet, the barracks does not.
     const saturated: Entity[] = [...grown, ...Array.from({ length: 20 }, (_, index) => gathering(100 + index, kind))];
-    const late = chooseOrders(0, faction, purse(600), saturated, deposits, new Set());
+    const late = chooseOrders(0, faction, purse(600, 600), saturated, deposits, new Set());
     assert.ok(!late.some(decision => decision.units.includes(1) || decision.units.includes(21)), `${faction} kept a saturated hub busy`);
     assert.ok(late.some(decision => ARMY[faction].slice(0, 2).map(kind => `train_${kind}`).includes(decision.order.kind)), faction);
   }
@@ -520,9 +572,9 @@ test("the bot never asks a hub for an army unit, and a saturated hub orders noth
 
 function sample(tick: number, slot: number, fields: Partial<Sample> = {}): Sample {
   return {
-    tick: BigInt(tick), slot, material: 0, catalyst: 0, collectedMaterial: 0, collectedCatalyst: 0,
-    armyValueMaterial: 0, armyValueCatalyst: 0, labour: 0, army: 0, buildings: 0,
-    lostMaterial: 0, lostCatalyst: 0, ...fields,
+    tick: BigInt(tick), slot, material: 0, catalyst: 0, terrazine: 0, collectedMaterial: 0, collectedCatalyst: 0,
+    collectedTerrazine: 0, armyValueMaterial: 0, armyValueCatalyst: 0, labour: 0, army: 0, buildings: 0,
+    lostMaterial: 0, lostCatalyst: 0, lostTerrazine: 0, ...fields,
   };
 }
 
@@ -563,12 +615,12 @@ test("the score screen plots mined income, army value, floating balance and labo
   assert.equal(board.totals.find(entry => entry.slot === 0)!.mined.material, 800);
 });
 
-test("the two currencies are graphed apart and never added into one number", () => {
+test("the three currencies are graphed apart and never added into one number", () => {
   const board = buildScoreboard(match());
   // Every facet is denominated in exactly one currency, or in no currency at
   // all. There is no axis anywhere that material and catalyst share.
   for (const entry of facets(board)) {
-    assert.ok(entry.currency === "material" || entry.currency === "catalyst" || entry.currency === undefined, entry.key);
+    assert.ok(entry.currency === "material" || entry.currency === "catalyst" || entry.currency === "terrazine" || entry.currency === undefined, entry.key);
     if (entry.currency) assert.ok(entry.label.toLowerCase().includes(entry.currency), entry.label);
   }
   assert.deepEqual(values(board, "mined-catalyst", 0), [0, 60, 140]);
@@ -576,9 +628,9 @@ test("the two currencies are graphed apart and never added into one number", () 
   // A summed series would have to reach 800 + 140 somewhere; nothing does.
   assert.ok(!facets(board).some(entry => entry.series.some(series => series.final === 940)));
   const totals = board.totals.find(entry => entry.slot === 0)!;
-  assert.deepEqual(totals.mined, { material: 800, catalyst: 140 });
-  assert.deepEqual(totals.banked, { material: 60, catalyst: 10 });
-  assert.deepEqual(totals.lost, { material: 180, catalyst: 0 });
+  assert.deepEqual(totals.mined, { material: 800, catalyst: 140, terrazine: 0 });
+  assert.deepEqual(totals.banked, { material: 60, catalyst: 10, terrazine: 0 });
+  assert.deepEqual(totals.lost, { material: 180, catalyst: 0, terrazine: 0 });
 });
 
 test("a currency nobody ever touched is not given an empty axis of its own", () => {
@@ -779,7 +831,7 @@ test("brood and brutes fight but are not army, not trainable and take no supply"
     assert.ok(isTemporary(kind) && fights(kind), kind);
     assert.equal(isArmy(kind), false, kind);
     assert.equal(takesSupply(kind), false, kind);
-    assert.deepEqual(costOf(kind), { material: 0, catalyst: 0 });
+    assert.deepEqual(costOf(kind), { material: 0, catalyst: 0, terrazine: 0 });
     for (const building of ["hq", "outpost", "barracks", "factory"]) for (const faction of FACTIONS) assert.equal(canProduce(kind, building, faction), false);
   }
   assert.deepEqual([CATALOG.brood.hp, CATALOG.brute.hp], [30, 70]);
@@ -845,13 +897,14 @@ test("shield, channel and arrival state read off the unit row", () => {
 });
 
 test("each faction's army is priced and bodied as the server lists it", () => {
-  // Mirrors rules::stats for the six faction units.
-  const expected: Record<string, [number, number, number]> = {
-    sentinel: [220, 150, 0], skimmer: [70, 90, 0], lancer: [240, 175, 75],
-    swarmer: [60, 50, 0], spitter: [85, 90, 0], crusher: [420, 175, 75],
+  // Mirrors rules::stats for the six faction units: health, then the
+  // catalyst price (the army costs nothing else).
+  const expected: Record<string, [number, number]> = {
+    sentinel: [220, 150], skimmer: [70, 90], lancer: [240, 250],
+    swarmer: [60, 50], spitter: [85, 90], crusher: [420, 250],
   };
-  for (const [kind, [hp, material, catalyst]] of Object.entries(expected)) {
-    assert.deepEqual([CATALOG[kind].hp, CATALOG[kind].cost.material, CATALOG[kind].cost.catalyst], [hp, material, catalyst], kind);
+  for (const [kind, [hp, catalyst]] of Object.entries(expected)) {
+    assert.deepEqual([CATALOG[kind].hp, CATALOG[kind].cost.material, CATALOG[kind].cost.catalyst, CATALOG[kind].cost.terrazine], [hp, 0, catalyst, 0], kind);
     assert.ok(isArmy(kind) && fights(kind) && takesSupply(kind), kind);
   }
   assert.deepEqual(FACTIONS.map(faction => ARMY[faction][2]).map(armyBuilding), ["factory", "factory", "factory"]);
@@ -862,8 +915,9 @@ test("each faction's army is priced and bodied as the server lists it", () => {
 test("the client's map hash is the server's, byte for byte", () => {
   // Pinned in server/src/maps.rs as SKIRMISH_CONTENT_HASH.
   assert.equal(mapContentHash(skirmishMap), 0x4756989d5a0df082n);
-  // Crossfire's, as the server wrote it into a live room's map_hash.
-  assert.equal(MAP_HASH, 0x82f409b8597b4cf1n);
+  // Expanse's: pinned in server/src/maps.rs as EXPANSE_CONTENT_HASH, the value
+  // the server writes into a new room's map_hash.
+  assert.equal(MAP_HASH, 0x18f42e085fe019b4n);
 });
 
 test("the bot adds a second barracks once its factory is under way", () => {

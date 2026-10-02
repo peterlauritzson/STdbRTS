@@ -45,9 +45,13 @@ function castAbility(owner: number, faction: FactionName, owned: Entity[], units
 
 /** Material held back so a repair pulse is always payable. */
 const REPAIR_RESERVE = 20;
-/** Labour kept on catalyst once the opening labour count is reached. */
-const CATALYST_MINERS = 2;
-const CATALYST_MINER_THRESHOLD = 4;
+/**
+ * Refineries the bot builds: the catalyst deposits nearest its HQ. Catalyst
+ * buys every army unit and is extracted only by a refinery, so the first goes
+ * down at the very start and a second once the barracks is under way.
+ */
+const REFINERIES_FIRST = 1;
+const REFINERIES_WANTED = 2;
 /** The labour count the opening builds up to, for every faction alike. */
 const OPENING_LABOUR = 6;
 /**
@@ -88,10 +92,24 @@ function buildSite(kind: string, hq: Entity, owner: number, units: Entity[], nod
 }
 
 /**
+ * The catalyst deposit nearest the HQ that can take a refinery right now, or
+ * undefined: every legal site has to pass the same placement check the build
+ * preview uses, so the bot never orders a refinery the server would refuse.
+ */
+function refinerySite(hq: Entity, owner: number, units: Entity[], nodes: Node[]): { x: number; y: number } | undefined {
+  return nodes
+    .filter(node => currencyOf(node.kind) === "catalyst" && node.amount > 0 && !placementError("refinery", node.x, node.y, owner, units, nodes))
+    .sort((left, right) => Math.hypot(left.x - hq.x, left.y - hq.y) - Math.hypot(right.x - hq.x, right.y - hq.y) || left.id - right.id)
+    .map(node => ({ x: node.x, y: node.y }))[0];
+}
+
+/**
  * The practice opponent's policy. It sees exactly what any authenticated
  * client sees — the public unit, node and command rows of its own match — and
- * decides from `balance`, which is its own two-currency purse. Both currencies
- * must cover a price; nothing here may assume one can stand in for the other.
+ * decides from `balance`, which is its own three-currency purse. Every currency
+ * must cover a price; nothing here may assume one can stand in for another:
+ * labour, structures and research are material, the army is catalyst and
+ * turrets are terrazine.
  *
  * `faction` is the one the server dealt this slot, read from the bot's own
  * `Player` row exactly as any other client would read it. It decides which
@@ -117,7 +135,7 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
   const workers = owned.filter(unit => isLabour(unit.kind));
   const soldiers = owned.filter(unit => isArmy(unit.kind));
   const assigned = new Set(busy);
-  let available: Cost = { material: balance.material, catalyst: balance.catalyst };
+  let available: Cost = { material: balance.material, catalyst: balance.catalyst, terrazine: balance.terrazine };
   const repairing = workers.some(unit => unit.order.kind === "repair");
   // Three quarters of full hit points: 900 of 1200 for most HQs, 450 of the
   // 600 a Network HQ carries beside its shields.
@@ -128,39 +146,41 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
   // What is spendable after the repair reserve; the reserve is material only,
   // because repair is only ever charged in material.
   const reserve = repairing || repairer ? REPAIR_RESERVE : 0;
-  const spendable = (): Cost => ({ material: Math.max(0, available.material - reserve), catalyst: available.catalyst });
+  const spendable = (): Cost => ({ ...available, material: Math.max(0, available.material - reserve) });
   const has = (kind: string) => owned.some(unit => unit.kind === kind);
   const count = (kind: string) => owned.filter(unit => unit.kind === kind).length;
   const ready = (kind: string) => owned.some(unit => unit.kind === kind && unit.constructionRemaining === 0n);
-  const desired = workers.length >= 4 && !has("barracks") ? "barracks"
+  const refineries = count("refinery");
+  const refineryAt = refinerySite(hq, owner, units, nodes);
+  const desired = refineryAt && refineries < REFINERIES_FIRST ? "refinery"
+    : workers.length >= 4 && !has("barracks") ? "barracks"
     : workers.length >= OPENING_LABOUR && !has("outpost") ? "outpost"
     : ready("barracks") && soldiers.length >= 3 && !has("factory") ? "factory"
     // A second barracks once the factory is under way: with one, every faction
     // floated thousands of material by 3:00 that it had nowhere to spend.
     : has("factory") && count("barracks") < 2 ? "barracks"
-    : soldiers.length >= 3 && !has("turret") ? "turret"
+    : refineryAt && has("barracks") && refineries < REFINERIES_WANTED ? "refinery"
+    // Turrets cost terrazine, a by-product of mining that only builds up over
+    // time: one is built when it is affordable, never waited for.
+    : soldiers.length >= 3 && !has("turret") && affords(available, CATALOG.turret.cost) ? "turret"
     : ready("factory") && !has("lab") ? "lab" : undefined;
   // Command-card construction: the order names the HQ and the site raises
   // itself, so no labour is taken off mining. A command still scheduled for
   // the HQ may be this build, not yet executed, so nothing is placed until it
   // clears; otherwise the one-second delay would place the same building twice.
   if (desired && !busy.has(hq.id) && affords(available, CATALOG[desired].cost)) {
-    const point = buildSite(desired, hq, owner, units, nodes);
+    const point = desired === "refinery" ? refineryAt : buildSite(desired, hq, owner, units, nodes);
     if (point) {
       decisions.push({ units: [hq.id], order: { kind: `build_${desired}`, ...point, target: 0 } });
       available = spend(available, CATALOG[desired].cost);
     }
   }
-  // Catalyst has to be mined deliberately: it is nowhere near a start position
-  // and nothing else produces it, so a fixed share of the workforce is posted
-  // to it once the opening worker count is up. Without this the bot can never
-  // buy a factory, a laboratory, siege or any technology.
+  // Labour only ever mines material: catalyst comes from the refineries above
+  // and the server refuses a gather order on a catalyst deposit. The server
+  // also spreads labour across the patches (one miner each), so every idle
+  // worker is simply sent to the nearest one.
   const live = nodes.filter(node => node.amount > 0);
-  const catalystNodes = live.filter(node => currencyOf(node.kind) === "catalyst");
   const materialNodes = live.filter(node => currencyOf(node.kind) === "material");
-  const onCatalyst = (worker: Entity) => worker.order.kind === "gather" && catalystNodes.some(node => node.id === worker.order.target);
-  let miners = workers.filter(onCatalyst).length;
-  const wanted = workers.length >= CATALYST_MINER_THRESHOLD ? CATALYST_MINERS : 0;
   // Only idle labour is redirected. A drifter that is already gathering is
   // therefore never touched again: it has no return trip, so it stays parked on
   // its deposit for the rest of the match, which is the whole Network model.
@@ -170,11 +190,9 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
     // holds cargo in the first place, so the return trip is guarded on the
     // carrier model rather than on the cargo field alone.
     if (worker.cargo && carriesCargo(worker.kind)) { decisions.push({ units: [worker.id], order: { kind: "return", x: 0, y: 0, target: 0 } }); continue; }
-    const wantsCatalyst = miners < wanted && catalystNodes.length > 0;
-    const target = nearest(wantsCatalyst ? catalystNodes : materialNodes.length ? materialNodes : catalystNodes, worker);
+    const target = nearest(materialNodes, worker);
     if (!target) continue;
     decisions.push({ units: [worker.id], order: { kind: "gather", x: 0, y: 0, target: target.id } });
-    if (currencyOf(target.kind) === "catalyst") miners++;
   }
   // Labour can be queued at any hub now, not only at the HQ, so what is already
   // on order is counted across every building this player owns.
@@ -187,9 +205,8 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
   const labourTarget = has("barracks") ? Math.min(LABOUR_CAP, Math.max(OPENING_LABOUR, LABOUR_PER_HUB * hubs)) : OPENING_LABOUR;
   const technology = Object.keys(TECHNOLOGIES).find(kind => !researched.includes(`research_${kind}`) && !owned.some(unit => unit.production.some(item => item.kind === `research_${kind}`)));
   const lab = owned.find(unit => unit.kind === "lab" && unit.constructionRemaining === 0n && unit.production.length === 0 && !assigned.has(unit.id));
-  // Technology costs both currencies. If it is wanted but unaffordable the bot
-  // saves for it; once it has been ordered this turn it stops saving, so a
-  // catalyst-poor turn never freezes unit production outright.
+  // Technology costs material. If it is wanted but unaffordable the bot saves
+  // for it; once it has been ordered this turn it stops saving.
   let savingForResearch = !!(lab && technology);
   if (lab && technology && affords(spendable(), RESEARCH_COST)) {
     decisions.push({ units: [lab.id], order: { kind: `research_${technology}`, x: 0, y: 0, target: 0 } });
@@ -197,9 +214,9 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
     savingForResearch = false;
   }
   // Holding material back for a purchase only makes sense while material is
-  // what is missing. A purchase waiting on catalyst is waiting on mining, not
-  // on spending, so the army keeps being built in the meantime — otherwise a
-  // catalyst shortage would quietly stop the opponent from playing.
+  // what is missing, and only against another material purchase. The army is
+  // paid for in catalyst, so a purchase waiting on material never holds it up,
+  // and one waiting on catalyst is waiting on refineries, not on spending.
   const saving = (cost: Cost) => shortfall(available, cost) === "material";
   let population = owned.filter(unit => takesSupply(unit.kind)).length + owned.reduce((total, unit) => total + unit.production.filter(item => !item.kind.startsWith("research_")).length, 0);
   // Stock is spent when the item is queued, so two harvesters asked of the same
@@ -228,7 +245,8 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
     // else. Past it, labour waits on a wanted building exactly as the army does,
     // so a growing workforce cannot starve the barracks it is meant to feed.
     const opening = kind === labour && labourCount < OPENING_LABOUR;
-    if ((desired && saving(CATALOG[desired].cost) && !opening) || (savingForResearch && saving(RESEARCH_COST) && !opening)) continue;
+    const usesMaterial = CATALOG[kind].cost.material > 0;
+    if (usesMaterial && ((desired && saving(CATALOG[desired].cost) && !opening) || (savingForResearch && saving(RESEARCH_COST) && !opening))) continue;
     // A harvester is free of currency and bought with one point of this hub's
     // stock. Without this the bot would order one every pass and be refused
     // every pass, because `affords` is trivially true for a price of nothing.

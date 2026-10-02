@@ -109,9 +109,9 @@ export function niceMax(value: number): number {
 
 function emptySample(slot: number, tick: bigint): Sample {
   return {
-    tick, slot, material: 0, catalyst: 0, collectedMaterial: 0, collectedCatalyst: 0,
-    armyValueMaterial: 0, armyValueCatalyst: 0, labour: 0, army: 0, buildings: 0,
-    lostMaterial: 0, lostCatalyst: 0,
+    tick, slot, material: 0, catalyst: 0, terrazine: 0, collectedMaterial: 0, collectedCatalyst: 0,
+    collectedTerrazine: 0, armyValueMaterial: 0, armyValueCatalyst: 0, labour: 0, army: 0, buildings: 0,
+    lostMaterial: 0, lostCatalyst: 0, lostTerrazine: 0,
   };
 }
 
@@ -166,7 +166,7 @@ function carries(facet: ScoreFacet): boolean {
 }
 
 function panelOf(key: string, title: string, caption: string, facets: ScoreFacet[], empty: string): ScorePanel {
-  const kept = facets.filter(facet => facet.currency !== "catalyst" || carries(facet));
+  const kept = facets.filter(facet => (facet.currency !== "catalyst" && facet.currency !== "terrazine") || carries(facet));
   const live = kept.some(carries) ? kept : [];
   return { key, title, caption, facets: live, empty: live.length ? "" : empty };
 }
@@ -202,6 +202,7 @@ export function buildScoreboard(samples: readonly Sample[], incomeMode: IncomeMo
 
   const minedMaterial = (sample: Sample) => sample.collectedMaterial;
   const minedCatalyst = (sample: Sample) => sample.collectedCatalyst;
+  const minedTerrazine = (sample: Sample) => sample.collectedTerrazine;
   const mined = (read: (sample: Sample) => number) =>
     incomeMode === "rate"
       ? (sample: Sample, index: number, all: Sample[]) => perMinute(read(sample), index, all, seconds, read)
@@ -210,10 +211,11 @@ export function buildScoreboard(samples: readonly Sample[], incomeMode: IncomeMo
 
   const panels = [
     panelOf("income", incomeMode === "rate" ? "Income rate" : "Income", incomeMode === "rate"
-      ? "Mined per minute, sample to sample. Mining only: the opening stipend (200 material a minute for 90 seconds, then 100 a minute for 90 more) and every refund are excluded, so this is how well each commander actually worked the deposits and nothing else."
-      : "Cumulative mined. Mining only: the opening stipend (200 material a minute for 90 seconds, then 100 a minute for 90 more) and every refund are excluded, so this is how well each commander actually worked the deposits and nothing else. The slope is the rate; the end of the line is the match total.",
+      ? "Mined per minute, sample to sample. Mining only: the base income (200 material a minute for 90 seconds, then 100 a minute for good) and every refund are excluded, so this is how well each commander actually worked the deposits and nothing else."
+      : "Cumulative mined. Mining only: the base income (200 material a minute for 90 seconds, then 100 a minute for good) and every refund are excluded, so this is how well each commander actually worked the deposits and nothing else. The slope is the rate; the end of the line is the match total.",
       [facet("mined-material", `Material${suffix}`, "material", mined(minedMaterial)),
-        facet("mined-catalyst", `Catalyst${suffix}`, "catalyst", mined(minedCatalyst))],
+        facet("mined-catalyst", `Catalyst${suffix}`, "catalyst", mined(minedCatalyst)),
+        facet("mined-terrazine", `Terrazine${suffix}`, "terrazine", mined(minedTerrazine))],
       "Neither commander mined anything before the match ended."),
     panelOf("army", "Army value", "The summed cost of the army units alive at each sample. A cliff is a battle; a line that never leaves the floor is a commander who never built one.",
       [facet("army-material", "Army value in material", "material", sample => sample.armyValueMaterial),
@@ -221,7 +223,8 @@ export function buildScoreboard(samples: readonly Sample[], incomeMode: IncomeMo
       "No army units were alive at any sample."),
     panelOf("banked", "Unspent", "Banked and doing nothing. Income that keeps climbing here never became army, labour or buildings — floating is usually the story of a lost match.",
       [facet("banked-material", "Unspent material", "material", sample => sample.material),
-        facet("banked-catalyst", "Unspent catalyst", "catalyst", sample => sample.catalyst)],
+        facet("banked-catalyst", "Unspent catalyst", "catalyst", sample => sample.catalyst),
+        facet("banked-terrazine", "Unspent terrazine", "terrazine", sample => sample.terrazine)],
       "Neither commander held a balance at any sample."),
     panelOf("labour", "Labour", "Workers, drifters or harvesters alive. This is the cause the income graph is the effect of.",
       [facet("labour", "Labour units", undefined, sample => sample.labour)],
@@ -234,9 +237,9 @@ export function buildScoreboard(samples: readonly Sample[], incomeMode: IncomeMo
     const outIndex = outs.get(slot);
     return {
       slot,
-      mined: { material: last.collectedMaterial, catalyst: last.collectedCatalyst },
-      lost: { material: last.lostMaterial, catalyst: last.lostCatalyst },
-      banked: { material: last.material, catalyst: last.catalyst },
+      mined: { material: last.collectedMaterial, catalyst: last.collectedCatalyst, terrazine: last.collectedTerrazine },
+      lost: { material: last.lostMaterial, catalyst: last.lostCatalyst, terrazine: last.lostTerrazine },
+      banked: { material: last.material, catalyst: last.catalyst, terrazine: last.terrazine },
       labour: last.labour, army: last.army, buildings: last.buildings,
       outSeconds: outIndex === undefined ? undefined : seconds[outIndex],
     };

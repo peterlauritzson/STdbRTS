@@ -395,8 +395,27 @@ mod tests {
     /// the simulation tests keep their small, coordinate-stable world; this is
     /// what a player actually gets.
     #[test]
-    fn matches_are_created_on_a_four_base_melee_map_with_no_resources_in_the_centre() {
+    fn matches_are_created_on_expanse_with_no_resources_in_the_centre() {
         let map = by_id(DEFAULT_MATCH_MAP).expect("the configured match map must exist");
+        assert_eq!(map.id, "expanse");
+        assert_eq!(map.size, 9600.0);
+        map.validate().expect("the match map must pass validation");
+        let centre = map.size / 2.0;
+        let nearest = map
+            .deposits
+            .iter()
+            .map(|d| distance(centre, centre, d.x, d.y))
+            .fold(f32::MAX, f32::min);
+        assert!(
+            nearest > 700.0,
+            "a deposit sits {nearest:.0} units from the centre; the centre must carry no resources"
+        );
+    }
+
+    /// Crossfire, the match map before expanse, stays registered and unchanged.
+    #[test]
+    fn crossfire_is_a_four_base_melee_map_with_no_resources_in_the_centre() {
+        let map = by_id("crossfire").expect("crossfire stays registered");
         assert_eq!(map.id, "crossfire");
         assert_eq!(map.size, 3200.0);
         assert_eq!(map.starts.len(), 4);
@@ -428,6 +447,33 @@ mod tests {
             "a deposit sits {nearest:.0} units from the centre; the centre must carry no resources"
         );
     }
+
+    /// The 9600 map at the inclusive size ceiling, through the real validator
+    /// (including the route BFS over its 240x240 navigation grid).
+    #[test]
+    fn expanse_parses_validates_and_has_rotational_symmetry() {
+        let map = by_id("expanse").expect("expanse must be registered");
+        assert_eq!(map.id, "expanse");
+        assert_eq!(map.size, crate::MAX_WORLD_SIZE);
+        assert_eq!(map.starts.len(), 4);
+        assert_eq!(map.deposits.len(), 240);
+        assert_eq!(map.validate_routes(), Ok(()));
+        // Four-fold symmetry: every start is the previous one turned a quarter
+        // clockwise about the centre, so no slot has a positional advantage.
+        for i in 0..4 {
+            let [x, y] = map.starts[i];
+            let [nx, ny] = map.starts[(i + 1) % 4];
+            assert!((nx - (map.size - y)).abs() < 0.2 && (ny - x).abs() < 0.2);
+        }
+        assert_eq!(by_id("expanse").unwrap().content_hash(), expanse_map().content_hash());
+        // The match map's hash is compared with the client's bundled copy
+        // (tests/presentation.test.ts pins the same value), so it is pinned.
+        assert_eq!(map.content_hash(), EXPANSE_CONTENT_HASH);
+    }
+
+    /// Expanse's content hash, as the client computes it from its bundled
+    /// copy. Re-pin both together if the map is ever deliberately edited.
+    const EXPANSE_CONTENT_HASH: u64 = 0x18f4_2e08_5fe0_19b4;
 
     #[test]
     fn a_match_map_id_always_resolves_to_the_same_definition() {
@@ -570,7 +616,7 @@ mod tests {
         assert!(invalid.validate().is_err());
         invalid = valid.clone();
         // Past the ceiling.
-        invalid.size = 8000.0;
+        invalid.size = 12000.0;
         assert!(invalid.validate().is_err());
         invalid = valid.clone();
         invalid.terrain[0][2] = -10.0;
@@ -595,9 +641,10 @@ mod tests {
         // A larger extent only adds empty ground around the same geometry.
         assert!(sized(2400.0).is_ok());
         assert!(sized(4080.0).is_ok());
+        assert!(sized(crate::MAX_WORLD_SIZE).is_ok());
 
         assert!(sized(1560.0).unwrap_err().contains("between"));
-        assert!(sized(4120.0).unwrap_err().contains("between"));
+        assert!(sized(crate::MAX_WORLD_SIZE + 40.0).unwrap_err().contains("between"));
         assert!(sized(3210.0).unwrap_err().contains("navigation cell"));
         assert!(sized(0.0).unwrap_err().contains("positive finite"));
         assert!(sized(f32::NAN).unwrap_err().contains("positive finite"));
@@ -734,8 +781,19 @@ pub fn crossfire_map() -> &'static MapDefinition {
     })
 }
 
+/// The 9600-unit, 24-base melee map (3x crossfire's diameter), and the map new
+/// matches are created on since the engine-scaling increment (step 28) made its
+/// 240x240 navigation grid affordable.
+pub fn expanse_map() -> &'static MapDefinition {
+    static MAP: OnceLock<MapDefinition> = OnceLock::new();
+    MAP.get_or_init(|| {
+        MapDefinition::parse(include_str!("../../shared/maps/expanse.json"))
+            .expect("valid built-in expanse map")
+    })
+}
+
 /// The map a newly created match is played on.
-pub const DEFAULT_MATCH_MAP: &str = "crossfire";
+pub const DEFAULT_MATCH_MAP: &str = "expanse";
 
 /// Resolves a frozen `Room.map_id` back to its definition. A match records the
 /// map it was created on and must keep resolving to that same map for its whole
@@ -743,6 +801,7 @@ pub const DEFAULT_MATCH_MAP: &str = "crossfire";
 pub fn by_id(id: &str) -> Option<&'static MapDefinition> {
     match id {
         "crossfire" => Some(crossfire_map()),
+        "expanse" => Some(expanse_map()),
         "skirmish" => Some(default_map()),
         _ => None,
     }

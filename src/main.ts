@@ -1,10 +1,10 @@
 import "../styles.css";
-import { createElement, createIcons, Keyboard, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, type IconNode } from "lucide";
+import { createElement, createIcons, Keyboard, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, type IconNode } from "lucide";
 import { ABILITIES, castRefusal, scheduledCasts, type AbilityKind } from "./abilities";
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
 import { COLORS, countdown, TICK_MS, VISUALS } from "./presentation";
-import { addCost, isCompletedHub, ARMY, armyFaction, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
+import { addCost, NO_COST, isCompletedHub, ROSTER, armyBuilding, armyFaction, describe, passiveLine, veteranStacks, isVeteran, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_BUILDINGS, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
 import { Practice, type PracticeOpponent } from "./practice";
 import { Feedback } from "./feedback";
 import { ScoreScreen, type ScorePlayer } from "./scorescreen";
@@ -72,10 +72,10 @@ function affordability(button: HTMLButtonElement, cost: Cost, balance: Cost, blo
  */
 const LABOUR_KINDS = ["worker", "drifter", "harvester"];
 /** Each faction's labour and army; a player only ever sees their own. */
-const TRAINABLE = [...LABOUR_KINDS, ...FACTIONS.flatMap(faction => ARMY[faction])];
+const TRAINABLE = [...LABOUR_KINDS, ...FACTIONS.flatMap(faction => ROSTER[faction])];
 for (const kind of TRAINABLE) {
   const definition = CATALOG[kind];
-  const button = catalogButton(`train-${kind}`, definition.label, definition.cost, definition.seconds, definition.icon, definition.role);
+  const button = catalogButton(`train-${kind}`, definition.label, definition.cost, definition.seconds, definition.icon, describe(kind));
   button.hidden = true;
   element("training-buttons").append(button);
 }
@@ -85,20 +85,22 @@ for (const kind of TRAINABLE) {
  * faction's labour is: the server refuses it by name, so a disabled button
  * would only be noise.
  */
-const BUILDABLE = ["barracks", "outpost", "turret", "factory", "lab", "sensor", "relay"];
+const BUILDABLE = ["barracks", "outpost", "turret", "factory", "lab", "sensor", "relay", "refinery", "bunker", "bastion", "spine"];
 for (const kind of BUILDABLE) {
   const definition = CATALOG[kind];
-  const button = catalogButton(`build-${kind}`, definition.label, definition.cost, definition.seconds, definition.icon, definition.role);
+  const button = catalogButton(`build-${kind}`, definition.label, definition.cost, definition.seconds, definition.icon, describe(kind));
   if (BUILDING_FACTION[kind]) button.hidden = true;
   element("building-buttons").append(button);
 }
 for (const [kind, definition] of Object.entries(TECHNOLOGIES)) element("research-buttons").append(catalogButton(`research-${kind}`, definition.label, RESEARCH_COST, RESEARCH_SECONDS, definition.icon, definition.description));
-createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, Keyboard } });
+createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle } });
 /** Catalogue icon names to icon nodes, for portraits built after `createIcons` has run. */
 const ICON_NODES: Record<string, IconNode> = {
   house: House, hammer: Hammer, radio: Radio, sprout: Sprout, swords: Swords, radar: Radar, crosshair: Crosshair,
   "shield-half": ShieldHalf, wind: Wind, zap: Zap, bug: Bug, droplets: Droplets, tent: Tent, factory: Factory,
-  shield: Shield, warehouse: Warehouse, "flask-conical": FlaskConical, "satellite-dish": SatelliteDish,
+  shield: Shield, warehouse: Warehouse, "flask-conical": FlaskConical, "satellite-dish": SatelliteDish, fuel: Fuel,
+  target: Target, "heart-pulse": HeartPulse, "brick-wall": BrickWall, waypoints: Waypoints, ghost: Ghost, eye: Eye,
+  footprints: Footprints, flame: Flame, skull: Skull, castle: Castle, triangle: Triangle,
 };
 function icon(name: string): SVGElement {
   return createElement(ICON_NODES[name] ?? Square);
@@ -248,9 +250,12 @@ function productionBuilding() {
 
 let warnedMapRoom: bigint | undefined;
 session.onNotice = message => {
+  clearTimeout(noticeTimer);
+  // An empty message withdraws the notice: a refusal that has since been
+  // answered (a placement that failed and then succeeded) must not linger.
+  if (!message) { element("notice").hidden = true; return; }
   element("notice").textContent = message;
   element("notice").hidden = false;
-  clearTimeout(noticeTimer);
   noticeTimer = setTimeout(() => { element("notice").hidden = true; }, 6000);
 };
 
@@ -445,7 +450,7 @@ function renderMatch(): void {
   const mobile = owned.filter(unit => takesSupply(unit.kind));
   const pending = owned.reduce((count, unit) => count + unit.production.filter(item => !item.kind.startsWith("research_")).length, 0);
   const canOrder = session.ready && session.matchReady && room.state === "playing" && alive;
-  const balance: Cost = { material: me.material, catalyst: me.catalyst };
+  const balance: Cost = { material: me.material, catalyst: me.catalyst, terrazine: me.terrazine };
   const faction = myFaction();
   const labour = LABOUR[faction];
   const fields = battlefield.fields();
@@ -453,6 +458,8 @@ function renderMatch(): void {
   element("material").textContent = String(balance.material);
   element("catalyst").textContent = String(balance.catalyst);
   element("catalyst-readout").classList.toggle("empty", balance.catalyst === 0);
+  element("terrazine").textContent = String(balance.terrazine);
+  element("terrazine-readout").classList.toggle("empty", balance.terrazine === 0);
   element("unit-count").textContent = `${mobile.length} / ${MAX_UNITS}`;
   // The server owns the map; this client only draws its bundled copy. If they
   // differ (a stale bundle after a republish), say so once per match rather
@@ -492,9 +499,9 @@ function renderMatch(): void {
     const blocked = stockless || !canOrder || !site || mobile.length + pending >= MAX_UNITS;
     // The tooltip, and the notice a hotkey shows, says why a button is off:
     // the first refusal that applies, in the order a player can fix them.
-    const needs = LABOUR_KINDS.includes(kind) ? "a finished hub" : kind === ARMY[faction][2] ? "a finished factory" : "a finished barracks";
+    const needs = LABOUR_KINDS.includes(kind) ? "a finished hub" : armyBuilding(kind) === "factory" ? "a finished factory" : "a finished barracks";
     const why = !canOrder ? "Orders are closed" : !site ? `Needs ${needs}` : mobile.length + pending >= MAX_UNITS ? `Unit cap ${MAX_UNITS} reached` : `Trains at ${CATALOG[site.kind].label} #${site.id}`;
-    affordability(button, definition.cost, balance, blocked, stockless ? `${definition.role} / ${STOCK_REASON}` : `${definition.role} / ${why}`);
+    affordability(button, definition.cost, balance, blocked, stockless ? `${describe(kind)} / ${STOCK_REASON}` : `${describe(kind)} / ${why}`);
   }
   const producers = buildings.filter(unit => isProducer(unit, faction, fields));
   const nextSignature = producers.map(unit => `${unit.id}:${unit.kind}`).join(",");
@@ -511,11 +518,11 @@ function renderMatch(): void {
     if (button.hidden) continue;
     // Construction is driven by any labour unit now, not only by a worker:
     // gating this on "worker" left Network and Organic unable to build at all.
-    const blocked = !canOrder || !battlefield.issuer() || buildings.length >= 16 || (kind === "factory" && !buildings.some(unit => unit.kind === "barracks" && unit.constructionRemaining === 0n));
-    affordability(element<HTMLButtonElement>(`build-${kind}`), definition.cost, balance, blocked, definition.role);
+    const blocked = !canOrder || !battlefield.issuer() || buildings.length >= MAX_BUILDINGS || ((kind === "factory" || kind === "lab") && !buildings.some(unit => unit.kind === "barracks" && unit.constructionRemaining === 0n));
+    affordability(element<HTMLButtonElement>(`build-${kind}`), definition.cost, balance, blocked, describe(kind));
     element(`build-${kind}`).setAttribute("aria-pressed", String(battlefield.targeting === `build_${kind}`));
   }
-  element("building-count").textContent = `${buildings.length} / 16 structures`;
+  element("building-count").textContent = `${buildings.length} / ${MAX_BUILDINGS} structures`;
   for (const [kind, definition] of Object.entries(TECHNOLOGIES)) {
     const researched = me.research.includes(`research_${kind}`);
     const queued = owned.some(unit => unit.production.some(item => item.kind === `research_${kind}`));
@@ -523,7 +530,7 @@ function renderMatch(): void {
     const blocked = !canOrder || !!researched || queued || !buildings.some(unit => unit.kind === "lab" && unit.constructionRemaining === 0n && unit.production.length < 8);
     // A technology already bought or queued is never short of anything, so it
     // is priced at nothing and reads as complete rather than unaffordable.
-    const cost = researched || queued ? { material: 0, catalyst: 0 } : RESEARCH_COST;
+    const cost = researched || queued ? NO_COST : RESEARCH_COST;
     affordability(button, cost, balance, blocked, `${definition.description}${researched ? " / Complete" : queued ? " / Researching" : " / Requires laboratory"}`);
     button.classList.toggle("completed", !!researched);
   }
@@ -541,7 +548,7 @@ function renderMatch(): void {
   // deliberately excluded: it holds nothing, ever, so a "0 cargo" line would be
   // a lie about a unit that has no cargo model at all.
   const carriers = selection.filter(unit => carriesCargo(unit.kind));
-  const carried = carriers.reduce((total, unit) => addCost(total, { material: 0, catalyst: 0, [currencyOf(unit.cargoKind)]: unit.cargo }), { material: 0, catalyst: 0 });
+  const carried = carriers.reduce((total, unit) => addCost(total, { ...NO_COST, [currencyOf(unit.cargoKind)]: unit.cargo }), NO_COST);
   const cargoLabel = CURRENCIES.filter(currency => carried[currency] > 0).map(currency => `${carried[currency]} ${currency}`).join(" + ") || "0";
   const drifting = selection.some(unit => gathersInPlace(unit.kind));
   const hubs = selection.filter(unit => isHub(unit.kind) && unit.owner === me.slot);
@@ -550,6 +557,8 @@ function renderMatch(): void {
       + (selection.some(unit => unit.maxShields > 0) ? ` / ${selection.reduce((sum, unit) => sum + unit.shields, 0)} shields` : "")
       + (carriers.length ? ` / ${cargoLabel} cargo` : "")
       + (drifting ? " / credits in place" : "")
+      + (selection.length === 1 && isVeteran(selection[0].kind) ? ` / ${veteranStacks(selection[0].kills)} / 15 stacks` : "")
+      + (selection.length === 1 && passiveLine(selection[0].kind) ? ` / ${passiveLine(selection[0].kind)}` : "")
       + (faction === "organic" && hubs.length ? ` / ${hubs.reduce((sum, unit) => sum + unit.stock, 0)} / ${hubs.length * HUB_STOCK_CAP} stock` : "")
     : "";
   element<HTMLButtonElement>("stop").disabled = !canOrder || !battlefield.ownedSelection().some(unit => !isBuilding(unit.kind));
@@ -587,7 +596,7 @@ function renderMatch(): void {
   element<HTMLButtonElement>("idle-worker").disabled = !canOrder || !owned.some(unit => isLabour(unit.kind) && unit.order.kind === "stop");
   element("idle-worker").title = `Select idle ${CATALOG[labour].label.toLowerCase()}`;
   element("idle-worker").setAttribute("aria-label", element("idle-worker").title);
-  const refund = (producer?.production ?? []).reduce((total, item) => addCost(total, costOf(item.kind)), { material: 0, catalyst: 0 });
+  const refund = (producer?.production ?? []).reduce((total, item) => addCost(total, costOf(item.kind)), NO_COST);
   // A cancelled harvester costs nothing to refund in currency and everything in
   // stock, so the refund is quoted in both rather than reading as "nothing".
   const stocked = (producer?.production ?? []).filter(item => item.kind === "harvester").length;
@@ -613,7 +622,7 @@ function renderMatch(): void {
       slot: player.slot, name: player.name, faction: factionOf(player.faction),
       // Last-hit attribution, kept from the row the server wrote: it is final
       // by the time a player can leave, and it is the only place it lives.
-      killed: { material: player.killedMaterial, catalyst: player.killedCatalyst },
+      killed: { material: player.killedMaterial, catalyst: player.killedCatalyst, terrazine: player.killedTerrazine },
     });
   }
   // The score screen only ever replaces a *finished* match. "Eliminated"

@@ -21,12 +21,16 @@ export default __t.row({
   slot: __t.u8(),
   material: __t.u32(),
   catalyst: __t.u32(),
+  terrazine: __t.u32(),
   collectedMaterial: __t.u32().name("collected_material"),
   collectedCatalyst: __t.u32().name("collected_catalyst"),
+  collectedTerrazine: __t.u32().name("collected_terrazine"),
   lostMaterial: __t.u32().name("lost_material"),
   lostCatalyst: __t.u32().name("lost_catalyst"),
+  lostTerrazine: __t.u32().name("lost_terrazine"),
   killedMaterial: __t.u32().name("killed_material"),
   killedCatalyst: __t.u32().name("killed_catalyst"),
+  killedTerrazine: __t.u32().name("killed_terrazine"),
   get faction() {
     return Faction;
   },

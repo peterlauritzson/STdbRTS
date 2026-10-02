@@ -3,22 +3,22 @@ import test from "node:test";
 import { tables, type DbConnection } from "../src/bindings";
 import { connectClient, me, order, until } from "../scripts/client";
 
-// Mirrors the opening stipend in rts_core (DECISIONS.md, 2026-09-22): 200
-// material per minute for 90s, then 100 per minute for 90s, then nothing,
+// Mirrors the base income in rts_core (DECISIONS.md, 2026-09-22, made permanent
+// in step 27): 200 material per minute for 90s, then 100 per minute for good,
 // accumulated in whole ticks at 20 TPS. It is duplicated here so the balance
 // assertions below can stay exact rather than being loosened into
 // inequalities. If the Rust constants move, this must move with them.
 const STIPEND_FIRST_END = 1800n;
-const STIPEND_SECOND_END = 3600n;
 function stipendTotal(tick: bigint): bigint {
   const first = tick < STIPEND_FIRST_END ? tick : STIPEND_FIRST_END;
-  const second = tick <= STIPEND_FIRST_END ? 0n : (tick < STIPEND_SECOND_END ? tick : STIPEND_SECOND_END) - STIPEND_FIRST_END;
+  const second = tick <= STIPEND_FIRST_END ? 0n : tick - STIPEND_FIRST_END;
   return first / 6n + second / 12n;
 }
 
-// Catalyst is per-base now, like gas: deposit 1 sits in the main mineral line,
-// so tech is paid for at home rather than by walking to the middle of the map.
-test("laboratory construction and logistics research use mined resources", { timeout: 240000 }, async () => {
+// Three currencies, one purpose each: the lab and research are material, the
+// army is catalyst (extracted by a refinery on a deposit, never by labour) and
+// the turret is terrazine (a by-product of material mined).
+test("laboratory construction, a refinery and logistics research use mined resources", { timeout: 240000 }, async () => {
   const builder = (await connectClient()).connection;
   const opponent = (await connectClient()).connection;
   try {
@@ -37,40 +37,47 @@ test("laboratory construction and logistics research use mined resources", { tim
     const units = () => [...builder.db.unit.iter()].filter(row => row.matchId === matchId).map(row => row.data);
     assert.deepEqual(units().filter(unit => unit.owner === 0 && unit.kind === "worker").map(unit => unit.id), [2, 3]);
     assert.deepEqual(units().filter(unit => unit.owner === 1 && unit.kind === "drifter").map(unit => unit.id), [6, 7]);
-    await assert.rejects(order(builder, [2], "build_factory", { x: 680, y: 720 }), /barracks/);
-    // Placement is checked before cost, so a blocked site reports the ground.
-    await assert.rejects(order(builder, [2], "build_lab", { x: 870, y: 700 }), /terrain/);
+    // Coordinates are on the expanse main, HQ at (850, 850): the same layout as
+    // crossfire's main shifted by (+250, +250), mineral arc to the north-west.
+    await assert.rejects(order(builder, [2], "build_factory", { x: 930, y: 970 }), /barracks/);
+    // Placement is checked before cost, so a blocked site reports the ground:
+    // the west wall of the main's ramp, rect [860, 1540, 40, 320].
+    await assert.rejects(order(builder, [2], "build_lab", { x: 880, y: 1600 }), /terrain/);
     // A lab (like a factory) now needs a completed barracks first, and that is
     // checked ahead of cost too — so the catalyst rejection below can only be
-    // observed once the prerequisite is met. (400, 800) sits off the mineral
+    // observed once the prerequisite is met. (650, 1050) sits off the mineral
     // arc: clear of terrain, more than 75 from every deposit, at least 110 from
-    // both the hub and the (680, 720) lab site used later, and within 500 of
+    // both the hub and the (930, 970) lab site used later, and within 500 of
     // the hub. Worker 2 builds it.
-    await order(builder, [2], "build_barracks", { x: 400, y: 800 });
+    await order(builder, [2], "build_barracks", { x: 650, y: 1050 });
     await until(() => units().some(unit => unit.kind === "barracks"), "barracks site created");
     const barracksId = units().find(unit => unit.kind === "barracks")!.id;
     // Worker 3 starts the material line while the barracks goes up, so the 150
-    // material it cost has time to be earned back before the isolation check
-    // below runs.
+    // material it cost has time to be earned back.
     await order(builder, [3], "gather", { target: 2 });
     await until(() => units().find(unit => unit.id === barracksId)?.constructionRemaining === 0n, "barracks completed", 20000);
-    await until(() => me(builder).material >= 150, "recover material spent on the barracks", 60000);
-    // ...and a clear but unaffordable site reports the money: catalyst starts at
-    // zero, and a laboratory costs 50 of it.
-    await assert.rejects(order(builder, [2], "build_lab", { x: 680, y: 720 }), /catalyst/);
-    // A laboratory costs 150 material AND 50 catalyst, and catalyst exists only
-    // at the two central deposits — so tech cannot be opened from the starting
-    // balance at all, the middle of the map has to be worked first. Worker 3
-    // already holds the material line while worker 2, free again, walks to the
-    // nearest catalyst.
-    await order(builder, [2], "gather", { target: 1 });
-    await assert.rejects(order(builder, [2], "build_lab", { x: 440, y: 220 }), /catalyst/);
-    await until(
-      () => me(builder).material >= 150 && me(builder).catalyst >= 50,
-      "mine the laboratory down payment in both currencies",
-      90000,
-    );
-    await order(builder, [2], "build_lab", { x: 680, y: 720 });
+    // Labour never mines catalyst: the order is refused and says what to build.
+    await assert.rejects(order(builder, [2], "gather", { target: 1 }), /refinery/);
+    // A refinery has to stand on a catalyst deposit.
+    await assert.rejects(order(builder, [2], "build_refinery", { x: 1300, y: 1300 }), /catalyst deposit/);
+    // Aimed near deposit 10, it snaps onto it, costs 75 material, and then
+    // extracts on its own with nobody working it.
+    const catalystBefore = me(builder).catalyst;
+    await order(builder, [2], "build_refinery", { x: 1020, y: 730 });
+    await until(() => units().some(unit => unit.kind === "refinery"), "refinery site created");
+    const refinery = units().find(unit => unit.kind === "refinery")!;
+    const deposit = [...builder.db.resource_node.iter()].find(row => row.matchId === matchId && row.data.id === 10)!.data;
+    assert.deepEqual([refinery.x, refinery.y], [deposit.x, deposit.y], "snapped onto the deposit");
+    await until(() => units().find(unit => unit.id === refinery.id)?.constructionRemaining === 0n, "refinery raised itself", 20000);
+    await until(() => me(builder).catalyst >= catalystBefore + 8, "the refinery extracts catalyst without workers", 20000);
+    assert.ok(me(builder).collectedCatalyst > 0, "extraction is mined income");
+    // One refinery to a deposit.
+    await assert.rejects(order(builder, [2], "build_refinery", { x: 1026, y: 727 }), /already has a refinery/);
+    // A turret is bought with terrazine, which only mining earns: refused now.
+    await assert.rejects(order(builder, [2], "build_turret", { x: 930, y: 970 }), /terrazine/);
+    await until(() => me(builder).material >= 200, "mine the laboratory price in material", 90000);
+    assert.ok(me(builder).terrazine > 0, "mining paid a terrazine by-product");
+    await order(builder, [2], "build_lab", { x: 930, y: 970 });
     assert.ok(!units().some(unit => unit.kind === "lab"));
     await until(() => units().some(unit => unit.kind === "lab"), "lab site created");
     const labId = units().find(unit => unit.kind === "lab")!.id;
@@ -82,14 +89,8 @@ test("laboratory construction and logistics research use mined resources", { tim
     // A drifter has no return trip at all, and is refused one by name.
     await assert.rejects(order(opponent, [6], "return"), /Drifters never carry a load/);
     await until(() => units().find(unit => unit.id === labId)?.constructionRemaining === 0n, "lab raised itself", 20000);
-    // Research costs another 100 material and 50 catalyst, so the centre has to
-    // be worked a second time.
-    await order(builder, [2], "gather", { target: 1 });
-    await until(
-      () => me(builder).material >= 100 && me(builder).catalyst >= 50,
-      "mine research budget in both currencies",
-      90000,
-    );
+    // Research costs 150 material.
+    await until(() => me(builder).material >= 150, "mine the research budget in material", 90000);
     await order(builder, [labId], "research_logistics");
     assert.ok(!me(builder).research.length);
     await until(() => units().find(unit => unit.id === labId)!.production.length === 1, "research activated");
@@ -109,7 +110,7 @@ test("laboratory construction and logistics research use mined resources", { tim
   }
 });
 
-test("workers repair real combat damage through delayed reducers", { timeout: 60000 }, async () => {
+test("workers repair real combat damage through delayed reducers", { timeout: 240000 }, async () => {
   const defender = (await connectClient()).connection;
   const attacker = (await connectClient()).connection;
   try {
@@ -126,11 +127,15 @@ test("workers repair real combat damage through delayed reducers", { timeout: 60
     // below, so the defender's workers are stilled first — exactly what the
     // Rust tests' `idle_labour` does. It used to pass by timing luck.
     await order(defender, [2, 3], "stop");
-    await order(defender, [4], "move", { x: 1100, y: 600 });
+    // The defender's fighter is parked in the far corner of its main, out of
+    // range of wherever the attacker comes in.
+    await order(defender, [4], "move", { x: 300, y: 300 });
     await order(attacker, [8], "attack", { target: 1 });
-    // Cross-spawn on this map is 2000 units, about 18 seconds of walking.
-    await until(() => unit(1).hp < 1200, "enemy damages HQ", 60000);
-    await order(attacker, [8], "move", { x: 1500, y: 1500 });
+    // Cross-spawn on expanse is 7900 units in a straight line, more around the
+    // walls of both mains: about a minute and a half of walking.
+    await until(() => unit(1).hp < 1200, "enemy damages HQ", 180000);
+    // Out through the main's ramp to the south.
+    await order(attacker, [8], "move", { x: 1050, y: 2000 });
     await until(() => Math.hypot(unit(8).x - unit(1).x, unit(8).y - unit(1).y) > 180, "enemy leaves firing range");
     await order(attacker, [8], "stop");
     const damaged = unit(1).hp;
@@ -229,6 +234,8 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       await assert.rejects(order(host, [1], "rally_move", { x: -10 }), /outside/);
       await assert.rejects(order(host, [1], "rally_gather", { target: 999 }), /depleted/);
       await assert.rejects(order(host, [1], "cancel_production"), /empty/);
+      await assert.rejects(order(host, [2], "gather", { target: 1 }), /refinery/);
+      await assert.rejects(order(host, [1], "rally_gather", { target: 1 }), /refinery/);
       await assert.rejects(order(host, [2], "repair", { target: 5 }), /friendly/);
       await assert.rejects(order(host, [2], "repair", { target: 1 }), /fully/);
       // Net of the stipend: rejected commands must not move the balance at all.
@@ -320,12 +327,12 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       await until(() => unit(barracksId).order.kind === "rally_move", "barracks rally activation");
       await order(host, [barracksId], "train_soldier");
       await until(() => unit(barracksId).production.length === 1, "queued soldier");
-      const paidTick = host.db.room.id.find(matchId)!.tick;
-      const paid = me(host).material;
-      const netPaid = () => me(host).material - Number(stipendTotal(host.db.room.id.find(matchId)!.tick) - stipendTotal(paidTick));
+      // A soldier is catalyst only, so the refund is read in catalyst: no
+      // stipend or delivery can move it.
+      const paid = me(host).catalyst;
       await order(host, [barracksId], "cancel_production");
-      assert.equal(netPaid(), paid, "a delayed cancellation has not refunded yet");
-      await until(() => netPaid() === paid + 100, "full refund");
+      assert.equal(me(host).catalyst, paid, "a delayed cancellation has not refunded yet");
+      await until(() => me(host).catalyst === paid + 100, "full refund");
       assert.equal(unit(barracksId).production.length, 0);
       assert.equal(unit(barracksId).order.kind, "rally_move");
       await assert.rejects(order(host, [barracksId], "cancel_production"), /empty/);
@@ -407,7 +414,7 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       // deposit is nearest rather than to a pinned id, so this survives the map.
       const drifter = find(6);
       const nearest = [...second.db.resource_node.iter()]
-        .filter(row => row.matchId === matchId && row.data.amount > 0)
+        .filter(row => row.matchId === matchId && row.data.amount > 0 && row.data.kind.tag === "Material")
         .map(row => row.data)
         .sort((left, right) => Math.hypot(left.x - drifter.x, left.y - drifter.y) - Math.hypot(right.x - drifter.x, right.y - drifter.y))[0];
       const driftTick = host.db.room.id.find(matchId)!.tick;
@@ -462,7 +469,7 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
       await until(() => find(9).production.length === 1, "harvester queued");
       const organicStipend = Number(stipendTotal(host.db.room.id.find(matchId)!.tick) - stipendTotal(stockTick));
       assert.equal(me(third).material - organicStipend, organicStart, "a harvester costs no material at all");
-      assert.equal(me(third).catalyst, 0, "and no catalyst either");
+      assert.equal(me(third).catalyst, 100, "and no catalyst either: the opening 100 is untouched");
       await until(() => all().some(unit => unit.owner === 2 && unit.kind === "harvester" && unit.id > 16), "harvester born", 20000);
       assert.equal(labourOf(2).length, 3);
     });

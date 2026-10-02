@@ -16,10 +16,13 @@ export const UNIT_KEYS = {
   rally: "y",
 } as const;
 
-/** The production row: labour, then the faction's fighter, raider and heavy. */
-export const TRAIN_KEYS = ["q", "w", "e", "r"] as const;
+/**
+ * The production row: labour, then the faction's six army units in card order.
+ * Q W E R then D Z X, clear of every unit command (A S H F G T Y C) and of B.
+ */
+export const TRAIN_KEYS = ["q", "w", "e", "r", "d", "z", "x"] as const;
 /** Pressed after B, in the order the build buttons are shown. */
-export const BUILD_KEYS = ["q", "w", "e", "r", "t", "y", "u"] as const;
+export const BUILD_KEYS = ["q", "w", "e", "r", "t", "y", "u", "i"] as const;
 export const BUILD_MENU_KEY = "b";
 
 /** Two presses of a control group key within this window centre the camera on it. */

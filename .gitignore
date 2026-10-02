@@ -12,3 +12,4 @@ node_modules/
 
 # Ignore all log files
 *.log
+.env.deploy

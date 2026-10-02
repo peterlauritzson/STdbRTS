@@ -17,7 +17,9 @@
     "test:client": "node --import tsx --test tests/presentation.test.ts",
     "test:integration": "node --import tsx --test tests/integration.test.ts",
     "test:browser": "playwright test",
-    "bot": "tsx scripts/bot.ts"
+    "bot": "tsx scripts/bot.ts",
+    "deploy:server": "spacetime publish --server maincloud --module-path server --delete-data=never --yes honeybadger-rts",
+    "deploy:web": "npm run build && node scripts/deploy-pa.mjs"
   },
   "engines": { "node": ">=22.12.0" },
   "dependencies": {

@@ -103,7 +103,12 @@ pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
             .player()
             .match_id()
             .filter(room.id)
-            .map(|player| (player.slot, Balance::new(player.material, player.catalyst)))
+            .map(|player| {
+                (
+                    player.slot,
+                    Balance::new(player.material, player.catalyst).with_terrazine(player.terrazine),
+                )
+            })
             .collect(),
         // Every owner's economy, so the simulation can read a faction per slot
         // without reaching back into the database mid-tick.
@@ -125,7 +130,8 @@ pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
             .map(|player| {
                 (
                     player.slot,
-                    Balance::new(player.collected_material, player.collected_catalyst),
+                    Balance::new(player.collected_material, player.collected_catalyst)
+                        .with_terrazine(player.collected_terrazine),
                 )
             })
             .collect(),
@@ -137,7 +143,11 @@ pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
             .map(|player| {
                 (
                     player.slot,
-                    Cost::new(player.lost_material, player.lost_catalyst),
+                    Cost {
+                        material: player.lost_material,
+                        catalyst: player.lost_catalyst,
+                        terrazine: player.lost_terrazine,
+                    },
                 )
             })
             .collect(),
@@ -149,7 +159,11 @@ pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
             .map(|player| {
                 (
                     player.slot,
-                    Cost::new(player.killed_material, player.killed_catalyst),
+                    Cost {
+                        material: player.killed_material,
+                        catalyst: player.killed_catalyst,
+                        terrazine: player.killed_terrazine,
+                    },
                 )
             })
             .collect(),
@@ -189,8 +203,12 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
         room.state = "finished".into();
         room.winner = winner;
     }
+    // Ids still alive, sorted once: a membership test per old row, not a scan
+    // of the world per old row.
+    let mut alive: Vec<u32> = world.units.iter().map(|unit| unit.id).collect();
+    alive.sort_unstable();
     for old in ctx.db.unit().match_id().filter(room.id).collect::<Vec<_>>() {
-        if !world.units.iter().any(|unit| unit.id == old.data.id) {
+        if alive.binary_search(&old.data.id).is_err() {
             ctx.db.unit().id().delete(old.id);
         }
     }
@@ -283,18 +301,30 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
             .cloned()
             .unwrap_or_default();
         let changed = balance.is_some_and(|balance| {
-            (player.material, player.catalyst) != (balance.material, balance.catalyst)
+            (player.material, player.catalyst, player.terrazine)
+                != (balance.material, balance.catalyst, balance.terrazine)
         }) || faction.is_some_and(|faction| player.faction != faction)
-            || (player.collected_material, player.collected_catalyst)
-                != (collected.material, collected.catalyst)
-            || (player.lost_material, player.lost_catalyst) != (lost.material, lost.catalyst)
-            || (player.killed_material, player.killed_catalyst)
-                != (killed.material, killed.catalyst)
+            || (
+                player.collected_material,
+                player.collected_catalyst,
+                player.collected_terrazine,
+            ) != (collected.material, collected.catalyst, collected.terrazine)
+            || (
+                player.lost_material,
+                player.lost_catalyst,
+                player.lost_terrazine,
+            ) != (lost.material, lost.catalyst, lost.terrazine)
+            || (
+                player.killed_material,
+                player.killed_catalyst,
+                player.killed_terrazine,
+            ) != (killed.material, killed.catalyst, killed.terrazine)
             || player.research != research;
         if changed {
             if let Some(balance) = balance {
                 player.material = balance.material;
                 player.catalyst = balance.catalyst;
+                player.terrazine = balance.terrazine;
             }
             if let Some(faction) = faction {
                 player.faction = faction;
@@ -305,10 +335,13 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
             // nothing, and zero is the honest value.
             player.collected_material = collected.material;
             player.collected_catalyst = collected.catalyst;
+            player.collected_terrazine = collected.terrazine;
             player.lost_material = lost.material;
             player.lost_catalyst = lost.catalyst;
+            player.lost_terrazine = lost.terrazine;
             player.killed_material = killed.material;
             player.killed_catalyst = killed.catalyst;
+            player.killed_terrazine = killed.terrazine;
             player.research = research;
             ctx.db.player().identity().update(player);
         }
@@ -374,8 +407,10 @@ pub fn record_sample(ctx: &ReducerContext, match_id: u64, world: &World) {
             slot: *slot,
             material: balance.material,
             catalyst: balance.catalyst,
+            terrazine: balance.terrazine,
             collected_material: collected.material,
             collected_catalyst: collected.catalyst,
+            collected_terrazine: collected.terrazine,
             army_value_material: roster.army_value.material,
             army_value_catalyst: roster.army_value.catalyst,
             labour: roster.labour,
@@ -383,6 +418,7 @@ pub fn record_sample(ctx: &ReducerContext, match_id: u64, world: &World) {
             buildings: roster.buildings,
             lost_material: lost.material,
             lost_catalyst: lost.catalyst,
+            lost_terrazine: lost.terrazine,
         });
     }
 }

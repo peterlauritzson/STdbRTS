@@ -42,12 +42,16 @@ pub fn connected(ctx: &ReducerContext) {
             slot: 0,
             material: STARTING_BALANCE.material,
             catalyst: STARTING_BALANCE.catalyst,
+            terrazine: STARTING_BALANCE.terrazine,
             collected_material: 0,
             collected_catalyst: 0,
+            collected_terrazine: 0,
             lost_material: 0,
             lost_catalyst: 0,
+            lost_terrazine: 0,
             killed_material: 0,
             killed_catalyst: 0,
+            killed_terrazine: 0,
             faction: Faction::default(),
             research: vec![],
             ready: false,
@@ -138,15 +142,19 @@ pub fn create_room(ctx: &ReducerContext, name: String, capacity: u8) -> Result<(
     player.faction = faction_for_slot(0);
     player.material = STARTING_BALANCE.material;
     player.catalyst = STARTING_BALANCE.catalyst;
+    player.terrazine = STARTING_BALANCE.terrazine;
     // The history counters are per-match and reset with the balance. A player
     // who carried last match's totals into this one would make its very first
     // sample a lie.
     player.collected_material = 0;
     player.collected_catalyst = 0;
+    player.collected_terrazine = 0;
     player.lost_material = 0;
     player.lost_catalyst = 0;
+    player.lost_terrazine = 0;
     player.killed_material = 0;
     player.killed_catalyst = 0;
+    player.killed_terrazine = 0;
     player.research.clear();
     player.last_order_tick = 0;
     player.orders_this_tick = 0;
@@ -182,15 +190,19 @@ pub fn join_room(ctx: &ReducerContext, match_id: u64) -> Result<(), String> {
     player.faction = faction_for_slot(player.slot);
     player.material = STARTING_BALANCE.material;
     player.catalyst = STARTING_BALANCE.catalyst;
+    player.terrazine = STARTING_BALANCE.terrazine;
     // The history counters are per-match and reset with the balance. A player
     // who carried last match's totals into this one would make its very first
     // sample a lie.
     player.collected_material = 0;
     player.collected_catalyst = 0;
+    player.collected_terrazine = 0;
     player.lost_material = 0;
     player.lost_catalyst = 0;
+    player.lost_terrazine = 0;
     player.killed_material = 0;
     player.killed_catalyst = 0;
+    player.killed_terrazine = 0;
     player.research.clear();
     player.last_order_tick = 0;
     player.orders_this_tick = 0;

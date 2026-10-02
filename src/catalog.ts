@@ -1,4 +1,4 @@
-import mapDefinition from "../shared/maps/crossfire.json";
+import mapDefinition from "../shared/maps/expanse.json";
 import { mapContentHash } from "./maphash";
 import { Faction } from "./bindings/types";
 import type { Entity, Node, ResourceKind } from "./bindings/types";
@@ -14,24 +14,32 @@ export const mapIdentity = { id: mapDefinition.id, version: mapDefinition.versio
 /** `MapDefinition::content_hash` of the bundled map, compared with the room's `map_hash`. */
 export const MAP_HASH = mapContentHash(mapDefinition);
 /** Mobile units a player may hold, excluding temporary units: `rules::MAX_UNITS`. */
-export const MAX_UNITS = 120;
+export const MAX_UNITS = 400;
+/** Buildings a player may hold, construction sites included: `rules::MAX_BUILDINGS`. */
+export const MAX_BUILDINGS = 150;
 
-/** The two currencies of the dual-currency economy, in server spelling. */
-export type Currency = "material" | "catalyst";
-/** A price or a balance. Both currencies are always present; zero is not absent. */
-export interface Cost { material: number; catalyst: number }
+/**
+ * The three currencies, in server spelling, one purpose each: material buys
+ * labour, structures and research; catalyst buys the army; terrazine buys
+ * static defense.
+ */
+export type Currency = "material" | "catalyst" | "terrazine";
+/** A price or a balance. Every currency is always present; zero is not absent. */
+export interface Cost { material: number; catalyst: number; terrazine: number }
 
-export const CURRENCIES: readonly Currency[] = ["material", "catalyst"];
-export const CURRENCY_LABEL: Record<Currency, string> = { material: "Material", catalyst: "Catalyst" };
-const price = (material: number, catalyst = 0): Cost => ({ material, catalyst });
+export const CURRENCIES: readonly Currency[] = ["material", "catalyst", "terrazine"];
+export const CURRENCY_LABEL: Record<Currency, string> = { material: "Material", catalyst: "Catalyst", terrazine: "Terrazine" };
+/** A price in each currency, mirroring `Cost::new` and `Cost::terrazine`. */
+export const price = (material: number, catalyst = 0, terrazine = 0): Cost => ({ material, catalyst, terrazine });
+export const NO_COST: Cost = price(0);
 /** Every technology costs the same; the server has one price for all three. */
-export const RESEARCH_COST: Cost = price(100, 50);
+export const RESEARCH_COST: Cost = price(150);
 export const RESEARCH_SECONDS = 15;
 
 export interface Definition { label: string; hp: number; radius: number; cost: Cost; seconds: number; building: boolean; icon: string; role: string }
 export const CATALOG: Record<string, Definition> = {
-  hq: { label: "Headquarters", hp: 1200, radius: 34, cost: price(0), seconds: 0, building: true, icon: "house", role: "Primary base / worker and infantry production" },
-  worker: { label: "Worker", hp: 60, radius: 10, cost: price(50), seconds: 3, building: false, icon: "hammer", role: "Industrial labour / mines 25 and walks it home" },
+  hq: { label: "Headquarters", hp: 1200, radius: 34, cost: price(0), seconds: 0, building: true, icon: "house", role: "Primary base / labour production" },
+  worker: { label: "Worker", hp: 60, radius: 10, cost: price(50), seconds: 3, building: false, icon: "hammer", role: "Industrial labour / mines 25 and walks it home, one miner per patch" },
   // The Network labour unit. It never holds cargo and never walks a load home,
   // so nothing that reads a load — the cargo bar, the return order, the cargo
   // line in the selection panel — applies to it.
@@ -39,26 +47,42 @@ export const CATALOG: Record<string, Definition> = {
   // The Organic labour unit. Free of currency, bought with one point of hub
   // stock, carries 10, and cannot fight at all.
   harvester: { label: "Harvester", hp: 45, radius: 8, cost: price(0), seconds: 2, building: false, icon: "sprout", role: "Organic labour / costs 1 hub stock, gathers only" },
-  soldier: { label: "Soldier", hp: 140, radius: 12, cost: price(100), seconds: 5, building: false, icon: "swords", role: "Infantry / counters scouts" },
-  scout: { label: "Scout", hp: 80, radius: 11, cost: price(80), seconds: 3.5, building: false, icon: "radar", role: "Fast raider / vulnerable to infantry" },
-  siege: { label: "Siege", hp: 220, radius: 17, cost: price(150, 50), seconds: 8, building: false, icon: "crosshair", role: "Long range / triple damage to buildings" },
+  soldier: { label: "Soldier", hp: 140, radius: 12, cost: price(0, 100), seconds: 5, building: false, icon: "swords", role: "Infantry / counters scouts" },
+  scout: { label: "Scout", hp: 80, radius: 11, cost: price(0, 80), seconds: 3.5, building: false, icon: "radar", role: "Fast raider / vulnerable to infantry" },
+  siege: { label: "Siege", hp: 220, radius: 17, cost: price(0, 200), seconds: 8, building: false, icon: "crosshair", role: "Long range / triple damage to buildings" },
   // Network army: fewer, stronger, half shields. Mirrors `rules::stats`.
-  sentinel: { label: "Sentinel", hp: 220, radius: 13, cost: price(150), seconds: 6.5, building: false, icon: "shield-half", role: "Network fighter / tough, hard-hitting, counters nothing in particular" },
-  skimmer: { label: "Skimmer", hp: 70, radius: 10, cost: price(90), seconds: 3.5, building: false, icon: "wind", role: "Network raider / fastest unit, triple damage to labour" },
-  lancer: { label: "Lancer", hp: 240, radius: 16, cost: price(175, 75), seconds: 9, building: false, icon: "zap", role: "Network artillery / 250 range, triple damage to buildings" },
+  sentinel: { label: "Sentinel", hp: 220, radius: 13, cost: price(0, 150), seconds: 6.5, building: false, icon: "shield-half", role: "Network fighter / tough, hard-hitting, counters nothing in particular" },
+  skimmer: { label: "Skimmer", hp: 70, radius: 10, cost: price(0, 90), seconds: 3.5, building: false, icon: "wind", role: "Network raider / fastest unit, triple damage to labour" },
+  lancer: { label: "Lancer", hp: 240, radius: 16, cost: price(0, 250), seconds: 9, building: false, icon: "zap", role: "Network artillery / 250 range, triple damage to buildings" },
   // Organic army: cheap, fast, in numbers.
-  swarmer: { label: "Swarmer", hp: 60, radius: 9, cost: price(50), seconds: 2.25, building: false, icon: "bug", role: "Organic fighter / cheap fast melee, leaves a brood if it dies on your creep" },
-  spitter: { label: "Spitter", hp: 85, radius: 11, cost: price(90), seconds: 4, building: false, icon: "droplets", role: "Organic support / 150 range, fires over the swarm" },
-  crusher: { label: "Crusher", hp: 420, radius: 18, cost: price(175, 75), seconds: 9, building: false, icon: "hammer", role: "Organic heavy / melee, triple damage to buildings, leaves a brute on your creep" },
-  barracks: { label: "Barracks", hp: 700, radius: 34, cost: price(150), seconds: 8, building: true, icon: "tent", role: "Soldier and scout production" },
-  factory: { label: "Factory", hp: 900, radius: 34, cost: price(200, 50), seconds: 12, building: true, icon: "factory", role: "Siege production / requires barracks" },
-  turret: { label: "Turret", hp: 500, radius: 30, cost: price(125), seconds: 7, building: true, icon: "shield", role: "Automatic defense / 210 range" },
+  swarmer: { label: "Swarmer", hp: 60, radius: 9, cost: price(0, 50), seconds: 2.25, building: false, icon: "bug", role: "Organic fighter / cheap fast melee, leaves a brood if it dies on your creep" },
+  spitter: { label: "Spitter", hp: 85, radius: 11, cost: price(0, 90), seconds: 4, building: false, icon: "droplets", role: "Organic support / 150 range, fires over the swarm" },
+  crusher: { label: "Crusher", hp: 420, radius: 18, cost: price(0, 250), seconds: 9, building: false, icon: "hammer", role: "Organic heavy / melee, triple damage to buildings, leaves a brute on your creep" },
+  // The second tier of each roster (docs/honeybadger/ROSTER-PASSIVES.md).
+  // Mirrors `rules::stats`; each role string ends where the passive line begins.
+  marksman: { label: "Marksman", hp: 100, radius: 11, cost: price(0, 125), seconds: 5.5, building: false, icon: "target", role: "Industrial rifle / 170 range, fragile" },
+  medic: { label: "Medic", hp: 90, radius: 11, cost: price(0, 100), seconds: 4.5, building: false, icon: "heart-pulse", role: "Industrial support / no weapon" },
+  bulwark: { label: "Bulwark", hp: 420, radius: 17, cost: price(0, 225), seconds: 8.5, building: false, icon: "brick-wall", role: "Industrial tank / slow, tough, weak gun" },
+  arcer: { label: "Arcer", hp: 90, radius: 11, cost: price(0, 140), seconds: 5.5, building: false, icon: "waypoints", role: "Network caster / 130 range, light" },
+  phantom: { label: "Phantom", hp: 100, radius: 11, cost: price(0, 160), seconds: 6, building: false, icon: "ghost", role: "Network assassin / fast, short range, hits hard" },
+  warden: { label: "Warden", hp: 300, radius: 16, cost: price(0, 250), seconds: 9, building: false, icon: "eye", role: "Network support walker / barely armed" },
+  prowler: { label: "Prowler", hp: 70, radius: 10, cost: price(0, 80), seconds: 3, building: false, icon: "footprints", role: "Organic raider / fast melee" },
+  devourer: { label: "Devourer", hp: 130, radius: 12, cost: price(0, 120), seconds: 4.25, building: false, icon: "flame", role: "Organic bruiser / tougher than a swarmer" },
+  behemoth: { label: "Behemoth", hp: 450, radius: 19, cost: price(0, 275), seconds: 9.5, building: false, icon: "skull", role: "Organic siege beast / heavy, slow" },
+  barracks: { label: "Barracks", hp: 700, radius: 34, cost: price(150), seconds: 8, building: true, icon: "tent", role: "Fighter and raider production" },
+  factory: { label: "Factory", hp: 900, radius: 34, cost: price(250), seconds: 12, building: true, icon: "factory", role: "Heavy production / requires barracks" },
+  turret: { label: "Turret", hp: 500, radius: 30, cost: price(0, 0, 100), seconds: 7, building: true, icon: "shield", role: "Automatic defense / 210 range / costs terrazine" },
+  // Faction static defenses: terrazine, shoot like the turret, faction-gated.
+  bunker: { label: "Bunker", hp: 800, radius: 30, cost: price(0, 0, 125), seconds: 8, building: true, icon: "brick-wall", role: "Industrial defense / 150 range, high hit points / costs terrazine" },
+  bastion: { label: "Bastion", hp: 500, radius: 30, cost: price(0, 0, 125), seconds: 7.5, building: true, icon: "castle", role: "Network defense / 190 range / costs terrazine" },
+  spine: { label: "Spine", hp: 600, radius: 30, cost: price(0, 0, 125), seconds: 7.5, building: true, icon: "triangle", role: "Organic defense / 170 range / costs terrazine" },
+  refinery: { label: "Refinery", hp: 400, radius: 28, cost: price(75), seconds: 6, building: true, icon: "fuel", role: "Extracts catalyst from the deposit it stands on, with no workers / build on a catalyst deposit" },
   outpost: { label: "Outpost", hp: 650, radius: 30, cost: price(100), seconds: 6, building: true, icon: "warehouse", role: "Resource drop-off / base expansion" },
-  lab: { label: "Laboratory", hp: 650, radius: 32, cost: price(150, 50), seconds: 10, building: true, icon: "flask-conical", role: "Faction-wide research" },
+  lab: { label: "Laboratory", hp: 650, radius: 32, cost: price(200), seconds: 10, building: true, icon: "flask-conical", role: "Faction-wide research" },
   // Faction buildings: each projects its faction's zone and nobody else can
   // build it. `hp` is the listed total; a Network entity carries half of it as
   // shields, and the row's own `maxHp`/`maxShields` are what to draw against.
-  sensor: { label: "Sensor tower", hp: 450, radius: 26, cost: price(125, 50), seconds: 7, building: true, icon: "satellite-dish", role: "Industrial / your units move 30% faster within 450" },
+  sensor: { label: "Sensor tower", hp: 450, radius: 26, cost: price(175), seconds: 7, building: true, icon: "satellite-dish", role: "Industrial / your units move 30% faster within 450" },
   relay: { label: "Relay", hp: 300, radius: 22, cost: price(75), seconds: 5, building: true, icon: "zap", role: "Network / power field 320: drifters train at any structure in it, shields regenerate 3x, units teleport within it" },
   // Temporary units creep spawns where one of its owner's units dies on it —
   // mirrors `rules::stats` and `rules::temporary_lifetime`. Never trained (so
@@ -82,12 +106,77 @@ export const ARMY: Readonly<Record<"industrial" | "network" | "organic", readonl
   network: ["sentinel", "skimmer", "lancer"],
   organic: ["swarmer", "spitter", "crusher"],
 };
+/**
+ * The whole roster per faction in command-card order: the barracks units, then
+ * the factory units. `ARMY` above is the original trio each faction opens
+ * with, which the bot and the tests still read as fighter, raider, heavy.
+ */
+export const ROSTER: Readonly<Record<"industrial" | "network" | "organic", readonly string[]>> = {
+  industrial: ["soldier", "scout", "marksman", "medic", "siege", "bulwark"],
+  network: ["sentinel", "skimmer", "arcer", "phantom", "lancer", "warden"],
+  organic: ["swarmer", "spitter", "prowler", "devourer", "crusher", "behemoth"],
+};
+/** Trained at the factory: `rules::army_building`. */
+export const FACTORY_KINDS: readonly string[] = ["siege", "lancer", "crusher", "bulwark", "warden", "behemoth"];
 export const armyFaction = (kind: string): "industrial" | "network" | "organic" | undefined =>
-  (Object.keys(ARMY) as ("industrial" | "network" | "organic")[]).find(faction => ARMY[faction].includes(kind));
+  (Object.keys(ROSTER) as ("industrial" | "network" | "organic")[]).find(faction => ROSTER[faction].includes(kind));
 export const isArmy = (kind: string): boolean => !!armyFaction(kind);
-/** The factory trains the third unit of each roster; the barracks trains the rest. */
+/** The factory trains each faction's heavy units; the barracks trains the rest. */
 export const armyBuilding = (kind: string): string | undefined =>
-  !isArmy(kind) ? undefined : ARMY[armyFaction(kind)!][2] === kind ? "factory" : "barracks";
+  !isArmy(kind) ? undefined : FACTORY_KINDS.includes(kind) ? "factory" : "barracks";
+/** A building that shoots: `rules::is_static_defense`. */
+export const isStaticDefense = (kind: string): boolean => ["turret", "bunker", "bastion", "spine"].includes(kind);
+
+// --- Passives -----------------------------------------------------------------
+
+/**
+ * Each kind's one passive and what it says, the single table every tooltip
+ * reads. Mirrors `rules::passive`; the numbers are the constants in rules.rs.
+ */
+export const PASSIVES: Readonly<Record<string, { name: string; text: string }>> = {
+  veteran: { name: "Veteran", text: "each kill gives +3% attack rate and speed, up to 15 stacks" },
+  forced_march: { name: "Forced March", text: "+40% speed after 10s without dealing or taking damage" },
+  shrapnel: { name: "Shrapnel", text: "each shell deals 50% to other enemies within 45 of the target" },
+  acid_splash: { name: "Acid Splash", text: "hits deal 50% to other enemies within 35 of the target" },
+  entrenchment: { name: "Entrenchment", text: "holding one spot for 7.5s gives +2 armour and +25 range" },
+  field_medic: { name: "Field Medic", text: "heals the most-damaged friendly unit within 90 by 3 every 0.5s" },
+  guardian: { name: "Guardian", text: "takes 30% of damage dealt to friendly units within 90" },
+  battle_blink: { name: "Battle Blink", text: "at 30% health teleports 160 away from its attacker (12s)" },
+  overwatch: { name: "Overwatch", text: "+50% damage for 1s after 10s without attacking" },
+  ricochet: { name: "Ricochet", text: "hits jump to 2 more enemies within 70, at 50% then 25%" },
+  ricochet_one: { name: "Ricochet", text: "each hit jumps to 1 more enemy within 70, at 50%" },
+  phase_shift: { name: "Phase Shift", text: "the first hit it takes every 8s is fully absorbed" },
+  shield_aura: { name: "Shield Aura", text: "friendly shields within 110 regenerate even under fire" },
+  predator: { name: "Predator", text: "heals 30% of the damage it deals" },
+  regrowth: { name: "Regrowth", text: "after 5s unhurt, regenerates 2% of its health every second" },
+  death_burst: { name: "Death Burst", text: "when it dies, deals 80 to every enemy unit within 70" },
+  fortified: { name: "Fortified", text: "always +2 armour" },
+};
+/** Kind to passive id: `rules::passive`. */
+export const PASSIVE_OF: Readonly<Record<string, string>> = {
+  soldier: "veteran", devourer: "veteran",
+  scout: "forced_march", skimmer: "forced_march", prowler: "forced_march",
+  siege: "shrapnel", spitter: "acid_splash",
+  marksman: "entrenchment", medic: "field_medic", bulwark: "guardian",
+  sentinel: "battle_blink", lancer: "overwatch", arcer: "ricochet", bastion: "ricochet_one",
+  phantom: "phase_shift", warden: "shield_aura",
+  swarmer: "predator", spine: "predator", crusher: "regrowth", behemoth: "death_burst", bunker: "fortified",
+};
+/** "Veteran: each kill ...", or undefined for a kind with no passive. */
+export const passiveLine = (kind: string): string | undefined => {
+  const passive = PASSIVES[PASSIVE_OF[kind]];
+  return passive && `${passive.name}: ${passive.text}`;
+};
+/** A button's tooltip: the role, then the passive in one line. */
+export const describe = (kind: string): string => {
+  const role = CATALOG[kind]?.role ?? kind;
+  const passive = passiveLine(kind);
+  return passive ? `${role} / ${passive}` : role;
+};
+/** Veteran stacks held after `kills` kills: `rules::veteran_stacks`. */
+export const veteranStacks = (kills: number): number => Math.min(15, kills);
+/** Veteran kinds, whose stacks are drawn. */
+export const isVeteran = (kind: string): boolean => PASSIVE_OF[kind] === "veteran";
 
 /**
  * How long a temporary unit lives, in ticks, mirroring
@@ -201,12 +290,12 @@ export const canProduce = (kind: string, building: string, faction: FactionName)
 };
 
 /** Which currency a deposit holds, or a worker carries, as a plain string. */
-export const currencyOf = (kind: ResourceKind): Currency => (kind.tag === "Catalyst" ? "catalyst" : "material");
+export const currencyOf = (kind: ResourceKind): Currency => (kind.tag === "Catalyst" ? "catalyst" : kind.tag === "Terrazine" ? "terrazine" : "material");
 
 /** The price of anything orderable, including the `research_*` orders. */
 export function costOf(kind: string): Cost {
   if (kind.startsWith("research_")) return RESEARCH_COST;
-  return CATALOG[kind]?.cost ?? price(0);
+  return CATALOG[kind]?.cost ?? NO_COST;
 }
 
 /**
@@ -217,6 +306,7 @@ export function costOf(kind: string): Cost {
 export function shortfall(balance: Cost, cost: Cost): Currency | undefined {
   if (balance.material < cost.material) return "material";
   if (balance.catalyst < cost.catalyst) return "catalyst";
+  if (balance.terrazine < cost.terrazine) return "terrazine";
   return undefined;
 }
 
@@ -236,25 +326,65 @@ export function shortfallReason(balance: Cost, cost: Cost): string | undefined {
 export const spend = (balance: Cost, cost: Cost): Cost => ({
   material: Math.max(0, balance.material - cost.material),
   catalyst: Math.max(0, balance.catalyst - cost.catalyst),
+  terrazine: Math.max(0, balance.terrazine - cost.terrazine),
 });
 
-export const addCost = (left: Cost, right: Cost): Cost => ({ material: left.material + right.material, catalyst: left.catalyst + right.catalyst });
+export const addCost = (left: Cost, right: Cost): Cost => ({
+  material: left.material + right.material,
+  catalyst: left.catalyst + right.catalyst,
+  terrazine: left.terrazine + right.terrazine,
+});
 
-/** "150 material + 50 catalyst", "50 material", "nothing". */
+/** "100 catalyst + 100 terrazine", "50 material", "nothing". */
 export function formatCost(cost: Cost): string {
   const parts = CURRENCIES.filter(currency => cost[currency] > 0).map(currency => `${cost[currency]} ${currency}`);
   return parts.join(" + ") || "nothing";
 }
 
-export function placementError(kind: string, x: number, y: number, owner: number, units: Entity[], nodes: Node[]): string | undefined {
+/** How far from a catalyst deposit a refinery may be aimed and still snap onto it: `rules::REFINERY_SNAP_DISTANCE`. */
+export const REFINERY_SNAP_DISTANCE = 60;
+
+/**
+ * The catalyst deposit a refinery aimed at `(x, y)` would stand on, or why none
+ * will take it. Mirrors `World::build_site`: the nearest deposit within the snap
+ * distance that still holds catalyst and has no refinery on it yet.
+ */
+export function refinerySite(x: number, y: number, units: Entity[], nodes: Node[]): { node: Node } | { error: string } {
+  const near = nodes.filter(node => currencyOf(node.kind) === "catalyst" && Math.hypot(node.x - x, node.y - y) <= REFINERY_SNAP_DISTANCE);
+  if (!near.length) return { error: "A refinery must be built on a catalyst deposit" };
+  const free = near
+    .filter(node => node.amount > 0 && !units.some(unit => unit.kind === "refinery" && Math.hypot(unit.x - node.x, unit.y - node.y) < 1))
+    .sort((left, right) => Math.hypot(left.x - x, left.y - y) - Math.hypot(right.x - x, right.y - y) || left.id - right.id);
+  return free.length ? { node: free[0] } : { error: "That catalyst deposit is empty or already has a refinery" };
+}
+
+/**
+ * Where a building aimed at `(x, y)` will actually stand. Every kind stands
+ * where it was aimed except the refinery, which snaps onto its deposit; the
+ * build preview draws here so what you see is where it goes.
+ */
+export function buildSite(kind: string, x: number, y: number, units: Entity[], nodes: Node[]): { x: number; y: number } {
+  if (kind !== "refinery") return { x, y };
+  const site = refinerySite(x, y, units, nodes);
+  return "node" in site ? { x: site.node.x, y: site.node.y } : { x, y };
+}
+
+export function placementError(kind: string, aimX: number, aimY: number, owner: number, units: Entity[], nodes: Node[]): string | undefined {
+  let x = aimX, y = aimY;
+  if (kind === "refinery") {
+    const site = refinerySite(aimX, aimY, units, nodes);
+    if ("error" in site) return site.error;
+    ({ x, y } = site.node);
+  }
   // Bounds follow the map, not a constant: hardcoding the 1600 map's 1540 edge
   // confined building to the top-left quarter of a larger map.
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 60 || x > worldSize - 60 || y < 60 || y > worldSize - 60) return "Map boundary";
   if (terrain.some(([left, top, width, height]) => x > left - 50 && x < left + width + 50 && y > top - 50 && y < top + height + 50)) return "Terrain obstructed";
-  if (units.some(unit => Math.hypot(unit.x - x, unit.y - y) < (isBuilding(unit.kind) ? 110 : 55)) || nodes.some(node => Math.hypot(node.x - x, node.y - y) < 75)) return "Site occupied";
+  // A refinery stands on a deposit by definition, so only other buildings and units obstruct it.
+  if (units.some(unit => Math.hypot(unit.x - x, unit.y - y) < (isBuilding(unit.kind) ? 110 : 55)) || (kind !== "refinery" && nodes.some(node => Math.hypot(node.x - x, node.y - y) < 75))) return "Site occupied";
   const owned = units.filter(unit => unit.owner === owner && isBuilding(unit.kind));
   if (!owned.some(unit => unit.constructionRemaining === 0n && Math.hypot(unit.x - x, unit.y - y) <= 500)) return "Outside build radius";
-  if (owned.length >= 16) return "Building limit reached";
-  if (kind === "factory" && !owned.some(unit => unit.kind === "barracks" && unit.constructionRemaining === 0n)) return "Barracks required";
+  if (owned.length >= MAX_BUILDINGS) return "Building limit reached";
+  if ((kind === "factory" || kind === "lab") && !owned.some(unit => unit.kind === "barracks" && unit.constructionRemaining === 0n)) return "Barracks required";
   return undefined;
 }

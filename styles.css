@@ -116,6 +116,9 @@ body.in-match .match { height: 100dvh; }
 /* Organic harvester stock. Free labour gated on an invisible counter is
    unreadable, so stock reads as a balance beside the two currencies —
    and is hidden outright for the two factions it means nothing to. */
+.readout.terrazine { color: #8fe0d4; border-color: #2f7a70; background: #172a28; }
+.readout.terrazine b { color: #c9f5ee; }
+.readout.terrazine.empty { opacity: 0.72; }
 .readout.stock { color: #a6e08f; border-color: #46783a; background: #1b2a1a; }
 .readout.stock b { color: #d3f5c4; }
 .readout.stock.empty { opacity: 0.72; }
@@ -274,6 +277,7 @@ button[aria-pressed="true"] { border-color: var(--accent); background: #4a603d; 
    that is actually missing on a disabled button. */
 .cost-part.material { color: #d8c894; }
 .cost-part.catalyst { color: #cbb0f2; }
+.cost-part.terrazine { color: #8fe0d4; }
 .production-buttons button:disabled .cost-part.short { color: #ff9ba2; text-decoration: underline wavy; text-underline-offset: 2px; }
 /* A button disabled only for want of a currency stays readable enough to show
    which one, instead of fading out with everything else. */
