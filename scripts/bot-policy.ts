@@ -1,7 +1,7 @@
 import type { CreepPatch, Node, Order } from "../src/bindings/types";
 import type { Entity } from "../src/units";
 import { abilityOf, castingHub, onCreep, recallable } from "../src/abilities";
-import { affords, ARMY, ROSTER, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isCompletedHub, isHub, isLabour, LABOUR, MAX_UNITS, placementError, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, type Cost, type FactionName } from "../src/catalog";
+import { affords, ARMY, ROSTER, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isCompletedHub, isHub, isLabour, LABOUR, MAX_UNITS, placementError, requiredTier, researchReason, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, tierOf, tierOrder, costOf, type Cost, type FactionName } from "../src/catalog";
 
 export interface Decision { units: number[]; order: Order }
 
@@ -210,16 +210,26 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
   // a factory.
   const hubs = owned.filter(unit => isHub(unit.kind) && unit.constructionRemaining === 0n).length;
   const labourTarget = has("barracks") ? Math.min(LABOUR_CAP, Math.max(OPENING_LABOUR, LABOUR_PER_HUB * hubs)) : OPENING_LABOUR;
-  const technology = Object.keys(TECHNOLOGIES).find(kind => !researched.includes(`research_${kind}`) && !owned.some(unit => unit.production.some(item => item.kind === `research_${kind}`)));
-  const lab = owned.find(unit => unit.kind === "lab" && unit.constructionRemaining === 0n && unit.production.length === 0 && !assigned.has(unit.id));
-  // Technology costs material. If it is wanted but unaffordable the bot saves
-  // for it; once it has been ordered this turn it stops saving.
-  let savingForResearch = !!(lab && technology);
-  if (lab && technology && affords(spendable(), RESEARCH_COST)) {
-    decisions.push({ units: [lab.id], order: { kind: `research_${technology}`, x: 0, y: 0, target: 0 } });
-    available = spend(available, RESEARCH_COST);
+  // Research is instant and global, ordered in the name of the HQ. Tiers come
+  // first and in order: tier 1 once a barracks stands, tier 2 once a factory
+  // does (tier 3 once a lab does), because the second-tier units below stay
+  // locked without them. A technology waits for a finished lab, as it always
+  // did, and for the tiers it could buy first.
+  const tier = tierOf(researched);
+  const nextTier = tier < 3 ? tierOrder(tier + 1) : undefined;
+  const technology = Object.keys(TECHNOLOGIES).map(kind => `research_${kind}`).find(kind => !researched.includes(kind));
+  const wanted = nextTier && !researchReason(nextTier, researched, owned, owner) ? nextTier
+    : technology && ready("lab") && !researchReason(technology, researched, owned, owner) ? technology : undefined;
+  // What is wanted but unaffordable the bot saves for; once it has been ordered
+  // this pass it stops saving. A command already scheduled for the HQ may be
+  // this very purchase, so nothing is ordered until it clears.
+  let savingForResearch = !!wanted;
+  if (wanted && !busy.has(hq.id) && affords(spendable(), costOf(wanted))) {
+    decisions.push({ units: [hq.id], order: { kind: wanted, x: 0, y: 0, target: 0 } });
+    available = spend(available, costOf(wanted));
     savingForResearch = false;
   }
+  const savingCost = wanted ? costOf(wanted) : RESEARCH_COST;
   // Holding material back for a purchase only makes sense while material is
   // what is missing, and only against another material purchase. The army is
   // paid for in catalyst, so a purchase waiting on material never holds it up,
@@ -245,9 +255,12 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
   // its faction's labour (an Organic outpost included, an Industrial or Network
   // one not at all), a barracks soldiers and scouts, a factory siege.
   const wantedFrom = (building: string): string | undefined => {
+    // A second-tier unit is only asked for once its tier is bought; until
+    // then the building makes its first-tier unit.
+    const unlocked = (kind: string) => requiredTier(kind) <= tier;
     const kind = isHub(building) ? (labourCount < labourTarget ? labour : undefined)
-      : building === "barracks" ? (scouts < soldiers.length / 4 ? raider : extras < soldiers.length / 4 ? barracksExtra : fighter)
-      : building === "factory" ? (factoryExtras < heavies ? factoryExtra : heavy) : undefined;
+      : building === "barracks" ? (scouts < soldiers.length / 4 ? raider : extras < soldiers.length / 4 && unlocked(barracksExtra) ? barracksExtra : fighter)
+      : building === "factory" ? (factoryExtras < heavies && unlocked(factoryExtra) ? factoryExtra : heavy) : undefined;
     return kind && canProduce(kind, building, faction) ? kind : undefined;
   };
   for (const producer of owned.filter(unit => unit.constructionRemaining === 0n && isBuilding(unit.kind) && !assigned.has(unit.id))) {
@@ -258,7 +271,7 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
     // so a growing workforce cannot starve the barracks it is meant to feed.
     const opening = kind === labour && labourCount < OPENING_LABOUR;
     const usesMaterial = CATALOG[kind].cost.material > 0;
-    if (usesMaterial && ((desired && saving(CATALOG[desired].cost) && !opening) || (savingForResearch && saving(RESEARCH_COST) && !opening))) continue;
+    if (usesMaterial && ((desired && saving(CATALOG[desired].cost) && !opening) || (savingForResearch && saving(savingCost) && !opening))) continue;
     // A harvester is free of currency and bought with one point of this hub's
     // stock. Without this the bot would order one every pass and be refused
     // every pass, because `affords` is trivially true for a price of nothing.

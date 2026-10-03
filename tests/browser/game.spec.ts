@@ -170,7 +170,18 @@ test("one-click practice, construction, scouts and persistent base management", 
   await page.setViewportSize({ width: 320, height: 740 });
   await noOverflow(page);
   await page.getByRole("tab", { name: "Research", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Weapons 150 material / 15s", exact: true })).toBeDisabled();
+  // Research is instant and needs no lab or selection: the cost line says so,
+  // the button is live once the material is there, and buying it is final.
+  const weapons = page.getByRole("button", { name: "Weapons 150 material / instant", exact: true });
+  await expect(weapons).toBeEnabled();
+  await weapons.click();
+  await expect(page.locator("#research-status")).toContainText("weapons");
+  await expect(page.getByRole("button", { name: /^Weapons/ })).toBeDisabled();
+  // Tiers are listed with their price and say what stops them.
+  const tierThree = page.getByRole("button", { name: "Tier 3 Dominion 800 material / instant", exact: true });
+  await expect(tierThree).toBeDisabled();
+  await expect(tierThree).toHaveAttribute("title", /Requires Tier 2 first/);
+  await noOverflow(page);
   await page.getByRole("button", { name: "Surrender and leave", exact: true }).click();
   await page.getByRole("button", { name: "Surrender", exact: true }).click();
   await expect(page.locator("#lobby")).toBeVisible();
@@ -343,7 +354,6 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     await expect(host.locator("#command-list")).toContainText("train worker");
     await expect.poll(dip(afterBarracks)).toBeGreaterThanOrEqual(35);
     await expect(host.locator("#unit-count")).toHaveText("4 / 400");
-    const afterWorker = await material();
     // Now hand the command card to the barracks explicitly, to train the
     // soldier it alone can produce.
     const barracks = await host.locator("#producer-select option").filter({ hasText: "Barracks" }).getAttribute("value");

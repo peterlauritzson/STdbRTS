@@ -17,10 +17,16 @@
 
 ## Money: three currencies, one job each
 
-- **Material**: labour, buildings and research. Mined from patches.
+- **Material**: labour, buildings, research and tiers. Mined from patches.
 - **Catalyst**: the army, and only the army. Comes from refineries built on catalyst deposits; no workers needed.
 - **Terrazine**: static defense (turrets and your faction's own defense). You earn it as a by-product of mining material: 12% of what you mine if Industrial, 10% otherwise.
 - Nothing converts into anything else. You start with 250 material and 100 catalyst, plus a steady trickle of free material (200 a minute for 90 seconds, then 100 a minute for the rest of the game).
+
+## Research and tiers
+
+- **Research is instant.** Open the Research tab and buy Weapons, Armour or Logistics (150 material each). No building is selected and nothing queues; you own it the moment you pay, for the rest of the match.
+- **Tiers gate your army.** Tier 1 (300 material, needs a finished barracks) unlocks the second unit of each barracks: marksman and medic, arcer and phantom, or prowler and devourer. Tier 2 (500, needs tier 1 and a finished factory) unlocks the factory's heavy unit: bulwark, warden or behemoth. Tier 3 (800, needs tier 2 and a finished laboratory) unlocks nothing new. Each tier also gives your faction one upgrade.
+- The first unit of each building (soldier, scout, siege; sentinel, skimmer, lancer; swarmer, spitter, crusher) needs no tier.
 
 ## Mining
 

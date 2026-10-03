@@ -31,6 +31,8 @@ All three are unarmed and have no passive.
 | **Siege** | Anti-structure artillery | Factory | 220 | 65 | 260 | 32 | 2.5 | 200 | 8 | **Shrapnel**: each shell deals 50% to other enemies within 45 of the target |
 | **Bulwark** | Tank | Factory | 420 | 80 | 90 | 14 | 0.7 | 225 | 8.5 | **Guardian**: takes 30% of damage dealt to friendly units within 90 |
 
+Tier gates: the marksman and medic need tier 1, the bulwark tier 2; the soldier, scout and siege need none. Tier upgrades: Combat Shields (tier 1) gives the soldier +20 hit points, Dig In (tier 2) cuts the marksman's Entrenchment hold to 4 s, Reinforced Plating (tier 3) gives every building +2 armour.
+
 Damage notes: the soldier does double damage to scouts and skimmers. Siege does triple damage to buildings but only half damage to scouts. Damage figures in the tables are before armour and research.
 
 ### Network army
@@ -46,6 +48,8 @@ Every Network unit splits its health into hit points and shields (see [shields](
 | **Lancer** | Anti-structure artillery | Factory | 161 + 79 | 75 | 250 | 36 | 2 | 250 | 9 | **Overwatch**: +50% damage for 1 s after 10 s without attacking |
 | **Warden** | Support walker | Factory | 201 + 99 | 85 | 100 | 10 | 0.8 | 250 | 9 | **Shield Aura**: friendly shields within 110 regenerate 2/s even under fire |
 
+Tier gates: the arcer and phantom need tier 1, the warden tier 2; the sentinel, skimmer and lancer need none. Tier upgrades: Quick Blink (tier 1) cuts the sentinel's Battle Blink cooldown to 8 s, Focusing Lens (tier 2) gives the lancer +20 range, Resonance (tier 3) cuts the phantom's Phase Shift cooldown to 5 s and doubles the warden's aura to 4 shields a second.
+
 Damage notes: the skimmer does triple damage to labour units. The lancer does triple damage to buildings.
 
 ### Organic army
@@ -58,6 +62,8 @@ Damage notes: the skimmer does triple damage to labour units. The lancer does tr
 | **Devourer** | Bruiser (melee) | Barracks | 130 | 120 | 24 | 14 | 0.6 | 120 | 4.25 | **Veteran**: each kill gives +3% attack rate and speed, up to 15 kills (+45%) |
 | **Crusher** | Anti-structure (melee) | Factory | 420 | 85 | 28 | 30 | 0.9 | 250 | 9 | **Regrowth**: after 5 s unhurt, regenerates 2% of its health every second |
 | **Behemoth** | Siege beast (melee) | Factory | 450 | 80 | 60 | 28 | 1.2 | 275 | 9.5 | **Death Burst**: on death, 80 damage to every enemy unit within 70 |
+
+Tier gates: the prowler and devourer need tier 1, the behemoth tier 2; the swarmer, spitter and crusher need none. Tier upgrades: Metabolic Boost (tier 1) gives the swarmer and prowler +15% speed, Grooved Spines (tier 2) gives the spitter +20 range, Adrenal Glands (tier 3) makes the swarmer and devourer attack 20% faster and gives the crusher +2 armour.
 
 Damage notes: the crusher does triple damage to buildings. The behemoth does not.
 
@@ -77,9 +83,9 @@ Every structure is built by placing it on the map; it then raises itself and nee
 | Structure | Who can build it | Hit points | Cost | Build (s) | Needs | What it does |
 | --- | --- | ---: | ---: | ---: | --- | --- |
 | **Headquarters** | Everyone | 1200 | - | - | - | Your starting hub. Trains labour, receives mined material, and creates your territory (creep for Organic, power field for Network). Lose every finished hub and you lose the match. |
-| **Barracks** | Everyone | 700 | 150 material | 8 | - | Trains each faction's fighters and raiders. Required before a factory or laboratory. |
-| **Factory** | Everyone | 900 | 250 material | 12 | barracks | Trains the heavy units: siege, bulwark, lancer, warden, crusher, behemoth. |
-| **Laboratory** | Everyone | 650 | 200 material | 10 | barracks | Researches weapons, armor and logistics. One finished laboratory is enough. |
+| **Barracks** | Everyone | 700 | 150 material | 8 | - | Trains each faction's fighters and raiders (the second unit of each needs tier 1). Required before a factory or laboratory, and for buying tier 1. |
+| **Factory** | Everyone | 900 | 250 material | 12 | barracks | Trains the heavy units: siege, lancer, crusher (no tier) and bulwark, warden, behemoth (tier 2). Required for buying tier 2. |
+| **Laboratory** | Everyone | 650 | 200 material | 10 | barracks | Required for buying tier 3. It researches nothing itself: research is instant and needs no building. |
 | **Outpost** | Everyone | 650 | 100 material | 6 | - | A second hub. Receives mined material and trains labour. For Organic it also spreads creep and stores harvester stock; for Network it projects a power field. |
 | **Refinery** | Everyone | 400 | 75 material | 6 | catalyst deposit | Must be built on a catalyst deposit (it snaps to one within 60 units; one per deposit). Extracts 4 catalyst every half second with no workers. |
 | **Turret** | Everyone | 500 | 100 terrazine | 7 | - | Static defense. Range 210, damage 16, cooldown 0.9 s. |
@@ -144,13 +150,23 @@ Network and Organic hubs (HQ and outposts) carry energy: up to 200, starting at 
 
 ## Research
 
-Bought at a finished laboratory. Each costs 150 material and takes 15 s. Each can be researched once; it applies to all your existing and future units and survives the loss of the laboratory.
+Bought from the Research tab with material. It is **instant**: no building is selected, nothing queues, and you own it the moment you pay. Each can be bought once; it applies to all your existing and future units and is never lost, even if every building falls.
 
-| Technology | Effect |
-| --- | --- |
-| **Weapons** | +4 attack damage on every attack, before multipliers. |
-| **Armor** | Every hit against your units and structures does 3 less damage (a hit never does less than 1). |
-| **Logistics** | Carry capacity 25 to 40 (harvesters 10 to 16); mining 5 to 7 per pulse (drifters 1 every 0.25 s to 3 every 0.5 s). |
+| Technology | Cost | Effect |
+| --- | ---: | --- |
+| **Weapons** | 150 material | +4 attack damage on every attack, before multipliers. |
+| **Armor** | 150 material | Every hit against your units and structures does 3 less damage (a hit never does less than 1). |
+| **Logistics** | 150 material | Carry capacity 25 to 40 (harvesters 10 to 16); mining 5 to 7 per pulse (drifters 1 every 0.25 s to 3 every 0.5 s). |
+
+### Tiers
+
+Bought in order, instantly, with material. The finished building is needed only at the moment of purchase. Refusals: "Already researched", "Requires Tier N first", "Requires a finished barracks" (factory, lab), or the usual material shortfall. Training a locked unit is refused with "Requires Tier N".
+
+| Tier | Cost | Needs | Unlocks | Industrial | Network | Organic |
+| --- | ---: | --- | --- | --- | --- | --- |
+| **1 Mobilisation** | 300 material | a finished barracks | marksman, medic / arcer, phantom / prowler, devourer | **Combat Shields**: soldier +20 maximum hit points (existing soldiers are raised at the purchase, later ones are born with it) | **Quick Blink**: Battle Blink cooldown 12 s to 8 s | **Metabolic Boost**: swarmer and prowler +15% speed |
+| **2 Escalation** | 500 material | tier 1, a finished factory | bulwark / warden / behemoth | **Dig In**: Entrenchment arms in 4 s instead of 7.5 s | **Focusing Lens**: lancer +20 range | **Grooved Spines**: spitter +20 range |
+| **3 Dominion** | 800 material | tier 2, a finished laboratory | nothing | **Reinforced Plating**: every own building +2 armour (stacks with Armor research and Fortified) | **Resonance**: Phase Shift every 5 s instead of 8 s; warden aura 2 to 4 shields a second | **Adrenal Glands**: swarmer and devourer attack 20% faster; crusher +2 armour |
 
 ## Economy constants
 
@@ -175,7 +191,7 @@ Bought at a finished laboratory. Each costs 150 material and takes 15 s. Each ca
 - Up to 400 mobile units per player (labour and army; temporary units do not count) and 150 buildings per player (construction sites count).
 - Each building queues up to 8 items; production is one item at a time.
 - Build within 500 units of one of your own finished buildings. A site must be 110 clear of other buildings, 55 clear of units, 75 clear of deposits (except a refinery), off terrain, and 60 from the map edge.
-- A factory and a laboratory each need a finished barracks first.
+- A factory and a laboratory each need a finished barracks first. Tiers need the building of their number (barracks, factory, laboratory) finished when bought, and the tier before.
 - Only Industrial can build sensor towers and bunkers; only Network relays and bastions; only Organic spines. Each faction trains only its own labour and army.
 - Every faction chooses in the lobby; with no choice, slots are dealt Industrial, Network, Organic in order.
 - You are out when your last finished hub falls. If the last hubs of two players fall on the same tick, it is a draw.
@@ -193,7 +209,7 @@ Bought at a finished laboratory. Each costs 150 material and takes 15 s. Each ca
 | F / G | Repair (then click a target) / return cargo |
 | Y | Set a rally point (with a production building selected) |
 | T / C | Teleport / faction ability (Recall, Bloom) |
-| Q W E R D Z X | Train: labour, then your six army units in card order |
+| Q W E R D Z X | Train: labour, then your six army units in card order. With the Research tab open: Weapons, Armor, Logistics, Tier 1, Tier 2, Tier 3 |
 | B, then Q W E R T Y U I | Build menu: barracks, outpost, turret, factory, laboratory, then your faction structure, refinery, faction defense |
 | Ctrl or Alt + 0-9 | Set control group |
 | Shift + 0-9 | Add to control group |

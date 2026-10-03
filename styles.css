@@ -279,6 +279,8 @@ button[aria-pressed="true"] { border-color: var(--accent); background: #4a603d; 
 #building-count, #research-status { font-size: 10px; margin-top: 10px; }
 #practice { width: 100%; margin-bottom: 20px; }
 .production-buttons .completed { opacity: 1; border-color: var(--accent); color: var(--accent); }
+.production-buttons em.tier-tag { position: absolute; bottom: 2px; right: 3px; font: 9px/12px "IBM Plex Mono", monospace; font-style: normal; color: #d9b36a; padding: 0 3px; border: 1px solid #6b5a33; border-radius: 2px; background: #1b1710; pointer-events: none; }
+.production-buttons button.locked { opacity: .55; }
 .production-buttons button { justify-content: start; padding: 6px 8px; font-size: 12px; }
 .production-buttons small { display: block; font: 9px "IBM Plex Mono", monospace; color: #b5c4a8; margin-top: 3px; }
 /* Prices carry the same two colours as the header chips, so a cost that needs

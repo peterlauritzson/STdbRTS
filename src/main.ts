@@ -4,7 +4,7 @@ import { ABILITIES, castRefusal, scheduledCasts, type AbilityKind } from "./abil
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
 import { COLORS, countdown, TICK_MS, VISUALS } from "./presentation";
-import { addCost, NO_COST, isCompletedHub, ROSTER, armyBuilding, armyFaction, describe, passiveLine, veteranStacks, isVeteran, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, RESEARCH_SECONDS, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_BUILDINGS, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
+import { addCost, NO_COST, isCompletedHub, ROSTER, armyBuilding, armyFaction, describe, passiveLine, veteranStacks, isVeteran, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, TIERS, TIER_UPGRADES, tierOrder, tierOf, requiredTier, researchReason, researchName, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_BUILDINGS, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
 import { Practice, type PracticeOpponent } from "./practice";
 import { Feedback } from "./feedback";
 import { ScoreScreen, type ScorePlayer } from "./scorescreen";
@@ -31,7 +31,7 @@ function text(tag: string, content: string, className = ""): HTMLElement {
  * text nodes so the rendered label — and therefore the button's accessible
  * name — is exactly "150 material + 50 catalyst / 8s".
  */
-function costLine(cost: Cost, seconds: number): HTMLElement {
+function costLine(cost: Cost, seconds: number | string): HTMLElement {
   const line = text("small", "", "cost-line");
   const parts = CURRENCIES.filter(currency => cost[currency] > 0);
   if (!parts.length) line.append(text("span", "free", "cost-part"));
@@ -39,11 +39,11 @@ function costLine(cost: Cost, seconds: number): HTMLElement {
     if (index) line.append(document.createTextNode(" + "));
     line.append(text("span", `${cost[currency]} ${currency}`, `cost-part ${currency}`));
   }
-  line.append(document.createTextNode(` / ${seconds}s`));
+  line.append(document.createTextNode(typeof seconds === "number" ? ` / ${seconds}s` : ` / ${seconds}`));
   return line;
 }
 
-function catalogButton(id: string, label: string, cost: Cost, seconds: number, icon: string, title: string): HTMLButtonElement {
+function catalogButton(id: string, label: string, cost: Cost, seconds: number | string, icon: string, title: string): HTMLButtonElement {
   const button = text("button", "") as HTMLButtonElement;
   button.id = id; button.title = title;
   const symbol = document.createElement("i"); symbol.dataset.lucide = icon;
@@ -77,6 +77,8 @@ for (const kind of TRAINABLE) {
   const definition = CATALOG[kind];
   const button = catalogButton(`train-${kind}`, definition.label, definition.cost, definition.seconds, definition.icon, describe(kind));
   button.hidden = true;
+  // Second- and third-tier units say which tier they wait for while locked.
+  if (requiredTier(kind)) { const tag = text("em", `Tier ${requiredTier(kind)}`, "tier-tag"); tag.hidden = true; button.append(tag); }
   element("training-buttons").append(button);
 }
 /**
@@ -96,7 +98,17 @@ for (const kind of BUILDABLE) {
   if (BUILDING_FACTION[kind]) button.hidden = true;
   element("building-buttons").append(button);
 }
-for (const [kind, definition] of Object.entries(TECHNOLOGIES)) element("research-buttons").append(catalogButton(`research-${kind}`, definition.label, RESEARCH_COST, RESEARCH_SECONDS, definition.icon, definition.description));
+/**
+ * The Research tab: the three technologies, then the three tiers. Both are
+ * instant, so the cost line says so instead of giving a duration. Order kinds
+ * are `research_<id>` and `tier_<n>`; the button ids are `research-<id>` and
+ * `research-tier_<n>`.
+ */
+const RESEARCH_BUTTONS: readonly { id: string; order: string; label: string; icon: string; cost: Cost; description: string; tier: number }[] = [
+  ...Object.entries(TECHNOLOGIES).map(([id, definition]) => ({ id, order: `research_${id}`, label: definition.label, icon: definition.icon, cost: RESEARCH_COST, description: definition.description, tier: 0 })),
+  ...([1, 2, 3] as const).map(tier => ({ id: `tier_${tier}`, order: tierOrder(tier), label: TIERS[tier].label, icon: ["tent", "factory", "flask-conical"][tier - 1], cost: TIERS[tier].cost, description: `Unlocks ${TIERS[tier].unlocks}`, tier })),
+];
+for (const research of RESEARCH_BUTTONS) element("research-buttons").append(catalogButton(`research-${research.id}`, research.label, research.cost, "instant", research.icon, research.description));
 createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, BookOpen, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle } });
 /** Catalogue icon names to icon nodes, for portraits built after `createIcons` has run. */
 const ICON_NODES: Record<string, IconNode> = {
@@ -373,9 +385,11 @@ element("help-toggle").addEventListener("click", toggleHelp);
 // The guide is a second page of the same app; it opens beside the match, never over it.
 element("guide-open").addEventListener("click", () => window.open("guide.html", "_blank", "noopener"));
 for (const kind of BUILDABLE) element(`build-${kind}`).addEventListener("click", () => battlefield.arm(`build_${kind}`));
-for (const kind of Object.keys(TECHNOLOGIES)) element(`research-${kind}`).addEventListener("click", () => {
-  const lab = battlefield.ownedSelection().find(unit => unit.kind === "lab" && unit.constructionRemaining === 0n) ?? session.snapshot.units.find(unit => unit.owner === session.snapshot.me?.slot && unit.kind === "lab" && unit.constructionRemaining === 0n);
-  if (lab) void session.order([lab.id], { kind: `research_${kind}`, x: 0, y: 0, target: 0 });
+// Research needs no building and no selection: it is ordered in the name of
+// the HQ, like construction (the server needs one own unit to issue it).
+for (const research of RESEARCH_BUTTONS) element(`research-${research.id}`).addEventListener("click", () => {
+  const issuer = battlefield.issuer();
+  if (issuer) void session.order([issuer.id], { kind: research.order, x: 0, y: 0, target: 0 });
 });
 document.querySelectorAll<HTMLInputElement>("input[name=mode]").forEach(input => input.addEventListener("change", () => {
   if (input.value === "select" || input.value === "order" || input.value === "pan") battlefield.mode = input.value;
@@ -460,6 +474,7 @@ function renderMatch(): void {
   const balance: Cost = { material: me.material, catalyst: me.catalyst, terrazine: me.terrazine };
   const faction = myFaction();
   const labour = LABOUR[faction];
+  const tier = tierOf(me.research);
   const fields = battlefield.fields();
   element("match-name").textContent = room.name;
   element("material").textContent = String(balance.material);
@@ -503,12 +518,18 @@ function renderMatch(): void {
     // possible refusal is the stock one — quoted exactly as the server gives it.
     const stockless = kind === "harvester" && stock === 0;
     const site = siteFor(kind);
-    const blocked = stockless || !canOrder || !site || mobile.length + pending >= MAX_UNITS;
+    // A second- or third-tier unit is locked until its tier is bought.
+    const tierNeeded = requiredTier(kind);
+    const locked = tierNeeded > tier;
+    const blocked = stockless || locked || !canOrder || !site || mobile.length + pending >= MAX_UNITS;
     // The tooltip, and the notice a hotkey shows, says why a button is off:
     // the first refusal that applies, in the order a player can fix them.
     const needs = LABOUR_KINDS.includes(kind) ? "a finished hub" : armyBuilding(kind) === "factory" ? "a finished factory" : "a finished barracks";
-    const why = !canOrder ? "Orders are closed" : !site ? `Needs ${needs}` : mobile.length + pending >= MAX_UNITS ? `Unit cap ${MAX_UNITS} reached` : `Trains at ${CATALOG[site.kind].label} #${site.id}`;
+    const why = !canOrder ? "Orders are closed" : locked ? `Requires Tier ${tierNeeded}` : !site ? `Needs ${needs}` : mobile.length + pending >= MAX_UNITS ? `Unit cap ${MAX_UNITS} reached` : `Trains at ${CATALOG[site.kind].label} #${site.id}`;
     affordability(button, definition.cost, balance, blocked, stockless ? `${describe(kind)} / ${STOCK_REASON}` : `${describe(kind)} / ${why}`);
+    const tag = button.querySelector<HTMLElement>(":scope > .tier-tag");
+    if (tag) tag.hidden = !locked;
+    button.classList.toggle("locked", locked);
   }
   const producers = buildings.filter(unit => isProducer(unit, faction, fields));
   const nextSignature = producers.map(unit => `${unit.id}:${unit.kind}`).join(",");
@@ -530,18 +551,18 @@ function renderMatch(): void {
     element(`build-${kind}`).setAttribute("aria-pressed", String(battlefield.targeting === `build_${kind}`));
   }
   element("building-count").textContent = `${buildings.length} / ${MAX_BUILDINGS} structures`;
-  for (const [kind, definition] of Object.entries(TECHNOLOGIES)) {
-    const researched = me.research.includes(`research_${kind}`);
-    const queued = owned.some(unit => unit.production.some(item => item.kind === `research_${kind}`));
-    const button = element<HTMLButtonElement>(`research-${kind}`);
-    const blocked = !canOrder || !!researched || queued || !buildings.some(unit => unit.kind === "lab" && unit.constructionRemaining === 0n && unit.production.length < 8);
-    // A technology already bought or queued is never short of anything, so it
-    // is priced at nothing and reads as complete rather than unaffordable.
-    const cost = researched || queued ? NO_COST : RESEARCH_COST;
-    affordability(button, cost, balance, blocked, `${definition.description}${researched ? " / Complete" : queued ? " / Researching" : " / Requires laboratory"}`);
-    button.classList.toggle("completed", !!researched);
+  for (const research of RESEARCH_BUTTONS) {
+    const bought = me.research.includes(research.order);
+    const button = element<HTMLButtonElement>(`research-${research.id}`);
+    const reason = researchReason(research.order, me.research, owned, me.slot);
+    // Tiers carry the faction's own upgrade in their tooltip.
+    const detail = research.tier ? `${TIER_UPGRADES[faction][research.tier - 1].name}: ${TIER_UPGRADES[faction][research.tier - 1].text} / ${research.description}` : research.description;
+    // Bought research is never short of anything, so it is priced at nothing
+    // and reads as complete rather than unaffordable.
+    affordability(button, bought ? NO_COST : research.cost, balance, !canOrder || !battlefield.issuer() || !!reason, `${detail} / ${bought ? "Complete" : reason ?? "Instant"}`);
+    button.classList.toggle("completed", bought);
   }
-  element("research-status").textContent = me.research.length ? me.research.map(kind => kind.slice(9)).join(" / ") : "No upgrades";
+  element("research-status").textContent = me.research.length ? me.research.map(researchName).join(" / ") : "No upgrades";
   for (const tab of CARD_TABS) {
     const keys: readonly string[] = tab === "build" ? BUILD_KEYS : TRAIN_KEYS;
     cardButtons(tab).forEach((button, index) => badge(button, keys[index]));
@@ -733,9 +754,7 @@ function renderTimers(): void {
   const selectedProducer = hq && battlefield.selected.has(hq.id) ? hq : undefined;
   const queued = selectedProducer ? selectedProducer.production : session.snapshot.units.filter(unit => unit.owner === me.slot).flatMap(unit => unit.production).filter(item => !item.kind.startsWith("research_")).sort((left, right) => Number(left.finishTick - right.finishTick));
   element("production-queue").replaceChildren(...queued.map(item => text("span", `${item.kind} ${Math.max(0, Number(item.finishTick - room.tick) / 20).toFixed(1)}s`, "production-item")));
-  const technology = me.research.map(kind => kind.slice(9));
-  const research = session.snapshot.units.filter(unit => unit.owner === me.slot).flatMap(unit => unit.production).filter(item => item.kind.startsWith("research_")).map(item => `${item.kind.slice(9)} ${Math.max(0, Number(item.finishTick - room.tick) / 20).toFixed(1)}s`);
-  element("research-status").textContent = [...technology, ...research].join(" / ") || "No upgrades";
+  element("research-status").textContent = me.research.map(researchName).join(" / ") || "No upgrades";
   const ours = commands.filter(command => command.owner === me.slot).sort((left, right) => left.id > right.id ? -1 : 1);
   element("pending-count").textContent = String(ours.filter(command => command.status === "scheduled").length + session.pending.size);
   const rows = [...session.pending.values()].map(pending => {

@@ -417,9 +417,12 @@ database:
   faction (reusing the demoted Increment F's extractor idea, without
   suppression). Refinery rate and the remembered cross-income rule get labeled
   experimental values.
-- **N2 - instant research and tiers.** Research becomes a command-card
-  purchase with no building; the lab's queue goes. Tier contents per roster
-  need proposing.
+- **N2 - instant research and tiers.** Built (step 32, 2026-10-03,
+  experimental, not committed). Research and three tiers are instant, global
+  purchases from the Research tab with no building selected; the lab's queue
+  is gone and the lab is the tier 3 gate. Tiers sit in the player's `research`
+  list, so there is no schema change; `RULESET_VERSION` 18. Tier contents and
+  prices are in DECISIONS.md (2026-10-03); the bots buy tiers first.
 - **N3 - build rules.** Placement within a fixed range of a finished
   structure; turrets only in the owner's zone; no building on the opponent's
   half for an opening window. Server validation and client placement preview

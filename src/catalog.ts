@@ -35,7 +35,6 @@ export const price = (material: number, catalyst = 0, terrazine = 0): Cost => ({
 export const NO_COST: Cost = price(0);
 /** Every technology costs the same; the server has one price for all three. */
 export const RESEARCH_COST: Cost = price(150);
-export const RESEARCH_SECONDS = 15;
 
 export interface Definition { label: string; hp: number; radius: number; cost: Cost; seconds: number; building: boolean; icon: string; role: string }
 export const CATALOG: Record<string, Definition> = {
@@ -79,7 +78,7 @@ export const CATALOG: Record<string, Definition> = {
   spine: { label: "Spine", hp: 600, radius: 30, cost: price(0, 0, 125), seconds: 7.5, building: true, icon: "triangle", role: "Organic defense / 170 range / costs terrazine" },
   refinery: { label: "Refinery", hp: 400, radius: 28, cost: price(75), seconds: 6, building: true, icon: "fuel", role: "Extracts catalyst from the deposit it stands on, with no workers / build on a catalyst deposit" },
   outpost: { label: "Outpost", hp: 650, radius: 30, cost: price(100), seconds: 6, building: true, icon: "warehouse", role: "Resource drop-off / base expansion" },
-  lab: { label: "Laboratory", hp: 650, radius: 32, cost: price(200), seconds: 10, building: true, icon: "flask-conical", role: "Faction-wide research" },
+  lab: { label: "Laboratory", hp: 650, radius: 32, cost: price(200), seconds: 10, building: true, icon: "flask-conical", role: "Tier 3 gate / requires barracks" },
   // Faction buildings: each projects its faction's zone and nobody else can
   // build it. `hp` is the listed total; a Network entity carries half of it as
   // shields, and the row's own `maxHp`/`maxShields` are what to draw against.
@@ -96,6 +95,62 @@ export const TECHNOLOGIES = {
   armor: { label: "Armor", description: "-3 damage per hit", icon: "shield" },
   logistics: { label: "Logistics", description: "40 cargo / 7 per extraction", icon: "warehouse" },
 };
+/**
+ * The three tiers, bought in order from the Research tab, instantly, with
+ * material (`rules::TIER_*_COST`, `rules::tier_building`, `rules::required_tier`).
+ * The building is only needed at the moment of purchase.
+ */
+export const TIERS: Readonly<Record<1 | 2 | 3, { label: string; cost: Cost; building: string; unlocks: string }>> = {
+  1: { label: "Tier 1 Mobilisation", cost: price(300), building: "barracks", unlocks: "marksman, medic / arcer, phantom / prowler, devourer" },
+  2: { label: "Tier 2 Escalation", cost: price(500), building: "factory", unlocks: "bulwark / warden / behemoth" },
+  3: { label: "Tier 3 Dominion", cost: price(800), building: "lab", unlocks: "the faction's tier 3 upgrade" },
+};
+/** The order kind that buys a tier. */
+export const tierOrder = (tier: number): string => `tier_${tier}`;
+/** The units a tier unlocks: `rules::required_tier`. 0 for the first-tier units, labour and buildings. */
+export const requiredTier = (kind: string): 0 | 1 | 2 =>
+  ["marksman", "medic", "arcer", "phantom", "prowler", "devourer"].includes(kind) ? 1 : ["bulwark", "warden", "behemoth"].includes(kind) ? 2 : 0;
+/** The highest tier in a research list: `rules::tier_of`. */
+export const tierOf = (research: readonly string[]): number =>
+  Math.max(0, ...research.map(item => /^tier_([123])$/.exec(item)?.[1]).filter((n): n is string => !!n).map(Number));
+/**
+ * Each faction's upgrade at each tier (`rules.rs`, "Tier upgrades"); the
+ * numbers are those constants.
+ */
+export const TIER_UPGRADES: Readonly<Record<FactionName, readonly [{ name: string; text: string }, { name: string; text: string }, { name: string; text: string }]>> = {
+  industrial: [
+    { name: "Combat Shields", text: "soldier +20 max hit points" },
+    { name: "Dig In", text: "Entrenchment arms in 4s instead of 7.5s" },
+    { name: "Reinforced Plating", text: "every own building +2 armour" },
+  ],
+  network: [
+    { name: "Quick Blink", text: "Battle Blink cooldown 8s instead of 12s" },
+    { name: "Focusing Lens", text: "lancer +20 range" },
+    { name: "Resonance", text: "Phase Shift every 5s instead of 8s; warden aura 4 shields per second instead of 2" },
+  ],
+  organic: [
+    { name: "Metabolic Boost", text: "swarmer and prowler +15% speed" },
+    { name: "Grooved Spines", text: "spitter +20 range" },
+    { name: "Adrenal Glands", text: "swarmer and devourer attack 20% faster; crusher +2 armour" },
+  ],
+};
+/**
+ * Why a research or tier purchase is refused apart from price, in the server's
+ * words (`World::validate_research`), or undefined when it can go ahead.
+ * `kind` is the order kind (`research_armor`, `tier_2`).
+ */
+export function researchReason(kind: string, research: readonly string[], owned: readonly { kind: string; owner: number; constructionRemaining: bigint }[], owner: number): string | undefined {
+  if (research.includes(kind)) return "Already researched";
+  const tier = /^tier_([123])$/.exec(kind)?.[1];
+  if (!tier) return undefined;
+  const number = Number(tier);
+  if (number > 1 && tierOf(research) < number - 1) return `Requires Tier ${number - 1} first`;
+  const building = TIERS[number as 1 | 2 | 3].building;
+  if (!owned.some(unit => unit.owner === owner && unit.kind === building && unit.constructionRemaining === 0n)) return `Requires a finished ${building}`;
+  return undefined;
+}
+/** A research list entry as a short readable name ("armor", "Tier 2"). */
+export const researchName = (kind: string): string => /^tier_/.test(kind) ? `Tier ${kind.slice(5)}` : kind.replace(/^research_/, "");
 export const isBuilding = (kind: string): boolean => CATALOG[kind]?.building ?? false;
 /**
  * Each faction's army, in command-card order: fighter and raider or support
@@ -296,6 +351,8 @@ export const currencyOf = (kind: ResourceKind): Currency => (kind.tag === "Catal
 /** The price of anything orderable, including the `research_*` orders. */
 export function costOf(kind: string): Cost {
   if (kind.startsWith("research_")) return RESEARCH_COST;
+  const tier = /^tier_([123])$/.exec(kind)?.[1];
+  if (tier) return TIERS[Number(tier) as 1 | 2 | 3].cost;
   return CATALOG[kind]?.cost ?? NO_COST;
 }
 

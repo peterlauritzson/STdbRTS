@@ -41,13 +41,29 @@ The Organic risks are all about territory. Lose a hub and its creep recedes; los
 
 The three currencies are kept strictly apart on purpose.
 
-- **Material** is for growth: labour, buildings, research. It is what you get from mining, so more mining means faster growth.
+- **Material** is for growth: labour, buildings, research and tiers. It is what you get from mining, so more mining means faster growth.
 - **Catalyst** is for the army. It is separate, comes from refineries that need no workers, and is not touched by your growth spending. As a result there is never a reason to hold back from building an army because you needed the money for something else.
 - **Terrazine** is for static defense. You earn it as a share of the material you mine, so a defender who mined a lot can afford strong defenses, and an army that never mined gets none.
 
 Money from losses is partly returned too: when one of your army units dies you get **half of its price back in catalyst**. Losing a fight stings but does not stop you rebuilding. Workers and buildings return nothing.
 
 Refineries are the one place you spend material to make catalyst, and each can only sit on a catalyst deposit. That makes the catalyst deposits the strategic points of the map: you always know where the other player must build.
+
+## Tiers: tech is a purchase, not a building
+
+Before tiers, every unit was available the moment its building stood, so there was nothing to choose or deny. Now material buys a decision: tech up now, or spend on structures and expansion.
+
+- Tiers are bought from the **Research tab**, instantly, in order, and are never lost. The building requirement is checked only at the moment you buy: tier 1 needs a finished barracks (300 material), tier 2 a finished factory (500), tier 3 a finished laboratory (800). Destroying a building afterwards does not undo anything, but an opponent who kills your only factory before you buy tier 2 has delayed it.
+- A locked unit's button is greyed with its tier on it, and the server refuses it with "Requires Tier N". The units are the marksman, medic, arcer, phantom, prowler and devourer (tier 1) and the bulwark, warden and behemoth (tier 2).
+- Each tier also makes one of your faction's passives better, so nothing new needs learning:
+
+| Tier | Industrial | Network | Organic |
+| --- | --- | --- | --- |
+| 1 | **Combat Shields**: soldier +20 maximum hit points (existing soldiers too) | **Quick Blink**: Battle Blink cooldown 8 s instead of 12 s | **Metabolic Boost**: swarmer and prowler move 15% faster |
+| 2 | **Dig In**: Entrenchment arms in 4 s instead of 7.5 s | **Focusing Lens**: lancer +20 range | **Grooved Spines**: spitter +20 range |
+| 3 | **Reinforced Plating**: every building +2 armour | **Resonance**: Phase Shift every 5 s instead of 8 s; warden aura 4 shields a second instead of 2 | **Adrenal Glands**: swarmer and devourer attack 20% faster; crusher +2 armour |
+
+- The laboratory is the tier 3 gate. It no longer researches anything, but it is a target for your opponent that delays your late game.
 
 ## Territory: creep, power fields and sensors
 
@@ -101,7 +117,7 @@ All three start with a headquarters, two labour units, one basic fighter, 250 ma
 2. Early on, build a **refinery** on your main's catalyst deposit (75 material) and a **barracks** (150).
 3. Fill all eight patches, then build an **outpost** near your natural expansion.
 4. Add a **sensor tower** near the front of your base, then a **factory** for siege.
-5. Keep your catalyst spent: soldiers and a marksman or two. Get a **lab** for weapons, armor and logistics as material allows.
+5. Keep your catalyst spent: soldiers and a marksman or two. Buy **tier 1** once the barracks stands (that unlocks the marksman), then weapons, armor and logistics from the Research tab as material allows; a **factory**, **tier 2** and a **lab** come later.
 
 ### Network
 

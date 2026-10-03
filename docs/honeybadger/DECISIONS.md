@@ -716,3 +716,43 @@ because the stamp is a timing request, not a rule the match was created under
 **Would overturn it.** Real online play showing typical round trips above
 300ms (raise the allowance, accepting a larger cheat bound), or players
 exploiting the allowance measurably.
+
+---
+
+## 2026-10-03 — N2: instant research and three tiers
+
+**Decision (Claude, on the author's instruction to "yolo decide upgrades and
+units, so we actually have more depth").** Every number is experimental.
+
+Research and tiers are instant, global to the player, bought from the Research
+tab with material, and never lost (they outlive every building, as research
+does today). No building is selected and none queues anything; the lab's
+research queue goes.
+
+- **Weapons / Armour / Logistics**: unchanged effects and price (150 material
+  each), now instant, with no building required.
+- **Tiers** are bought in order. Each one unlocks the second-tier units of one
+  production building and gives every faction one upgrade that sharpens its
+  identity. The building requirement is checked only at purchase.
+
+| Tier | Cost | Requires | Unlocks | Industrial | Network | Organic |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 Mobilisation | 300 | a finished barracks | marksman, medic / arcer, phantom / prowler, devourer | **Combat Shields**: soldier +20 max hit points | **Quick Blink**: Battle Blink cooldown 12s to 8s | **Metabolic Boost**: swarmer and prowler +15% speed |
+| 2 Escalation | 500 | tier 1, a finished factory | bulwark / warden / behemoth | **Dig In**: Entrenchment arms in 4s instead of 7.5s | **Focusing Lens**: lancer +20 range | **Grooved Spines**: spitter +20 range |
+| 3 Dominion | 800 | tier 2, a finished lab | — | **Reinforced Plating**: every own building +2 armour | **Resonance**: Phase Shift every 5s instead of 8s; warden aura 2 to 4 shields per second | **Adrenal Glands**: swarmer and devourer attack 20% faster; crusher +2 armour |
+
+The first-tier units (soldier, scout, siege; sentinel, skimmer, lancer;
+swarmer, spitter, crusher) need no tier. Training a gated kind without its tier
+is refused ("Requires Tier N"). The lab stays as the tier 3 gate, which gives
+the opponent a target that delays the late game.
+
+**Why.** Before this, every unit was available the moment its building stood,
+so there was no tech path to choose or deny. Tiers turn material into a real
+decision: tech up now, or spend on structures and expansion. They also give
+the lab a purpose. Each upgrade amplifies a passive the unit already has, so
+nothing new needs to be drawn. Tiers sit in the player's existing `research`
+list (`tier_1` to `tier_3`), so no schema change is needed. H0's fourth tier
+(7500, speed and range for everything) is not built.
+
+**Would overturn it.** Play showing tiers too cheap (everything unlocked by
+4:00) or too dear, or the author's own tier contents.

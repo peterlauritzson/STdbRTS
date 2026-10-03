@@ -120,6 +120,26 @@ Choices where the spec left room (each one the simplest faithful reading):
 - **Predator** heals 30% of the landed (post-armour) damage, rounded down; the spine heals itself.
 - **Regrowth** pays on whole seconds (ticks divisible by 20), 2% of maximum hit points.
 
+## Tier upgrades (N2)
+
+Tiers (`tier_1` to `tier_3`, bought instantly from the Research tab; DECISIONS.md, N2) amplify
+passives and stats the roster already has. Each is an owner-research check at the point the value
+is used, read from the owner's tier fixed at the start of the tick (a tier bought mid-tick applies
+from the next). Constants are in rules.rs ("Tier upgrades").
+
+| Tier | Industrial | Network | Organic |
+| --- | --- | --- | --- |
+| 1 | Combat Shields: soldier +20 max hit points | Quick Blink: **Battle Blink** cooldown 12s to 8s | Metabolic Boost: swarmer, prowler +15% speed (on top of **Forced March**) |
+| 2 | Dig In: **Entrenchment** hold 7.5s to 4s | Focusing Lens: lancer +20 range | Grooved Spines: spitter +20 range |
+| 3 | Reinforced Plating: every own building +2 armour | Resonance: **Phase Shift** cooldown 8s to 5s; **Shield Aura** 1 to 2 per interval (2 to 4 a second) | Adrenal Glands: swarmer and devourer attack 20% faster (after **Veteran**); crusher +2 armour |
+
+- Combat Shields raises `max_hp` and `hp` of every soldier the owner has at the purchase, and soldiers
+  spawned afterwards are born with the bonus (`World::spawn`).
+- Building and crusher armour go through `mitigated` and stack with the Armor research (3), Fortified
+  (2) and Entrenchment (2).
+- Tier 1 also unlocks marksman, medic, arcer, phantom, prowler and devourer; tier 2 unlocks bulwark,
+  warden and behemoth (`rules::required_tier`).
+
 ## Entity state the passives need
 
 New persisted fields on `Entity` (one schema change, batched with the engine

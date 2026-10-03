@@ -84,7 +84,6 @@ test("laboratory construction, a refinery and logistics research use mined resou
     assert.ok(!units().some(unit => unit.kind === "lab"));
     await until(() => units().some(unit => unit.kind === "lab"), "lab site created");
     const labId = units().find(unit => unit.kind === "lab")!.id;
-    await assert.rejects(order(builder, [labId], "research_logistics"), /construction/);
     // Nothing constructs any more: the old worker order is gone, and a placed
     // site can be neither worked on nor cancelled.
     await assert.rejects(order(opponent, [6], "construct", { target: labId }), /Unknown order/);
@@ -92,16 +91,25 @@ test("laboratory construction, a refinery and logistics research use mined resou
     // A drifter has no return trip at all, and is refused one by name.
     await assert.rejects(order(opponent, [6], "return"), /Drifters never carry a load/);
     await until(() => units().find(unit => unit.id === labId)?.constructionRemaining === 0n, "lab raised itself", 20000);
-    // Research costs 150 material.
+    // Research is instant, needs no lab and is ordered in the name of any own
+    // unit (the client names the HQ). It costs 150 material.
+    const hqId = units().find(unit => unit.owner === 0 && unit.kind === "hq")!.id;
     await until(() => me(builder).material >= 150, "mine the research budget in material", 90000);
-    await order(builder, [labId], "research_logistics");
-    assert.ok(!me(builder).research.length);
-    await until(() => units().find(unit => unit.id === labId)!.production.length === 1, "research activated");
-    await assert.rejects(order(builder, [labId], "research_logistics"), /already/);
-    await until(() => me(builder).research.includes("research_logistics"), "research completed", 25000);
+    await order(builder, [hqId], "research_logistics");
+    assert.ok(!units().some(unit => unit.production.length), "nothing queues anywhere");
+    await until(() => me(builder).research.includes("research_logistics"), "research is bought at once", 5000);
+    await assert.rejects(order(builder, [hqId], "research_logistics"), /Already researched/);
     await until(() => units().some(unit => unit.owner === 0 && unit.kind === "worker" && unit.cargo > 25), "upgraded worker cargo", 15000);
-    assert.equal(units().find(unit => unit.id === labId)!.production.length, 0);
     assert.ok(units().filter(unit => unit.kind === "worker").every(unit => unit.cargo <= 40));
+    // Tiers: in order, 300 material, and the units wait for them.
+    await assert.rejects(order(builder, [hqId], "tier_2"), /Requires Tier 1 first/);
+    await assert.rejects(order(builder, [barracksId], "train_marksman"), /Requires Tier 1/);
+    await until(() => me(builder).material >= 300, "mine the tier 1 price in material", 120000);
+    await order(builder, [hqId], "tier_1");
+    await until(() => me(builder).research.includes("tier_1"), "tier 1 is bought at once", 5000);
+    await assert.rejects(order(builder, [hqId], "tier_1"), /Already researched/);
+    await assert.rejects(order(builder, [hqId], "tier_2"), /factory/);
+    await assert.rejects(order(builder, [barracksId], "train_bulwark"), /Production requires|Requires Tier 2/);
     // Logistics raises a carrier's load. It cannot raise a drifter's, because a
     // drifter has no load: every one of them still holds exactly nothing.
     assert.ok(units().filter(unit => unit.kind === "drifter").every(unit => unit.cargo === 0));

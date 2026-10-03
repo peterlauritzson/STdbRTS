@@ -9,7 +9,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 17;
+pub const RULESET_VERSION: u32 = 18;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -667,7 +667,7 @@ pub const DEATH_SPAWN_BRUTE_COST: u32 = 200;
 /// small flyers. No air unit exists here, so there is no air branch: when one
 /// is added, this is where a flyer's spawn is chosen.
 pub fn death_spawn(kind: &str) -> Option<(&'static str, u8)> {
-    if is_building(kind) || is_temporary(kind) || kind.starts_with("research_") {
+    if is_building(kind) || is_temporary(kind) || is_research(kind) {
         return None;
     }
     let cost = total_cost(kind);
@@ -819,6 +819,188 @@ pub fn producer(kind: &str, building: &str, faction: Faction) -> bool {
     army_faction(kind) == Some(faction) && army_building(kind) == Some(building)
 }
 
+// ---------------------------------------------------------------------------
+// Research and tiers: instant, global, bought from the Research tab
+// ---------------------------------------------------------------------------
+//
+// Both live in the player's `research` list (`research_*` and `tier_*`), are
+// paid for on the spot and are never lost. No building is selected and none
+// queues anything. Every number is **experimental** (DECISIONS.md, N2).
+
+/// Material price of each of the three technologies (weapons, armour,
+/// logistics).
+pub const RESEARCH_COST: u32 = 150;
+/// Material price of tier 1, Mobilisation.
+pub const TIER_1_COST: u32 = 300;
+/// Material price of tier 2, Escalation.
+pub const TIER_2_COST: u32 = 500;
+/// Material price of tier 3, Dominion.
+pub const TIER_3_COST: u32 = 800;
+
+/// Anything bought from the Research tab.
+pub fn is_research(kind: &str) -> bool {
+    kind.starts_with("research_") || tier_number(kind).is_some()
+}
+
+/// `1..=3` for `tier_1..=tier_3`, otherwise `None`.
+pub fn tier_number(kind: &str) -> Option<u8> {
+    match kind {
+        "tier_1" => Some(1),
+        "tier_2" => Some(2),
+        "tier_3" => Some(3),
+        _ => None,
+    }
+}
+
+/// The finished building a tier needs when it is bought (checked only then):
+/// a barracks, a factory, a laboratory.
+pub fn tier_building(tier: u8) -> &'static str {
+    match tier {
+        1 => "barracks",
+        2 => "factory",
+        _ => "lab",
+    }
+}
+
+/// The tier a player must own before training `kind`: 1 for the second army
+/// unit of each barracks, 2 for the heavy unit of each factory, otherwise 0.
+pub fn required_tier(kind: &str) -> u8 {
+    match kind {
+        "marksman" | "medic" | "arcer" | "phantom" | "prowler" | "devourer" => 1,
+        "bulwark" | "warden" | "behemoth" => 2,
+        _ => 0,
+    }
+}
+
+/// The highest tier in a player's research list; 0 with none.
+pub fn tier_of(research: &[String]) -> u8 {
+    research
+        .iter()
+        .filter_map(|item| tier_number(item))
+        .max()
+        .unwrap_or(0)
+}
+
+// --- Tier upgrades (one per faction per tier) --------------------------------
+
+/// Tier 1, Industrial, Combat Shields: extra maximum hit points of a soldier.
+/// Applied to soldiers spawned afterwards and, at the purchase, to every
+/// existing soldier (maximum and current alike).
+pub const COMBAT_SHIELDS_HP: i32 = 20;
+/// Tier 1, Network, Quick Blink: Battle Blink cooldown (8s instead of
+/// `BLINK_COOLDOWN_TICKS`).
+pub const QUICK_BLINK_COOLDOWN_TICKS: u64 = 8 * TICKS_PER_SECOND;
+/// Tier 1, Organic, Metabolic Boost: swarmer and prowler move speed, percent.
+pub const METABOLIC_BOOST_SPEED_PERCENT: u32 = 115;
+/// Tier 2, Industrial, Dig In: ticks an Entrenchment hold needs (4s instead of
+/// `ENTRENCH_HOLD_TICKS`).
+pub const DIG_IN_HOLD_TICKS: u64 = 4 * TICKS_PER_SECOND;
+/// Tier 2, Network, Focusing Lens: extra lancer weapon range.
+pub const FOCUSING_LENS_RANGE: f32 = 20.0;
+/// Tier 2, Organic, Grooved Spines: extra spitter weapon range.
+pub const GROOVED_SPINES_RANGE: f32 = 20.0;
+/// Tier 3, Industrial, Reinforced Plating: armour of every own building.
+pub const REINFORCED_PLATING_ARMOUR: i32 = 2;
+/// Tier 3, Network, Resonance: Phase Shift cooldown (5s instead of
+/// `PHASE_COOLDOWN_TICKS`).
+pub const RESONANCE_PHASE_COOLDOWN_TICKS: u64 = 5 * TICKS_PER_SECOND;
+/// Tier 3, Network, Resonance: shields per interval under a warden's aura
+/// (2 instead of `SHIELD_AURA_PER_INTERVAL`, so 4 per second).
+pub const RESONANCE_AURA_PER_INTERVAL: i32 = 2;
+/// Tier 3, Organic, Adrenal Glands: swarmer and devourer attack rate, percent.
+pub const ADRENAL_ATTACK_PERCENT: u64 = 120;
+/// Tier 3, Organic, Adrenal Glands: extra crusher armour.
+pub const ADRENAL_CRUSHER_ARMOUR: i32 = 2;
+
+/// Extra maximum hit points `tier` gives a unit of `kind` (Combat Shields).
+pub fn tier_bonus_hp(kind: &str, tier: u8) -> i32 {
+    if kind == "soldier" && tier >= 1 {
+        COMBAT_SHIELDS_HP
+    } else {
+        0
+    }
+}
+
+/// Percent of speed `tier` gives `kind` (Metabolic Boost); 100 for none.
+pub fn tier_speed_percent(kind: &str, tier: u8) -> u32 {
+    if matches!(kind, "swarmer" | "prowler") && tier >= 1 {
+        METABOLIC_BOOST_SPEED_PERCENT
+    } else {
+        100
+    }
+}
+
+/// Battle Blink cooldown at `tier` (Quick Blink).
+pub const fn blink_cooldown(tier: u8) -> u64 {
+    if tier >= 1 {
+        QUICK_BLINK_COOLDOWN_TICKS
+    } else {
+        BLINK_COOLDOWN_TICKS
+    }
+}
+
+/// Ticks a marksman must hold still before it is entrenched (Dig In).
+pub const fn entrench_hold_ticks(tier: u8) -> u64 {
+    if tier >= 2 {
+        DIG_IN_HOLD_TICKS
+    } else {
+        ENTRENCH_HOLD_TICKS
+    }
+}
+
+/// Extra weapon range `tier` gives `kind` (Focusing Lens, Grooved Spines).
+pub fn tier_range_bonus(kind: &str, tier: u8) -> f32 {
+    match kind {
+        "lancer" if tier >= 2 => FOCUSING_LENS_RANGE,
+        "spitter" if tier >= 2 => GROOVED_SPINES_RANGE,
+        _ => 0.0,
+    }
+}
+
+/// Extra armour `tier` gives a target of `kind` owned by `faction`: Reinforced
+/// Plating on every Industrial building only (building kinds are shared, so the
+/// faction decides), Adrenal Glands on the crusher (an Organic-only kind).
+/// Stacks with research armour and Fortified.
+pub fn tier_armour(kind: &str, faction: Faction, tier: u8) -> i32 {
+    if tier < 3 {
+        0
+    } else if is_building(kind) && faction == Faction::Industrial {
+        REINFORCED_PLATING_ARMOUR
+    } else if kind == "crusher" {
+        ADRENAL_CRUSHER_ARMOUR
+    } else {
+        0
+    }
+}
+
+/// Phase Shift cooldown at `tier` (Resonance).
+pub const fn phase_cooldown(tier: u8) -> u64 {
+    if tier >= 3 {
+        RESONANCE_PHASE_COOLDOWN_TICKS
+    } else {
+        PHASE_COOLDOWN_TICKS
+    }
+}
+
+/// Shields per interval a warden's aura gives at `tier` (Resonance).
+pub const fn aura_per_interval(tier: u8) -> i32 {
+    if tier >= 3 {
+        RESONANCE_AURA_PER_INTERVAL
+    } else {
+        SHIELD_AURA_PER_INTERVAL
+    }
+}
+
+/// `cooldown` at `tier` for `kind` (Adrenal Glands: swarmer and devourer attack
+/// 20% faster), rounded to the nearest tick and never below one.
+pub fn tier_cooldown(kind: &str, cooldown: u64, tier: u8) -> u64 {
+    if tier >= 3 && matches!(kind, "swarmer" | "devourer") {
+        ((cooldown * 100 + ADRENAL_ATTACK_PERCENT / 2) / ADRENAL_ATTACK_PERCENT).max(1)
+    } else {
+        cooldown
+    }
+}
+
 /// The factory units' multiplier against structures.
 pub const ANTI_STRUCTURE_MULTIPLIER: i32 = 3;
 
@@ -857,14 +1039,21 @@ pub struct Stats {
 /// turret costs terrazine only. Training times and hit points are unchanged.
 pub fn stats(kind: &str) -> Option<Stats> {
     match kind {
-        "research_weapons" | "research_armor" | "research_logistics" => Some(Stats {
+        // Research and tiers are instant: material only, no training time.
+        "research_weapons" | "research_armor" | "research_logistics" | "tier_1" | "tier_2"
+        | "tier_3" => Some(Stats {
             hp: 0,
             speed: 0.0,
             range: 0.0,
             damage: 0,
             cooldown: 0,
-            cost: Cost::material(150),
-            training_ticks: 300,
+            cost: Cost::material(match kind {
+                "tier_1" => TIER_1_COST,
+                "tier_2" => TIER_2_COST,
+                "tier_3" => TIER_3_COST,
+                _ => RESEARCH_COST,
+            }),
+            training_ticks: 0,
         }),
         "barracks" | "factory" | "turret" | "bunker" | "bastion" | "spine" | "outpost" | "lab"
         | "sensor" | "relay" | "refinery" => {
@@ -1217,7 +1406,7 @@ pub fn vitals(kind: &str, faction: Faction) -> (i32, i32) {
     let Some(definition) = stats(kind) else {
         return (0, 0);
     };
-    if faction != Faction::Network || is_temporary(kind) || kind.starts_with("research_") {
+    if faction != Faction::Network || is_temporary(kind) || is_research(kind) {
         return (definition.hp, 0);
     }
     let shields = definition.hp * network_shield_percent(kind) / 100;
@@ -2970,6 +3159,9 @@ mod tests {
             "research_weapons",
             "research_armor",
             "research_logistics",
+            "tier_1",
+            "tier_2",
+            "tier_3",
             "worker",
             "drifter",
             "harvester",
@@ -3035,7 +3227,7 @@ mod tests {
         // base income. 15: unit cap 400 and building cap 150, and routes from
         // shared breadth-first fields (equally short routes may tie-break
         // differently from the old per-unit A*).
-        assert_eq!(RULESET_VERSION, 17);
+        assert_eq!(RULESET_VERSION, 18);
         assert!(RULESET_VERSION > 0);
     }
 
@@ -3065,6 +3257,9 @@ mod tests {
             ("research_weapons", 150, 0, 0),
             ("research_armor", 150, 0, 0),
             ("research_logistics", 150, 0, 0),
+            ("tier_1", 300, 0, 0),
+            ("tier_2", 500, 0, 0),
+            ("tier_3", 800, 0, 0),
         ] {
             assert_eq!(
                 stats(kind).unwrap().cost,
@@ -3106,6 +3301,9 @@ mod tests {
             "research_weapons",
             "research_armor",
             "research_logistics",
+            "tier_1",
+            "tier_2",
+            "tier_3",
         ] {
             let cost = stats(kind).unwrap().cost;
             assert!(
@@ -3137,7 +3335,8 @@ mod tests {
             ("outpost", 650, 120),
             ("lab", 650, 200),
             ("sensor", 450, 140),
-            ("research_weapons", 0, 300),
+            ("research_weapons", 0, 0),
+            ("tier_1", 0, 0),
         ] {
             let definition = stats(kind).unwrap();
             assert_eq!(

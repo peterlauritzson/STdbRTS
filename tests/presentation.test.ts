@@ -9,7 +9,7 @@ import { mapContentHash } from "../src/maphash";
 import { BUILD_KEYS, edgeDirection, groupAction, TRAIN_KEYS, UNIT_KEYS } from "../src/hotkeys";
 import skirmishMap from "../shared/maps/skirmish.json";
 import { clampToMap, WORLD_SIZE } from "../src/presentation";
-import { buildSite, isCompletedHub, affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, MAP_HASH, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
+import { buildSite, requiredTier, researchReason, researchName, tierOf, TIERS, TIER_UPGRADES, isCompletedHub, affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, MAP_HASH, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
 import { Faction, ResourceKind, type CreepPatch, type Node } from "../src/bindings/types";
 import type { Entity } from "../src/units";
 import { creepGoneTick, creepSecondsLeft, lifetimeFraction, offCreep } from "../src/creep";
@@ -259,11 +259,13 @@ test("bot will not order an army unit it cannot pay the catalyst for", () => {
   // the build order competes with the siege for this purse.
   const units = [unit(1, 0, "hq"), unit(2, 0, "barracks"), unit(3, 0, "factory"), { ...unit(4, 0, "barracks"), constructionRemaining: 10n }, unit(5, 0, "lab")];
   // A soldier (100) comes off the same catalyst first, leaving 199 for a siege.
-  const starved = chooseOrders(0, "industrial", purse(400, 299), units, [], new Set([5]));
+  // Research is bought out, so only the army competes for the purse.
+  const bought = ["research_weapons", "research_armor", "research_logistics", "tier_1", "tier_2", "tier_3"];
+  const starved = chooseOrders(0, "industrial", { ...purse(400, 299), research: bought }, units, [], new Set([5]));
   assert.ok(!starved.some(decision => decision.order.kind === "train_siege"));
   // Material was plentiful the whole time: it is the catalyst that stopped it.
   assert.equal(shortfall(purse(400, 199), CATALOG.siege.cost), "catalyst");
-  const funded = chooseOrders(0, "industrial", purse(400, 300), units, [], new Set([5]));
+  const funded = chooseOrders(0, "industrial", { ...purse(400, 300), research: bought }, units, [], new Set([5]));
   assert.ok(funded.some(decision => decision.order.kind === "train_siege"));
   // 400 material and 300 catalyst buy a worker, a soldier and the siege
   // exactly; nothing is ordered twice out of the same coin.
@@ -279,13 +281,59 @@ test("bot buys technology as soon as the material covers it", () => {
   const decisions = chooseOrders(0, "industrial", purse(150), units, [], new Set());
   assert.equal(decisions.length, 1);
   assert.equal(decisions[0].order.kind, "research_weapons");
-  assert.deepEqual(decisions[0].units, [2]);
+  // Research is ordered in the name of the HQ; no lab is selected or needed.
+  assert.deepEqual(decisions[0].units, [1]);
   // With the technology paid for, the bot goes back to producing units.
   const rich = chooseOrders(0, "industrial", purse(300), units, [], new Set());
   assert.deepEqual(rich.map(decision => decision.order.kind), ["research_weapons", "train_worker"]);
   // A technology already owned is not bought twice.
   const done = { ...purse(300), research: ["research_weapons", "research_armor", "research_logistics"] };
   assert.ok(!chooseOrders(0, "industrial", done, units, [], new Set()).some(decision => decision.order.kind.startsWith("research_")));
+});
+
+test("the bot buys tier 1 with a finished barracks, tier 2 after a factory, and in that order", () => {
+  const hq = unit(1, 0, "hq");
+  const finished = (id: number, kind: string): Entity => unit(id, 0, kind);
+  const building = (id: number, kind: string): Entity => ({ ...unit(id, 0, kind), constructionRemaining: 30n });
+  // No barracks, or one still going up: nothing to buy.
+  for (const units of [[hq], [hq, building(2, "barracks")]]) assert.ok(!chooseOrders(0, "industrial", purse(900), units, [], new Set()).some(decision => decision.order.kind.startsWith("tier_")));
+  const base = [hq, finished(2, "barracks")];
+  // Material is what is missing: the bot saves rather than buying a unit.
+  assert.ok(!chooseOrders(0, "industrial", purse(299, 500), base, [], new Set()).some(decision => decision.order.kind === "tier_1"));
+  const first = chooseOrders(0, "industrial", purse(300), base, [], new Set());
+  assert.equal(first[0].order.kind, "tier_1");
+  assert.deepEqual(first[0].units, [1]);
+  // A command already scheduled for the HQ may be this purchase: wait for it.
+  assert.ok(!chooseOrders(0, "industrial", purse(900), base, [], new Set([1])).some(decision => decision.order.kind === "tier_1"));
+  // Tier 2 needs tier 1 and a finished factory, and costs 500.
+  const withFactory = [...base, finished(3, "factory")];
+  const owning = { ...purse(900), research: ["tier_1"] };
+  assert.ok(chooseOrders(0, "industrial", { ...owning, material: 499 }, withFactory, [], new Set()).every(decision => decision.order.kind !== "tier_2"));
+  assert.ok(chooseOrders(0, "industrial", owning, withFactory, [], new Set()).some(decision => decision.order.kind === "tier_2" && decision.units[0] === 1));
+  assert.ok(!chooseOrders(0, "industrial", { ...owning, research: [] }, withFactory, [], new Set()).some(decision => decision.order.kind === "tier_2"));
+});
+
+test("tiers, their unlocks and their refusals mirror the server", () => {
+  assert.deepEqual([1, 2, 3].map(tier => costOf(`tier_${tier}`).material), [300, 500, 800]);
+  assert.deepEqual([1, 2, 3].map(tier => TIERS[tier as 1 | 2 | 3].building), ["barracks", "factory", "lab"]);
+  for (const kind of ["marksman", "medic", "arcer", "phantom", "prowler", "devourer"]) assert.equal(requiredTier(kind), 1, kind);
+  for (const kind of ["bulwark", "warden", "behemoth"]) assert.equal(requiredTier(kind), 2, kind);
+  for (const kind of ["soldier", "scout", "siege", "sentinel", "skimmer", "lancer", "swarmer", "spitter", "crusher", "worker"]) assert.equal(requiredTier(kind), 0, kind);
+  assert.equal(tierOf([]), 0);
+  assert.equal(tierOf(["research_armor", "tier_1", "tier_2"]), 2);
+  assert.equal(researchName("tier_3"), "Tier 3");
+  assert.equal(researchName("research_armor"), "armor");
+  for (const faction of FACTIONS) assert.equal(TIER_UPGRADES[faction].length, 3, faction);
+  const barracks = { ...unit(2, 0, "barracks") };
+  const units = [barracks, { ...unit(3, 0, "factory"), constructionRemaining: 4n }];
+  assert.equal(researchReason("research_armor", [], [], 0), undefined, "technologies need no building");
+  assert.equal(researchReason("research_armor", ["research_armor"], units, 0), "Already researched");
+  assert.equal(researchReason("tier_1", [], [], 0), "Requires a finished barracks");
+  assert.equal(researchReason("tier_1", [], units, 0), undefined);
+  assert.equal(researchReason("tier_1", [], [barracks], 1), "Requires a finished barracks", "another player's barracks");
+  assert.equal(researchReason("tier_2", [], units, 0), "Requires Tier 1 first");
+  assert.equal(researchReason("tier_2", ["tier_1"], units, 0), "Requires a finished factory", "still building");
+  assert.equal(researchReason("tier_3", ["tier_1"], units, 0), "Requires Tier 2 first");
 });
 
 // --- Factions and the three labour units ------------------------------------
@@ -567,7 +615,7 @@ test("the bot never asks a hub for an army unit, and a saturated hub orders noth
     // A saturated workforce: every hub goes quiet, the barracks does not.
     const saturated: Entity[] = [...grown, ...Array.from({ length: 20 }, (_, index) => gathering(100 + index, kind))];
     const late = chooseOrders(0, faction, purse(600, 600), saturated, deposits, new Set());
-    assert.ok(!late.some(decision => decision.units.includes(1) || decision.units.includes(21)), `${faction} kept a saturated hub busy`);
+    assert.ok(!late.some(decision => (decision.units.includes(1) || decision.units.includes(21)) && decision.order.kind.startsWith("train_")), `${faction} kept a saturated hub busy`);
     assert.ok(late.some(decision => ARMY[faction].slice(0, 2).map(kind => `train_${kind}`).includes(decision.order.kind)), faction);
   }
 });
@@ -1144,7 +1192,12 @@ test("the practice bot fields the new roster and builds its faction's defense on
     const asked = new Set<string>();
     for (let round = 0; round < 6; round++) {
       const extra = [...grown, ...Array.from({ length: round * 3 }, (_, index) => unit(200 + index, 0, ROSTER[faction][round % 2 ? 2 : 1]))];
-      for (const decision of chooseOrders(0, faction, purse(0, 4000), extra, deposits, new Set())) if (decision.order.kind.startsWith("train_")) asked.add(decision.order.kind.slice(6));
+      for (const decision of chooseOrders(0, faction, { ...purse(0, 4000), research: ["tier_1", "tier_2"] }, extra, deposits, new Set())) if (decision.order.kind.startsWith("train_")) asked.add(decision.order.kind.slice(6));
+    }
+    // Without the tiers the bot never asks for a locked unit.
+    for (let round = 0; round < 6; round++) {
+      const extra = [...grown, ...Array.from({ length: round * 3 }, (_, index) => unit(200 + index, 0, ROSTER[faction][round % 2 ? 2 : 1]))];
+      for (const decision of chooseOrders(0, faction, purse(0, 4000), extra, deposits, new Set())) assert.equal(requiredTier(decision.order.kind.slice(6)), 0, `${faction} asked for ${decision.order.kind} without its tier`);
     }
     assert.ok(asked.has(ROSTER[faction][2]) || asked.has(ROSTER[faction][5]), `${faction} never trained a new unit: ${[...asked]}`);
     for (const trained of asked) assert.ok(ROSTER[faction].includes(trained) || trained === LABOUR[faction], `${faction} trained ${trained}`);
