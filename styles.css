@@ -364,7 +364,11 @@ dialog p { margin-top: 14px; color: var(--muted); font-size: 14px; }
   .lobby-sidebar form { margin-bottom: 0; align-content: start; }.map-facts { grid-column: 1 / -1; }
   .operations { padding: 28px 0 0; }.map-diagram { height: 180px; }.room-row, .roster-row { gap: 12px; }
   .match { height: auto; min-height: calc(100dvh - 58px); grid-template-rows: 52px minmax(330px, 57dvh) auto; }
-  .match-bar { padding: 0 12px; gap: 8px; }.live-tag { display: none; }.operation-name { max-width: 18%; }.operation-name strong { font-size: 11px; }.match-metrics { gap: 7px; font-size: 9px; }.match-metrics b { font-size: 12px; margin-left: 2px; }
+  .match-bar { padding: 0 12px; gap: 8px; }.live-tag { display: none; }.operation-name { max-width: 18%; }.operation-name strong { font-size: 11px; }.match-metrics { gap: 2px 7px; font-size: 9px; }.match-metrics b { font-size: 12px; margin-left: 2px; }
+  /* Three currencies, Organic stock, units and clock no longer fit one row at
+     phone width: the metrics wrap to a second row inside the 52px bar rather
+     than push the leave button off screen. */
+  .match-metrics { min-width: 0; flex-wrap: wrap; justify-content: flex-end; }#leave-match { flex-shrink: 0; }
   /* Both currencies stay legible on a phone: the names shorten to MAT / CAT and
      the icons go, but neither chip is ever reduced to colour alone. */
   .readout { padding: 2px 5px; gap: 4px; }.readout svg { display: none; }

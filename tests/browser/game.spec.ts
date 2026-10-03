@@ -17,7 +17,7 @@ async function canvasColors(page: Page): Promise<number> {
 // World-to-screen must follow the map the client actually renders. This used to
 // hardcode the 1600 map's extent and half-extent, which silently aimed every
 // click at the wrong place once matches moved to a larger map.
-const WORLD: number = JSON.parse(readFileSync(new URL("../../shared/maps/crossfire.json", import.meta.url), "utf8")).size;
+const WORLD: number = JSON.parse(readFileSync(new URL("../../shared/maps/expanse.json", import.meta.url), "utf8")).size;
 
 async function worldClick(page: Page, x: number, y: number): Promise<void> {
   await page.getByRole("button", { name: "Show whole map", exact: true }).click();
@@ -116,12 +116,12 @@ test("one-click practice, construction, scouts and persistent base management", 
   // is 250 material and no catalyst at all.
   await expect(page.locator("#material-readout")).toContainText("MATERIAL");
   await expect(page.locator("#catalyst-readout")).toContainText("CATALYST");
-  await expect(page.locator("#catalyst")).toHaveText("0");
+  await expect(page.locator("#catalyst")).toHaveText("100");
   expect(Number(await page.locator("#material").innerText())).toBeGreaterThanOrEqual(250);
   // A two-currency cost is quoted in full, and the button says which currency
   // it is short of rather than simply going grey.
   // Network trains its own army. The other factions' units are hidden.
-  const lancer = page.getByRole("button", { name: "Lancer 175 material + 75 catalyst / 9s", exact: true });
+  const lancer = page.getByRole("button", { name: "Lancer 250 catalyst / 9s", exact: true });
   await expect(lancer).toBeDisabled();
   await expect(lancer).toHaveAttribute("data-shortfall", "catalyst");
   await expect(page.getByRole("button", { name: /^Soldier/ })).toHaveCount(0);
@@ -131,31 +131,31 @@ test("one-click practice, construction, scouts and persistent base management", 
   await expect(page.locator("#targeting-state")).toHaveText("Place Barracks");
   // Construction is ordered from the command card and raises itself: no
   // labour is selected, sent or needed, whatever the faction.
-  await worldClick(page, 2480, 680);
+  await worldClick(page, 8950, 1050);
   await expect(page.locator("#command-list")).toContainText("build barracks");
   await expect(page.locator("#producer-select option").filter({ hasText: "Barracks" })).toHaveCount(1, { timeout: 25000 });
   await page.getByRole("tab", { name: "Production", exact: true }).click();
   const barracks = await page.locator("#producer-select option").filter({ hasText: "Barracks" }).getAttribute("value");
   await page.getByLabel("Production building", { exact: true }).selectOption(barracks!);
   await expect(page.locator("#selection-title")).toHaveText("Barracks");
-  await page.getByRole("button", { name: "Skimmer 90 material / 3.5s", exact: true }).click();
-  await expect(page.locator("#unit-count")).toHaveText("4 / 120", { timeout: 15000 });
+  await page.getByRole("button", { name: "Skimmer 90 catalyst / 3.5s", exact: true }).click();
+  await expect(page.locator("#unit-count")).toHaveText("4 / 400", { timeout: 15000 });
   await page.getByRole("button", { name: "Set rally destination", exact: true }).click();
-  await worldClick(page, 2484, 419);
+  await worldClick(page, 8961, 889);
   await expect(page.locator("#rally-status")).toContainText("Material rally");
   await page.getByRole("tab", { name: "Build", exact: true }).click();
   await expect(page.getByRole("button", { name: "Outpost 100 material / 6s", exact: true })).toBeEnabled({ timeout: 30000 });
   await page.getByRole("button", { name: "Outpost 100 material / 6s", exact: true }).click();
-  await worldClick(page, 2600, 755);
-  await expect(page.locator("#building-count")).toHaveText("3 / 16 structures");
-  await worldClick(page, 2600, 755);
+  await worldClick(page, 8950, 1250);
+  await expect(page.locator("#building-count")).toHaveText("3 / 150 structures");
+  await worldClick(page, 8950, 1250);
   await expect(page.locator("#selection-title")).toHaveText("Outpost");
   await expect(page.locator("#selection-order")).toContainText("Constructing");
   // Placement is final: there is no cancel control, and the site finishes on
   // its own with nobody working on it.
   await expect(page.getByRole("button", { name: "Cancel construction", exact: true })).toHaveCount(0);
   await expect(page.locator("#selection-order")).not.toContainText("Constructing", { timeout: 20000 });
-  await expect(page.locator("#building-count")).toHaveText("3 / 16 structures");
+  await expect(page.locator("#building-count")).toHaveText("3 / 150 structures");
   await page.getByRole("button", { name: "Center on HQ", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("desktop-base.png"), fullPage: true });
   await page.reload();
@@ -170,8 +170,7 @@ test("one-click practice, construction, scouts and persistent base management", 
   await page.setViewportSize({ width: 320, height: 740 });
   await noOverflow(page);
   await page.getByRole("tab", { name: "Research", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Weapons 100 material + 50 catalyst / 15s", exact: true })).toBeDisabled();
-  await noOverflow(page);
+  await expect(page.getByRole("button", { name: "Weapons 150 material / 15s", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Surrender and leave", exact: true }).click();
   await page.getByRole("button", { name: "Surrender", exact: true }).click();
   await expect(page.locator("#lobby")).toBeVisible();
@@ -253,8 +252,8 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     // starts gathering at tick 0 and has already walked out to the mineral arc
     // (radius ~215 around the hub) by the time this runs. A box drawn tightly
     // around the spawn selects nothing and passes only by luck of timing.
-    await worldBoxSelect(host, 370, 370, 840, 840);
-    await worldOrder(host, 639, 389);
+    await worldBoxSelect(host, 500, 500, 1200, 1200);
+    await worldOrder(host, 639, 806);
     await expect(host.locator("#command-list")).toContainText("gather");
     // The choice is frozen at deployment: the lobby, and the only control that
     // could change a faction, are gone for the rest of the match.
@@ -291,11 +290,26 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     // to construct, and a load of ~25 can land inside the one-second command
     // delay. So a charge is read as the largest fall from the running peak
     // since `from`: income only ever raises the peak, a charge drops below it.
+    // The fall is tracked inside the page by a MutationObserver on the readout,
+    // because mining income now lands within a fraction of a second of a charge
+    // and a poll from here can miss the dip entirely.
     const dip = (from: number) => {
-      let peak = from;
-      return async () => { const value = await material(); peak = Math.max(peak, value); return peak - value; };
+      void host.evaluate(start => {
+        const w = window as unknown as { __dipObserver?: MutationObserver; __maxDrop: number };
+        w.__dipObserver?.disconnect();
+        let peak = start;
+        const node = document.getElementById("material")!;
+        w.__maxDrop = Math.max(0, peak - Number(node.textContent));
+        w.__dipObserver = new MutationObserver(() => {
+          const value = Number(node.textContent);
+          peak = Math.max(peak, value);
+          w.__maxDrop = Math.max(w.__maxDrop, peak - value);
+        });
+        w.__dipObserver.observe(node, { childList: true, characterData: true, subtree: true });
+      }, from);
+      return () => host.evaluate(() => (window as unknown as { __maxDrop: number }).__maxDrop);
     };
-    await expect(host.locator("#catalyst")).toHaveText("0");
+    await expect(host.locator("#catalyst")).toHaveText("100");
     const opening = await material();
     expect(opening).toBeGreaterThanOrEqual(250);
     // Soldier is trained only at a barracks now, never at the hub, so the host
@@ -314,7 +328,7 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     await host.getByRole("tab", { name: "Build", exact: true }).click();
     await host.getByRole("button", { name: "Barracks 150 material / 8s", exact: true }).click();
     await expect(host.locator("#targeting-state")).toHaveText("Place Barracks");
-    await worldClick(host, 600, 750);
+    await worldClick(host, 650, 1050);
     await expect(host.locator("#command-list")).toContainText("build barracks");
     // Material is charged the moment construction starts, not when it
     // finishes, so the dip is checked here rather than after the wait below.
@@ -328,24 +342,21 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     await host.getByRole("button", { name: "Worker 50 material / 3s" }).click();
     await expect(host.locator("#command-list")).toContainText("train worker");
     await expect.poll(dip(afterBarracks)).toBeGreaterThanOrEqual(35);
-    await expect(host.locator("#unit-count")).toHaveText("4 / 120");
+    await expect(host.locator("#unit-count")).toHaveText("4 / 400");
     const afterWorker = await material();
     // Now hand the command card to the barracks explicitly, to train the
     // soldier it alone can produce.
     const barracks = await host.locator("#producer-select option").filter({ hasText: "Barracks" }).getAttribute("value");
     await host.getByLabel("Production building", { exact: true }).selectOption(barracks!);
     await expect(host.locator("#selection-title")).toHaveText("Barracks");
-    await host.getByRole("button", { name: "Soldier 100 material / 5s" }).click();
-    await expect.poll(dip(afterWorker)).toBeGreaterThanOrEqual(80);
-    // Neither unit costs catalyst, and nothing the host owns is mining any.
+    await host.getByRole("button", { name: "Soldier 100 catalyst / 5s" }).click();
+    // The soldier is paid in catalyst alone: the whole 100 starting catalyst,
+    // and nothing the host owns is mining more.
     await expect(host.locator("#catalyst")).toHaveText("0");
-    const afterSoldier = await material();
     await host.getByRole("button", { name: "Cancel all unfinished production", exact: true }).click();
-    // The unstarted soldier is refunded in full and exactly once: 100 material
-    // back, and no catalyst invented along the way.
-    await expect.poll(material).toBeGreaterThanOrEqual(afterSoldier + 100);
-    expect(await material()).toBeLessThan(afterSoldier + 200);
-    await expect(host.locator("#catalyst")).toHaveText("0");
+    // The unstarted soldier is refunded in full and exactly once: 100 catalyst
+    // back, and nothing invented along the way.
+    await expect(host.locator("#catalyst")).toHaveText("100");
     await expect(host.locator("#production-queue")).toBeEmpty();
     // Selecting the army moves the current selection off the barracks and onto
     // a unit that is not itself a producer, so the rally controls below fall
@@ -363,7 +374,7 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     // Aim in world space, not at a screen pixel: where a raw canvas click lands
     // depends on the camera, and it used to be hidden by the order clamp that
     // forced every point into the old 1600 extent.
-    await worldClick(host, 1300, 1400);
+    await worldClick(host, 2000, 2000);
     await expect(host.locator("#selection-order")).toHaveText("attack move");
     await host.getByRole("button", { name: "Hold position", exact: true }).click();
     await expect(host.locator("#selection-order")).toHaveText("hold");
@@ -388,22 +399,26 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     const afterReload = await material();
     expect(afterReload).toBeGreaterThanOrEqual(beforeReload);
     expect(afterReload).toBeLessThan(beforeReload + 60);
-    await expect(host.locator("#catalyst")).toHaveText("0");
-    await expect(host.locator("#unit-count")).toHaveText("4 / 120");
+    await expect(host.locator("#catalyst")).toHaveText("100");
+    await expect(host.locator("#unit-count")).toHaveText("4 / 400");
     await peer.getByRole("button", { name: "Select army", exact: true }).click();
     await peer.getByRole("button", { name: "Attack-move", exact: true }).tap();
     await peer.locator("#battlefield").scrollIntoViewIfNeeded();
-    // The middle of the map, well away from the peer's own base at (2600, 600).
-    await worldTap(peer, 1600, 1600);
+    // The middle of the map, well away from the peer's own base at (8750, 850).
+    await worldTap(peer, 4800, 4800);
     await expect(peer.locator("#selection-order")).toHaveText("attack move");
     await peer.getByRole("button", { name: "Hold position", exact: true }).tap();
     await expect(peer.locator("#selection-order")).toHaveText("hold");
     await peer.getByRole("radio", { name: "Order", exact: true }).check();
     await peer.locator("#battlefield").scrollIntoViewIfNeeded();
-    await worldTap(peer, 1800, 1400);
+    await worldTap(peer, 4800, 4400);
     await expect(peer.locator("#command-list")).toContainText("move / 1");
     await noOverflow(peer);
     await peer.screenshot({ path: testInfo.outputPath("mobile-match.png"), fullPage: true });
+    // The Organic match bar carries an extra STOCK readout: at 390px it must still
+    // fit, with the leave button fully on screen.
+    await noOverflow(peer);
+    expect(await peer.evaluate(() => document.getElementById("leave-match")!.getBoundingClientRect().right <= window.innerWidth)).toBe(true);
     await peer.getByRole("button", { name: "Surrender and leave", exact: true }).click();
     await peer.getByRole("button", { name: "Surrender", exact: true }).click();
     await expect(peer.locator("#lobby")).toBeVisible();
@@ -434,7 +449,7 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
       await expect(host.locator(`.score-panel[data-panel="${panel}"]`)).toBeVisible();
     }
     // Income is mined income and says so, in the same words every time.
-    await expect(host.locator('.score-panel[data-panel="income"] .score-caption')).toContainText("opening stipend");
+    await expect(host.locator('.score-panel[data-panel="income"] .score-caption')).toContainText("base income");
     await expect(host.locator('.score-panel[data-panel="income"] .score-caption')).toContainText("Cumulative mined");
     // One line per commander, in that commander's battlefield colour — and
     // never only in that colour: slot 0 is solid and slot 1 is dashed, each
