@@ -50,8 +50,11 @@ export class Practice {
    * which it sets in the lobby exactly as the human sets theirs: a mirror is a
    * legitimate matchup, so no choice is refused here.
    */
-  async start(host: string, database: string, callsign: string, faction: FactionName = factionForSlot(PRACTICE_SLOT), opponent: PracticeOpponent = factionForSlot(0)): Promise<void> {
-    if (this.starting || this.human.snapshot.room || !this.human.ready) return;
+  async start(host: string, database: string, callsign: string, faction: FactionName = factionForSlot(PRACTICE_SLOT), opponent: PracticeOpponent = factionForSlot(0), commandDelay = 20): Promise<void> {
+    // A click that cannot start says why rather than doing nothing.
+    if (this.starting) return;
+    if (!this.human.ready) { this.human.onNotice("Still connecting to the server; try again in a moment"); return; }
+    if (this.human.snapshot.room) { this.human.onNotice("Leave your current room first"); return; }
     this.starting = true; this.onChange();
     this.activeKey = `stdbrts:practice:${host}:${database}`;
     localStorage.setItem(this.activeKey, "active");
@@ -61,7 +64,7 @@ export class Practice {
       const created = await this.bot.act(async connection => {
         if (this.bot.snapshot.me?.matchId !== 0n) await connection.reducers.leaveRoom({});
         await connection.reducers.setName({ name: "Automaton" });
-        await connection.reducers.createRoom({ name: "Practice / Expanse", capacity: 2 });
+        await connection.reducers.createRoom({ name: "Practice / Expanse", capacity: 2, commandDelay: BigInt(commandDelay) });
         await setFactionOn(connection, pickOpponent(opponent));
         await connection.reducers.setReady({ ready: true });
       });
@@ -94,6 +97,11 @@ export class Practice {
     } catch (error) {
       this.human.onNotice(error instanceof Error ? error.message : String(error));
       await this.bot.act(connection => connection.reducers.leaveRoom({}));
+      // Without its host the practice room can never start; do not leave the
+      // human waiting in it. (Cast: the guard at the top narrowed `room` to
+      // nothing, but it has changed since.)
+      const stuck = (this.human.snapshot as { room?: { state: string } }).room;
+      if (stuck?.state === "lobby") await this.human.act(connection => connection.reducers.leaveRoom({}));
       localStorage.removeItem(this.activeKey);
       this.bot.disconnect();
     } finally { this.starting = false; this.onChange(); }
@@ -109,6 +117,29 @@ export class Practice {
         await this.bot.act(connection => connection.reducers.leaveRoom({}));
         localStorage.removeItem(this.activeKey);
         this.bot.disconnect();
+        return;
+      }
+      // The AI hosts practice, so the human's Deploy button is off. If its
+      // one-shot start in `start` was interrupted (a reload, a reconnect, a
+      // timeout), it would otherwise sit in the lobby forever; deploying here
+      // whenever everyone is ready makes that recover on the next pass.
+      if (room.state === "lobby") {
+        const members = this.bot.snapshot.players.filter(player => player.matchId === room.id);
+        // The human's ready flag is set by `start` too; an interrupted start can
+        // leave them in the room unready, with no reason to tick the box.
+        const human = this.human.snapshot.me;
+        if (human && human.matchId === room.id && !human.ready) {
+          await this.human.act(connection => connection.reducers.setReady({ ready: true }));
+          return;
+        }
+        // The same for the AI: a reconnect in the lobby clears ready flags.
+        if (!me.ready) {
+          await this.bot.act(connection => connection.reducers.setReady({ ready: true }));
+          return;
+        }
+        if (room.host.isEqual(me.identity) && members.length >= 2 && members.every(player => player.ready && player.online)) {
+          await this.bot.act(connection => connection.reducers.startMatch({}));
+        }
         return;
       }
       if (room.state !== "playing") return;

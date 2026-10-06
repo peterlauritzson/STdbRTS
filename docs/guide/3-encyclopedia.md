@@ -184,26 +184,64 @@ Bought in order, instantly, with material. The finished building is needed only 
 | Hub stock (Organic) | +1 per hub every 3 s, up to 7 per hub. A harvester costs 1 |
 | Army death refund | 50% of the price paid (catalyst). Labour and buildings return nothing |
 | Repair | Labour units only. 1 material per 0.5 s restores up to 5 hit points |
-| Command delay | 1 s by default; a room sets 0.5 to 1.5 s. Orders may run up to 0.3 s earlier than the delay when your ping is low |
+| Command delay | 1 s by default; the room creator picks 0.5, 1.0 or 1.5 s at creation. Orders may run up to 0.3 s earlier than the delay when your ping is low |
 
 ## Limits and rules
 
 - Up to 400 mobile units per player (labour and army; temporary units do not count) and 150 buildings per player (construction sites count).
 - Each building queues up to 8 items; production is one item at a time.
-- Build within 500 units of one of your own finished buildings. A site must be 110 clear of other buildings, 55 clear of units, 75 clear of deposits (except a refinery), off terrain, and 60 from the map edge.
+- Build within 500 units (`BUILD_RADIUS`) of one of your own finished buildings, or within 500 of an unfinished building of yours that is itself within 500 of a finished one (one hop, not transitive). A site must be 110 clear of other buildings, 55 clear of enemy units (your own units standing there are moved to the nearest legal ground when the site is placed, orders kept), 75 clear of deposits (except a refinery), off terrain, and 60 from the map edge.
 - A factory and a laboratory each need a finished barracks first. Tiers need the building of their number (barracks, factory, laboratory) finished when bought, and the tier before.
 - Only Industrial can build sensor towers and bunkers; only Network relays and bastions; only Organic spines. Each faction trains only its own labour and army.
 - Every faction chooses in the lobby; with no choice, slots are dealt Industrial, Network, Organic in order.
 - You are out when your last finished hub falls. If the last hubs of two players fall on the same tick, it is a draw.
 - The map is 9600 by 9600 with four start positions. 240 deposits, grouped into about 24 base sites.
 
+## Behaviors
+
+Army units can be given a behavior instead of a single order. It goes through the normal command delay once; after that the server re-evaluates it every 0.25 s, so the unit reacts without a further delay. A state is held at least 1 s before it can change. Any other order to the unit ends the behavior. Behaviors cannot be queued, and labour and buildings cannot take one.
+
+Home is a spot beside your hub nearest the unit when the behavior started.
+
+Behavior rally (also the Tactics menu, whose header then reads "Rally new units with a tactic"): with only HQ/outpost/barracks/factory/lab selected, J/K/N then a click sends `rally_harass`/`rally_guard`/`rally_raid` to every selected producer (same rules as a move rally: goal on the map and unobstructed; not queueable). Each army unit a producer trains starts that behavior the tick it appears, with its home spot taken beside the nearest completed hub at that moment. Labour trained there walks to the goal as it does for a move rally. If army units are selected too, the behavior goes to them as usual and the rally is unchanged. The clear-rally button removes it.
+
+| Behavior | States |
+| --- | --- |
+| Harass | **advance**: attack-move to the goal, preferring enemy labour within reach. Retreats below 50% health, or when armed enemies within 350 outnumber its armed allies there (itself included). **retreat**: move home; within 250 of home it recovers. **recover**: hold; advances again at 80% health (a unit that cannot heal stays home as a defender) |
+| Guard | **return**: move to the goal without fighting; within 150 it watches. **watch**: attack-move around the goal; more than 600 from the goal it returns |
+| Raid | **advance**: attack-move to the goal. Retreats below 35% health. **retreat**: move home; within 250 it recovers. **recover**: hold; advances again at 90% health |
+
+Health is hit points plus shields.
+
+## Operations
+
+Client-side helpers that send ordinary orders for you, once a second. They exist only in your browser tab: closing it forgets them (buildings already ordered stay ordered). They end when the match ends.
+
+| Operation | Details |
+| --- | --- |
+| Expand toward | Armed with the Expand button or B, then V. Click the map or minimap. Base sites are clusters of deposits within 400 of each other with no hub (anyone's, finished or not) within 600 of their centre. The plan starts at your finished building nearest the site, hops at most 488 units per outpost, ends with an outpost 150-250 from the deposits (at least 112 from any catalyst deposit, so a refinery still fits), and then orders up to two refineries on the site's catalysts. One order per pass; none while an earlier build of yours is still waiting out the command delay |
+| Auto-labour | Toggled with the labour button on the Production tab or L. Each pass, every finished hub with an empty queue and no train order pending trains one labour unit while your labour (including queued) is below the number of non-empty material patches within 320 of your finished hubs (their mineral lines; a natural counts once it has its own hub) plus 2 (plus 0 for Network: a drifter holds its patch for good), you can afford it (Organic: the hub has stock) and you are under the unit cap. Paused while an expansion waits for material. Newly trained labour goes to work on its own |
+| Pending spend | Not an operation: the money readouts show (−N) for build, train and research orders that are sent but not yet run, and buttons use the balance after them |
+
+## Macro helpers
+
+| Helper | Rule |
+| --- | --- |
+| Snap placement | An invalid aim (Site occupied, Enemy units block the site, Terrain obstructed, Map boundary) searches 16-unit rings out to 160, 12 angles per ring, for the nearest spot `placementError` accepts. Never snaps around Outside build radius, Building limit, Barracks required, or a refinery (which snaps to its deposit). Used for both the click and the ghost. `src/macro.ts` `snapSite` |
+| Base label | Per finished hub: miners / material patches, plus idle labour nearest it. Patch owner: nearest finished own hub within 600; empty and catalyst deposits are excluded. Miner: own labour with a gather order targeting one of the base's patches (incl. the walk home). Colours: under amber, equal green, over orange. `baseSaturation` |
+| Transfer | Labour not already gathering at the clicked hub's base is assigned to distinct free patches (no `miner`, not targeted by other labour), closest worker-patch pairs first; extras are dealt round-robin over the patches nearest the hub. One gather order per patch, Shift queues. `assignPatches` |
+| Idle labour | `idleLabour(units, slot)`: own labour with a stop order (the F1 set) |
+
 ## Hotkeys
 
 | Key | Action |
 | --- | --- |
 | Left click / drag | Select / box select; Shift adds |
-| Double-click or Ctrl+click | Select all of that kind on screen |
-| Right click | Move, attack, mine, return cargo, set rally (Shift queues) |
+| Double-click or Ctrl+click | Select all of that kind on screen (units or buildings) |
+| Shift+click | Add a unit or building to the selection (or remove it) |
+| Tab / Shift+Tab | Make the next / previous kind in a mixed selection the active subgroup; train and rally act on it |
+| Right click | Move, attack, mine, return cargo (Shift queues). With only production buildings selected: set their rally point |
+| Right click own hub (labour selected) | Transfer labour to that base's free material patches; the base they already work: return cargo |
 | A, then click | Attack-move |
 | S / H | Stop / hold position |
 | F / G | Repair (then click a target) / return cargo |
@@ -211,6 +249,10 @@ Bought in order, instantly, with material. The finished building is needed only 
 | T / C | Teleport / faction ability (Recall, Bloom) |
 | Q W E R D Z X | Train: labour, then your six army units in card order. With the Research tab open: Weapons, Armor, Logistics, Tier 1, Tier 2, Tier 3 |
 | B, then Q W E R T Y U I | Build menu: barracks, outpost, turret, factory, laboratory, then your faction structure, refinery, faction defense |
+| B, then V | Expand toward a spot (operation, see above) |
+| J / K / N (or Tactics menu), then click | Harass / Guard / Raid the clicked goal (army units only, never queued) |
+| L | Toggle auto-labour |
+| Space (tap) | Jump to the latest attack on you |
 | Ctrl or Alt + 0-9 | Set control group |
 | Shift + 0-9 | Add to control group |
 | 0-9 (twice) | Select group (second press centres the camera) |
@@ -220,3 +262,14 @@ Bought in order, instantly, with material. The finished building is needed only 
 | Esc | Cancel targeting, then clear selection |
 | ? | Show or hide the in-game control list |
 | Wheel, middle-drag, Space+drag, arrow keys, screen edge | Zoom and camera |
+
+## Army roster
+
+A panel under the player list (hidden on phone widths, and when you have no army). Army means the same units F2 selects: your own combat units, not labour, buildings or temporary units.
+
+- Grouping: by activity first, then by distance. Units chained within 400 of one another form one cluster, so two squads standing apart are two rows.
+- Activity: a running behavior (Harass, Guard, Raid) wins; otherwise the order: attack-move is "Attack-moving", attack "Attacking", move "Moving", hold "Holding", stop "Idle"; any other order shows its name.
+- Row: activity, unit count, "at base" (cluster centre within 600 of a finished hub) or "field", and the makeup, most numerous first.
+- Order: fighting, moving, holding, idle. Idle clusters in the field are tinted red and are never cut off; other rows beyond six collapse into "+N more".
+- Click selects exactly that cluster and centres the camera on it; Shift+click adds it to the selection without moving the camera. The header ("ARMY n") collapses the panel and the choice is remembered in this browser.
+- The F1 idle-labour button shows a red count of labour units whose order is stop; it is hidden at zero.

@@ -20,4 +20,6 @@ export default __t.row({
   get data() {
     return EntityCold;
   },
+  behavior: __t.option(__t.string()),
+  behaviorState: __t.option(__t.string()).name("behavior_state"),
 });

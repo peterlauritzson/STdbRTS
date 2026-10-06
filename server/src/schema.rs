@@ -1,3 +1,4 @@
+use rts_core::behavior::Behavior;
 use rts_core::simulation::{EntityCold, EntityMotion, EntityState, EntityVitals, Node, Order};
 use rts_core::CreepPatch;
 use rts_core::Faction;
@@ -101,6 +102,20 @@ pub struct Unit {
     #[index(btree)]
     pub match_id: u64,
     pub data: EntityCold,
+    /// The behavior preset this unit runs ("harass", "guard", "raid"), or
+    /// `None`. Derived from the private `unit_state.behavior` on save, so a
+    /// client can show "Harass · retreat" without seeing the anchors.
+    ///
+    /// Columns rather than fields of `EntityCold` so the migration only adds
+    /// columns; each needs a default for rows written before it existed. They
+    /// are `Option<String>` rather than `String` because the table macro
+    /// type-checks a default in a const context, where an owned `String`
+    /// cannot be dropped but `None` can.
+    #[default(None::<String>)]
+    pub behavior: Option<String>,
+    /// The running state's name ("advance", "retreat", ...), or `None`.
+    #[default(None::<String>)]
+    pub behavior_state: Option<String>,
 }
 
 /// A unit's position, keyed like `unit`: the only row a merely-walking unit
@@ -133,6 +148,12 @@ pub struct UnitState {
     #[index(btree)]
     pub match_id: u64,
     pub data: EntityState,
+    /// The unit's running behavior with its anchors and state, round-tripped
+    /// by `game::load_world` / `game::save_world`. A column of its own, not a
+    /// field of `EntityState`, so adding it did not change an existing
+    /// column's type.
+    #[default(None::<Behavior>)]
+    pub behavior: Option<Behavior>,
 }
 
 #[spacetimedb::table(public, accessor = resource_node)]

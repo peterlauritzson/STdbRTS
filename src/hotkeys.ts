@@ -14,6 +14,10 @@ export const UNIT_KEYS = {
   teleport: "t",
   ability: "c",
   rally: "y",
+  // Behaviors (src/behaviors.ts): clear of every unit, train and build key.
+  harass: "j",
+  guard: "k",
+  raid: "n",
 } as const;
 
 /**
@@ -24,11 +28,20 @@ export const TRAIN_KEYS = ["q", "w", "e", "r", "d", "z", "x"] as const;
 /** Pressed after B, in the order the build buttons are shown. */
 export const BUILD_KEYS = ["q", "w", "e", "r", "t", "y", "u", "i"] as const;
 export const BUILD_MENU_KEY = "b";
+/**
+ * Operations (src/operations.ts). Expand is pressed on the Build card, so B then
+ * V, and V is clear of every build key; auto-labour is a plain toggle.
+ */
+export const OPERATION_KEYS = { expand: "v", autoLabour: "l" } as const;
 
 /** Two presses of a control group key within this window centre the camera on it. */
 export const DOUBLE_TAP_MS = 350;
-/** Pointer this close to a battlefield edge scrolls the camera, in CSS pixels. */
+/** Pointer this close to an edge scrolls the camera, in CSS pixels. */
 export const EDGE_SCROLL_PX = 12;
+/** The window-edge band used in play: thin, so the deck's bottom row stays clear of it. */
+export const EDGE_SCROLL_WINDOW_PX = 6;
+/** How long the pointer must rest at an edge before the camera moves. */
+export const EDGE_SCROLL_DWELL_MS = 150;
 
 /** Keys in a control-group chord: set with Ctrl or Alt (Chrome keeps Ctrl+1..9 for tabs), add with Shift. */
 export type GroupAction = { kind: "set" | "add" | "recall"; group: string };
@@ -44,10 +57,10 @@ export function groupAction(event: Pick<KeyboardEvent, "key" | "code" | "ctrlKey
 }
 
 /**
- * The camera velocity from the pointer's distance to the battlefield's edges,
- * in screen directions (-1, 0 or 1 per axis), with the pointer given relative
- * to the battlefield. A pointer outside it (over the match bar or the command
- * deck), or one not seen yet, scrolls nothing.
+ * The camera velocity from the pointer's distance to the edges of an area
+ * (the browser window, in play), in screen directions (-1, 0 or 1 per axis),
+ * with the pointer given relative to that area. A pointer outside it, or one
+ * not seen yet, scrolls nothing.
  */
 export function edgeDirection(pointer: { x: number; y: number } | undefined, width: number, height: number, margin = EDGE_SCROLL_PX): { x: number; y: number } {
   if (!pointer || pointer.x < 0 || pointer.y < 0 || pointer.x > width || pointer.y > height) return { x: 0, y: 0 };

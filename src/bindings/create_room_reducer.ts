@@ -13,4 +13,5 @@ import {
 export default {
   name: __t.string(),
   capacity: __t.u8(),
+  commandDelay: __t.u64(),
 };

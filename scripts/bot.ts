@@ -23,7 +23,7 @@ async function shutdown(): Promise<void> {
 
 await connection.reducers.setName({ name: "Basin Automaton" });
 if (roomArgument) await connection.reducers.joinRoom({ matchId: BigInt(roomArgument) });
-else await connection.reducers.createRoom({ name: "Practice / Automaton", capacity: 2 });
+else await connection.reducers.createRoom({ name: "Practice / Automaton", capacity: 2, commandDelay: 20n });
 await connection.reducers.setReady({ ready: true });
 console.log("Practice bot ready. Join its room and mark Ready, or deploy if you are the host.");
 

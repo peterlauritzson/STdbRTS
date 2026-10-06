@@ -1250,3 +1250,297 @@ test("the guide's markdown renderer handles tables, nested lists and page links"
   assert.deepEqual(rewriteHref("3-encyclopedia.md"), { href: "#encyclopedia", external: false });
   assert.deepEqual(rewriteHref("#units", "encyclopedia"), { href: "#encyclopedia/units", external: false });
 });
+
+// --- UX: alerts, own colour, pending spend, queue, subgroups ----------------
+
+import { ownerColor, legibleRadius } from "../src/presentation";
+import { AlertThrottle, alertCell, alertText, ALERT_THROTTLE_MS } from "../src/alerts";
+import { orderCost, pendingLabel, pendingSpend, refusedCurrency, availableAfter } from "../src/spend";
+import { queueView, rallyText } from "../src/production";
+import { creepLabels } from "../src/creep";
+import { cycleSubgroup, subgroupKinds, validSubgroup } from "../src/selection";
+
+test("the viewer is always the friendly colour and nobody shares a colour", () => {
+  for (const me of [0, 1, 2, 3]) {
+    assert.equal(ownerColor(me, me), COLORS[0]);
+    const seen = [0, 1, 2, 3].map(owner => ownerColor(owner, me));
+    assert.equal(new Set(seen).size, 4, `slot ${me} sees four different colours`);
+  }
+  // Practice: the human is slot 1 and used to be red; now the bot is.
+  assert.equal(ownerColor(1, 1), COLORS[0]);
+  assert.equal(ownerColor(0, 1), COLORS[1]);
+  // No viewer yet: the plain slot colours.
+  assert.equal(ownerColor(2, undefined), COLORS[2]);
+});
+
+test("a far-away unit is never drawn under the minimum on-screen size", () => {
+  assert.equal(legibleRadius(12, 1), 12);
+  assert.equal(legibleRadius(12, 0.06, 3), 50);
+  assert.ok(legibleRadius(10, 0.06, 3) * 0.06 >= 3);
+});
+
+test("an attack alert is raised once per area per 8 seconds, units and base apart", () => {
+  const throttle = new AlertThrottle();
+  assert.equal(alertCell(799, 0), "0,0");
+  assert.equal(alertCell(800, 0), "1,0");
+  assert.equal(throttle.accept("units", 100, 100, 0), true);
+  assert.equal(throttle.accept("units", 700, 300, 1000), false, "same 800-unit cell");
+  assert.equal(throttle.accept("units", 900, 100, 1000), true, "another cell");
+  assert.equal(throttle.accept("base", 100, 100, 1000), true, "a base hit is its own alert");
+  assert.equal(throttle.accept("units", 100, 100, ALERT_THROTTLE_MS - 1), false);
+  assert.equal(throttle.accept("units", 100, 100, ALERT_THROTTLE_MS), true);
+  assert.equal(alertText("base"), "Your base is under attack");
+  assert.equal(alertText("units"), "Your units are under attack");
+});
+
+test("pending spend counts only your scheduled and in-flight purchases", () => {
+  assert.deepEqual(orderCost("train_worker"), CATALOG.worker.cost);
+  assert.deepEqual(orderCost("build_outpost"), CATALOG.outpost.cost);
+  assert.deepEqual(orderCost("research_weapons"), RESEARCH_COST);
+  assert.deepEqual(orderCost("move"), purse(0));
+  const command = (owner: number, status: string, kind: string) => ({ owner, status, order: { kind } });
+  const pending = pendingSpend([
+    command(1, "scheduled", "train_worker"),
+    command(1, "scheduled", "build_barracks"),
+    command(1, "executed", "train_worker"),
+    command(1, "rejected", "build_barracks"),
+    command(0, "scheduled", "train_worker"),
+    command(1, "scheduled", "attack"),
+  ], [{ order: { kind: "train_worker" } }], 1);
+  assert.equal(pending.material, 50 + 150 + 50);
+  assert.deepEqual(availableAfter(purse(300, 10), pending), purse(50, 10));
+  assert.deepEqual(availableAfter(purse(100), pending), purse(0), "never negative");
+  assert.equal(pendingLabel(pending, "material"), "(−250)");
+  assert.equal(pendingLabel(pending, "catalyst"), "");
+  assert.equal(refusedCurrency("Insufficient catalyst: 90 needed, 20 available"), "catalyst");
+  assert.equal(refusedCurrency("Map boundary"), undefined);
+});
+
+test("the production queue shows selected buildings, else all, with progress and unsent orders", () => {
+  const barracks = { ...placed(10, 1, "barracks", 100, 100), production: [{ kind: "soldier", finishTick: 200n }, { kind: "soldier", finishTick: 300n }] };
+  const hq = placed(11, 1, "hq", 400, 400);
+  const enemy = { ...placed(12, 0, "barracks", 900, 900), production: [{ kind: "soldier", finishTick: 150n }] };
+  const duration = (kind: string) => CATALOG[kind].seconds * 20;
+  const commands = [{ owner: 1, status: "scheduled", units: [10], order: { kind: "train_soldier" } }, { owner: 1, status: "scheduled", units: [11], order: { kind: "train_worker" } }];
+  // Nothing selected: every building of mine, mine only.
+  const all = queueView([barracks, hq, enemy], commands, 1, new Set(), 150, duration);
+  assert.equal(all.scope, "all");
+  assert.deepEqual(all.rows.map(row => [row.building, row.kind, row.scheduled]), [[10, "soldier", false], [10, "soldier", false], [10, "soldier", true], [11, "worker", true]]);
+  // The first soldier finishes at 200 of a 100-tick build: half done at tick 150.
+  assert.equal(all.rows[0].progress, 0.5);
+  assert.equal(all.rows[1].progress, 0, "the second has not started");
+  // A selected busy building narrows it; a selected idle one does not.
+  assert.equal(queueView([barracks, hq], commands, 1, new Set([10]), 150, duration).rows.length, 3);
+  const idle = placed(13, 1, "factory", 0, 0);
+  assert.equal(queueView([barracks, idle], [], 1, new Set([13]), 150, duration).scope, "all");
+});
+
+test("a rally reads as words with a distance, not coordinates", () => {
+  const at = (kind: string, x: number, y: number) => ({ x: 0, y: 0, order: { kind, x, y, target: 0 } });
+  assert.equal(rallyText(at("stop", 0, 0), undefined, undefined), "Rally unset");
+  assert.equal(rallyText(at("rally_move", 300, 400), undefined, undefined), "Rally set / 500 away");
+  assert.equal(rallyText(at("rally_guard", 300, 400), undefined, undefined), "Rally: Guard at 300, 400 / 500 away");
+  assert.equal(rallyText(at("rally_move", 300, 400), undefined, { label: "Outpost" }), "Rally set / at Outpost / 500 away");
+  assert.equal(rallyText(at("rally_gather", 0, 0), { kind: ResourceKind.Material, x: 0, y: 190 }, undefined), "Material rally / 190 away");
+  assert.equal(rallyText(at("rally_gather", 0, 0), undefined, undefined), "Deposit rally / 0 away");
+});
+
+test("overlapping receding creep shares one caption", () => {
+  const lost = (x: number, y: number, radius: number, owner = 0) => patch(owner, x, y, radius, 100n);
+  const labels = creepLabels([lost(500, 500, 100), lost(510, 495, 60), lost(3000, 3000, 80), lost(500, 500, 100, 1), patch(0, 50, 50, 100)], 100n, 130);
+  assert.equal(labels.length, 3, "two stacked patches speak once; another owner and another place are separate; living creep says nothing");
+  assert.ok(labels.every(label => label.gone > 100n));
+  // The soonest-gone of a cluster speaks for it.
+  assert.equal(labels.find(label => label.x === 510)?.gone, creepGoneTick(lost(510, 495, 60), 100n));
+});
+
+test("Tab cycles the kinds in a mixed selection and a stale subgroup is dropped", () => {
+  const kinds = subgroupKinds([{ kind: "soldier" }, { kind: "barracks" }, { kind: "soldier" }, { kind: "scout" }]);
+  assert.deepEqual(kinds, ["barracks", "scout", "soldier"]);
+  assert.equal(cycleSubgroup(kinds, undefined), "barracks");
+  assert.equal(cycleSubgroup(kinds, "barracks"), "scout");
+  assert.equal(cycleSubgroup(kinds, "soldier"), "barracks", "wraps");
+  assert.equal(cycleSubgroup(kinds, "barracks", true), "soldier");
+  assert.equal(cycleSubgroup(kinds, undefined, true), "soldier");
+  assert.equal(cycleSubgroup(["soldier"], undefined), undefined, "one kind has nothing to cycle");
+  assert.equal(validSubgroup(kinds, "scout"), "scout");
+  assert.equal(validSubgroup(kinds, "worker"), undefined);
+});
+
+// --- Operations: expand toward, auto-labour ---------------------------------
+
+import expanseMap from "../shared/maps/expanse.json";
+import { autoLabourOrders, depositClusters, expansionSites, nearestSite, planExpansion, stepExpansion, type Expansion, type Plan, type View } from "../src/operations";
+
+const expanseNodes: Node[] = expanseMap.deposits.map(entry => ({ id: entry.id, x: entry.x, y: entry.y, amount: entry.amount, miner: 0, kind: entry.kind === "catalyst" ? ResourceKind.Catalyst : ResourceKind.Material }));
+const homes = (): Entity[] => [placed(1, 1, "hq", 8750, 850), placed(2, 0, "hq", 850, 850)];
+
+test("deposits group into sites, and a site with a hub near it is not free", () => {
+  const clusters = depositClusters(expanseNodes);
+  assert.equal(clusters.length, 24, "one per start ring and per expansion");
+  assert.ok(clusters.every(cluster => cluster.materials.length === 8 && cluster.catalysts.length === 2));
+  assert.equal(expansionSites(expanseNodes, homes()).length, 22, "the two occupied starts are not offered");
+  assert.equal(expansionSites(expanseNodes, []).length, 24);
+  // An unfinished outpost already claims its site.
+  const claimed = [...homes(), placed(3, 1, "outpost", 7450, 900, 50n)];
+  assert.equal(expansionSites(expanseNodes, claimed).length, 21);
+  const site = nearestSite({ x: 7300, y: 1000 }, expansionSites(expanseNodes, homes()))!;
+  assert.ok(Math.hypot(site.x - 7275, site.y - 1049) < 5);
+  assert.equal(nearestSite({ x: 0, y: 0 }, []), undefined);
+});
+
+test("an expansion plan is a legal, connected chain ending beside the deposits with room for refineries", () => {
+  const units = homes();
+  for (const site of expansionSites(expanseNodes, units)) {
+    const plan = planExpansion(site, 1, units, expanseNodes);
+    assert.ok(!("error" in plan), `site ${Math.round(site.x)},${Math.round(site.y)} should be reachable`);
+    const { chain, origin } = plan as Plan;
+    let previous = origin;
+    for (const link of chain) {
+      assert.ok(Math.hypot(link.x - previous.x, link.y - previous.y) <= 500, "every hop is inside the server's build radius");
+      const error = placementError("outpost", link.x, link.y, 1, units, expanseNodes);
+      assert.ok(error === undefined || error === "Outside build radius", `link at ${link.x},${link.y}: ${error}`);
+      previous = link;
+    }
+    const last = chain[chain.length - 1];
+    const gap = Math.hypot(last.x - site.x, last.y - site.y);
+    assert.ok(gap >= 140 && gap <= 260, `the outpost stands ${Math.round(gap)} from the deposits`);
+    for (const catalyst of site.catalysts) assert.ok(Math.hypot(catalyst.x - last.x, catalyst.y - last.y) >= 110, "the outpost does not block a refinery");
+    assert.equal((plan as Plan).refineries.length, 2);
+  }
+  // A single hop when the site is already in reach.
+  const near = planExpansion(nearestSite({ x: 7275, y: 1049 }, expansionSites(expanseNodes, units))!, 1, units, expanseNodes) as Plan;
+  assert.ok(near.chain.length <= 3);
+  // Nothing to expand from.
+  const none = planExpansion(expansionSites(expanseNodes, units)[0], 1, [], expanseNodes);
+  assert.deepEqual(none, { error: "No finished building to expand from" });
+});
+
+test("an expansion places one link at a time, waits for material and builds refineries last", () => {
+  const units = homes();
+  const site = nearestSite({ x: 7275, y: 1049 }, expansionSites(expanseNodes, units))!;
+  const plan = planExpansion(site, 1, units, expanseNodes) as Plan;
+  const operation: Expansion = { id: 1, kind: "expand", label: "test", plan, chain: plan.chain.map(link => ({ ...link })) };
+  const hq = units[0];
+  const view = (extra: Entity[], sent: View["sent"] = []): View => ({ owner: 1, units: [...units, ...extra], nodes: expanseNodes, sent });
+  const rich = purse(1000);
+  const total = plan.chain.length + 2;
+
+  // Link 1 is ordered in the HQ's name at the planned point.
+  let step = stepExpansion(operation, view([]), hq, false, rich);
+  assert.equal(step.total, total);
+  assert.equal(step.done, 0);
+  assert.equal(step.intents.length, 1);
+  assert.deepEqual(step.intents[0], { units: [hq.id], order: { kind: "build_outpost", x: plan.chain[0].x, y: plan.chain[0].y, target: 0 } });
+  // Short of material: it waits and says so, and lets others know it is starved.
+  step = stepExpansion(operation, view([]), hq, false, purse(99));
+  assert.equal(step.intents.length, 0);
+  assert.equal(step.starved, true);
+  // While the order is in the delay, or the HQ is busy, it does not order again.
+  assert.equal(stepExpansion(operation, view([], [{ units: [hq.id], order: { kind: "build_outpost", x: plan.chain[0].x, y: plan.chain[0].y, target: 0 } }]), hq, true, rich).intents.length, 0);
+  assert.equal(stepExpansion(operation, view([]), hq, true, rich).intents.length, 0);
+
+  // Each link waits for the one before to finish.
+  const stood: Entity[] = [];
+  for (const [index, link] of plan.chain.entries()) {
+    const building = placed(100 + index, 1, "outpost", link.x, link.y, 100n);
+    step = stepExpansion(operation, view([...stood, building]), hq, false, rich);
+    assert.equal(step.intents.length, 0, "an outpost under construction is waited for");
+    assert.equal(step.done, index);
+    stood.push(placed(100 + index, 1, "outpost", link.x, link.y));
+    step = stepExpansion(operation, view(stood), hq, false, rich);
+    assert.equal(step.done, index + 1);
+    if (index + 1 < plan.chain.length) {
+      assert.equal(step.intents[0]?.order.x, plan.chain[index + 1].x, "then the next link");
+    }
+  }
+  // All outposts stand: the refineries, one order per pass, on the catalyst deposits.
+  step = stepExpansion(operation, view(stood), hq, false, rich);
+  assert.equal(step.intents.length, 1);
+  assert.equal(step.intents[0].order.kind, "build_refinery");
+  assert.ok(plan.refineries.includes(expanseNodes.find(node => node.x === step.intents[0].order.x && node.y === step.intents[0].order.y)!.id));
+  const refineries = plan.refineries.map((id, index) => { const node = expanseNodes.find(entry => entry.id === id)!; return placed(200 + index, 1, "refinery", node.x, node.y); });
+  step = stepExpansion(operation, view([...stood, refineries[0]]), hq, false, rich);
+  assert.equal(step.intents[0].order.kind, "build_refinery", "the second refinery is next");
+  step = stepExpansion(operation, view([...stood, ...refineries]), hq, false, rich);
+  assert.equal(step.finished, true);
+  assert.equal(step.done, total);
+});
+
+test("auto-labour trains one unit per idle hub until the patches are covered", () => {
+  const nodes = [deposit(1, 300, 300, 1500), deposit(2, 340, 300, 1500), deposit(3, 380, 300, 0), deposit(4, 5000, 5000, 1500), deposit(5, 360, 340, 1500, "catalyst")];
+  const hub = (id: number, kind = "hq") => ({ ...unit(id, 1, kind), x: 220, y: 220 });
+  const labourers = (count: number) => Array.from({ length: count }, (_, index) => unit(50 + index, 1, "worker"));
+  const view = (units: Entity[], sent: View["sent"] = []): View => ({ owner: 1, units, nodes, sent });
+  // Two live patches in reach (one empty, one far, one catalyst do not count): cap is 2 + 2.
+  const train = { x: 0, y: 0, target: 0 };
+  assert.deepEqual(autoLabourOrders(view([hub(1), ...labourers(1)]), "industrial", purse(500)), [{ units: [1], order: { kind: "train_worker", ...train } }]);
+  assert.deepEqual(autoLabourOrders(view([hub(1), ...labourers(3)]), "industrial", purse(500)), [{ units: [1], order: { kind: "train_worker", ...train } }]);
+  assert.equal(autoLabourOrders(view([hub(1), ...labourers(4)]), "industrial", purse(500)).length, 0, "at the cap");
+  // A queue in progress, an order in the delay, an unfinished hub and an empty purse each hold it back.
+  const busy = { ...hub(1), production: [{ kind: "worker", finishTick: 90n }] };
+  assert.equal(autoLabourOrders(view([busy, ...labourers(1)]), "industrial", purse(500)).length, 0);
+  assert.equal(autoLabourOrders(view([hub(1), ...labourers(1)], [{ units: [1], order: { kind: "train_worker", ...train } }]), "industrial", purse(500)).length, 0);
+  assert.equal(autoLabourOrders(view([{ ...hub(1), constructionRemaining: 40n }]), "industrial", purse(500)).length, 0);
+  assert.equal(autoLabourOrders(view([hub(1)]), "industrial", purse(49)).length, 0);
+  // Two hubs share the work but not the cap, and the purse pays once per unit.
+  assert.equal(autoLabourOrders(view([hub(1), hub(2, "outpost")]), "industrial", purse(500)).length, 2);
+  assert.equal(autoLabourOrders(view([hub(1), hub(2, "outpost")]), "industrial", purse(50)).length, 1);
+  // Network trains drifters, Organic harvesters (only with stock).
+  assert.equal(autoLabourOrders(view([hub(1)]), "network", purse(100))[0].order.kind, "train_drifter");
+  assert.equal(autoLabourOrders(view([hub(1)]), "organic", purse(0)).length, 0, "no stock");
+  assert.equal(autoLabourOrders(view([{ ...hub(1), stock: 3 }]), "organic", purse(0))[0].order.kind, "train_harvester");
+  // A drifter holds its patch for good, so Network gets no spares: two patches, two drifters.
+  const drifters = (count: number) => Array.from({ length: count }, (_, index) => unit(50 + index, 1, "drifter"));
+  assert.equal(autoLabourOrders(view([hub(1), ...drifters(1)]), "network", purse(500)).length, 1);
+  assert.equal(autoLabourOrders(view([hub(1), ...drifters(2)]), "network", purse(500)).length, 0, "no spare drifters");
+  // A natural's patches inside build reach but off this hub's line (424 away, as on crossfire) do not count.
+  const natural = [...nodes, deposit(6, 220 + 424, 220, 1500), deposit(7, 220, 220 + 424, 1500)];
+  assert.equal(autoLabourOrders({ owner: 1, units: [hub(1), ...labourers(4)], nodes: natural, sent: [] }, "industrial", purse(500)).length, 0, "the natural is not this hub's line");
+});
+
+test("operation keys collide with no other key that is live in the same place", async () => {
+  const { OPERATION_KEYS } = await import("../src/hotkeys");
+  // Expand is read on the Build card (B, then V); auto-labour anywhere.
+  assert.ok(!(BUILD_KEYS as readonly string[]).includes(OPERATION_KEYS.expand));
+  for (const key of [OPERATION_KEYS.expand, OPERATION_KEYS.autoLabour]) {
+    assert.ok(!(Object.values(UNIT_KEYS) as string[]).includes(key), `${key} is a unit command`);
+    assert.ok(!(TRAIN_KEYS as readonly string[]).includes(key), `${key} trains something`);
+  }
+  assert.ok(!(BUILD_KEYS as readonly string[]).includes(OPERATION_KEYS.autoLabour));
+  assert.notEqual(OPERATION_KEYS.autoLabour, "b");
+});
+
+// --- Behavior commands --------------------------------------------------------
+
+import { UnitMerger } from "../src/units";
+import { behaviorLine, behaviorUnits, stateColor, BEHAVIORS } from "../src/behaviors";
+
+test("behaviors go to army units only and read back as counts per state", () => {
+  assert.deepEqual(behaviorUnits([{ kind: "soldier" }, { kind: "worker" }, { kind: "barracks" }, { kind: "brood" }, { kind: "lancer" }]).map(entry => entry.kind), ["soldier", "lancer"]);
+  assert.equal(behaviorLine([{ behavior: undefined }]), "");
+  assert.equal(behaviorLine([{ behavior: "harass", behaviorState: "retreat" }]), "Harass \u00b7 retreat");
+  const group = [..."aaaaaa"].map(() => ({ behavior: "harass", behaviorState: "advance" })).concat([{ behavior: "harass", behaviorState: "retreat" }, { behavior: "harass", behaviorState: "retreat" }]);
+  assert.equal(behaviorLine(group), "Harass: 6 advance, 2 retreat");
+  assert.equal(behaviorLine([...group, { behavior: "guard", behaviorState: "watch" }, { behavior: undefined }]), "Harass: 6 advance, 2 retreat / Guard: 1 watch");
+  assert.equal(new Set(Object.values(BEHAVIORS).map(entry => entry.color)).size, 3);
+  assert.notEqual(stateColor("retreat"), stateColor("advance"));
+  const keys = [UNIT_KEYS.harass, UNIT_KEYS.guard, UNIT_KEYS.raid];
+  assert.equal(new Set([...keys, ...Object.values(UNIT_KEYS)]).size, Object.values(UNIT_KEYS).length, "each behavior key is its own");
+  for (const key of keys) assert.ok(!(TRAIN_KEYS as readonly string[]).includes(key) && !(BUILD_KEYS as readonly string[]).includes(key));
+});
+
+test("the unit merger carries the behavior beside the cold row", () => {
+  const cold = unit(7, 1, "soldier");
+  const row = (behavior: string | undefined, behaviorState: string | undefined) => ({ id: 7n, matchId: 1n, data: cold, behavior, behaviorState });
+  const motion = { id: 7n, matchId: 1n, data: { x: 1, y: 2 } };
+  const vitals = { id: 7n, matchId: 1n, data: { hp: 5, shields: 0, damagedTick: 0n, shotTick: 0n, shotX: 0, shotY: 0, passiveReadyTick: 0n, kills: 0 } };
+  let current = row("harass", "advance");
+  const tables = { unit: { iter: () => [current], id: { find: () => current } }, unit_motion: { iter: () => [motion], id: { find: () => motion } }, unit_vitals: { iter: () => [vitals], id: { find: () => vitals } } };
+  const merger = new UnitMerger();
+  const [first] = merger.collect(tables as never, 1n);
+  assert.equal(first.behavior, "harass");
+  assert.equal(merger.collect(tables as never, 1n)[0], first, "unchanged rows reuse the object");
+  current = row("harass", "retreat");
+  assert.equal(merger.collect(tables as never, 1n)[0].behaviorState, "retreat");
+});

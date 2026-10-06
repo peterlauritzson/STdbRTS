@@ -1,16 +1,22 @@
 import "../styles.css";
-import { createElement, createIcons, BookOpen, Keyboard, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, type IconNode } from "lucide";
+import { createElement, createIcons, BookOpen, Keyboard, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, type IconNode } from "lucide";
 import { ABILITIES, castRefusal, scheduledCasts, type AbilityKind } from "./abilities";
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
-import { COLORS, countdown, TICK_MS, VISUALS } from "./presentation";
-import { addCost, NO_COST, isCompletedHub, ROSTER, armyBuilding, armyFaction, describe, passiveLine, veteranStacks, isVeteran, CATALOG, costOf, CURRENCIES, CURRENCY_LABEL, currencyOf, formatCost, RESEARCH_COST, TIERS, TIER_UPGRADES, tierOrder, tierOf, requiredTier, researchReason, researchName, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_BUILDINGS, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
+import { countdown, ownerColor, TICK_MS, VISUALS } from "./presentation";
+import { ALERT_BANNER_MS, alertText } from "./alerts";
+import { availableAfter, pendingLabel, pendingSpend, refusedCurrency } from "./spend";
+import { addCost, NO_COST, isCompletedHub, ROSTER, armyBuilding, armyFaction, describe, passiveLine, veteranStacks, isVeteran, CATALOG, costOf, CURRENCIES, currencyOf, formatCost, RESEARCH_COST, TIERS, TIER_UPGRADES, tierOrder, tierOf, requiredTier, researchReason, researchName, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, RALLIES, MAP_HASH, mapIdentity, MAX_BUILDINGS, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
 import { Practice, type PracticeOpponent } from "./practice";
 import { Feedback } from "./feedback";
 import { ScoreScreen, type ScorePlayer } from "./scorescreen";
 import { BUILDING_FACTION, powered, type Field } from "./zones";
-import { scheduledTraining, trainingSite } from "./production";
-import { BUILD_KEYS, BUILD_MENU_KEY, keyLabel, TRAIN_KEYS, UNIT_KEYS } from "./hotkeys";
+import { queueView, rallyText, scheduledTraining, trainingSite } from "./production";
+import { BUILD_KEYS, BUILD_MENU_KEY, keyLabel, OPERATION_KEYS, TRAIN_KEYS, UNIT_KEYS } from "./hotkeys";
+import { Operations } from "./operations";
+import type { Entity } from "./units";
+import { armyRoster, visibleRows, type RosterRow } from "./roster";
+import { BEHAVIORS, behaviorLine, behaviorUnits, type BehaviorKind } from "./behaviors";
 
 function element<Type extends HTMLElement = HTMLElement>(id: string): Type {
   const value = document.getElementById(id);
@@ -109,7 +115,7 @@ const RESEARCH_BUTTONS: readonly { id: string; order: string; label: string; ico
   ...([1, 2, 3] as const).map(tier => ({ id: `tier_${tier}`, order: tierOrder(tier), label: TIERS[tier].label, icon: ["tent", "factory", "flask-conical"][tier - 1], cost: TIERS[tier].cost, description: `Unlocks ${TIERS[tier].unlocks}`, tier })),
 ];
 for (const research of RESEARCH_BUTTONS) element("research-buttons").append(catalogButton(`research-${research.id}`, research.label, research.cost, "instant", research.icon, research.description));
-createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, BookOpen, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle } });
+createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, BookOpen, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck } });
 /** Catalogue icon names to icon nodes, for portraits built after `createIcons` has run. */
 const ICON_NODES: Record<string, IconNode> = {
   house: House, hammer: Hammer, radio: Radio, sprout: Sprout, swords: Swords, radar: Radar, crosshair: Crosshair,
@@ -134,7 +140,7 @@ function badge(button: HTMLElement, key: string | undefined): void {
   const label = keyLabel(key);
   if (node.textContent !== label) node.textContent = label;
 }
-for (const [id, key] of [["stop", UNIT_KEYS.stop], ["attack-move", UNIT_KEYS.attackMove], ["hold", UNIT_KEYS.hold], ["repair", UNIT_KEYS.repair], ["return", UNIT_KEYS.returnCargo], ["teleport", UNIT_KEYS.teleport], ["recall", UNIT_KEYS.ability], ["bloom", UNIT_KEYS.ability], ["set-rally", UNIT_KEYS.rally], ["idle-worker", "F1"], ["select-army", "F2"]] as const) {
+for (const [id, key] of [["stop", UNIT_KEYS.stop], ["attack-move", UNIT_KEYS.attackMove], ["hold", UNIT_KEYS.hold], ["harass", UNIT_KEYS.harass], ["guard", UNIT_KEYS.guard], ["raid", UNIT_KEYS.raid], ["repair", UNIT_KEYS.repair], ["return", UNIT_KEYS.returnCargo], ["teleport", UNIT_KEYS.teleport], ["recall", UNIT_KEYS.ability], ["bloom", UNIT_KEYS.ability], ["set-rally", UNIT_KEYS.rally], ["expand", OPERATION_KEYS.expand], ["auto-labour", OPERATION_KEYS.autoLabour], ["idle-worker", "F1"], ["select-army", "F2"]] as const) {
   const button = element(id);
   badge(button, key);
   button.title = `${button.title} (${keyLabel(key)})`;
@@ -150,6 +156,10 @@ const feedback = new Feedback(message => session.onNotice(message));
 element("sound").setAttribute("aria-pressed", String(feedback.enabled));
 element("sound").title = feedback.enabled ? "Sound on" : "Sound off";
 const battlefield = new Battlefield(element<HTMLCanvasElement>("battlefield"), element<HTMLCanvasElement>("minimap"), session);
+const operations = new Operations(session, () => battlefield.issuer());
+battlefield.onExpand = point => operations.begin(point);
+battlefield.overlays = () => operations.paths();
+battlefield.expandPreview = point => operations.preview(point);
 const host = element<HTMLInputElement>("host");
 const database = element<HTMLInputElement>("database");
 const callsign = element<HTMLInputElement>("callsign");
@@ -203,6 +213,12 @@ practiceOpponent.addEventListener("change", () => {
   paintOpponent(opponent);
   localStorage.setItem(PRACTICE_OPPONENT_KEY, opponent);
 });
+// The order delay is frozen into the room at creation; the practice pick is kept like the others.
+const practiceDelay = element<HTMLSelectElement>("practice-delay");
+const PRACTICE_DELAY_KEY = "stdbrts:v1:practice-delay";
+const delayChoice = (value: string | null): number => value === "10" || value === "30" ? Number(value) : 20;
+practiceDelay.value = String(delayChoice(localStorage.getItem(PRACTICE_DELAY_KEY)));
+practiceDelay.addEventListener("change", () => localStorage.setItem(PRACTICE_DELAY_KEY, String(delayChoice(practiceDelay.value))));
 factionPicker.addEventListener("change", () => {
   // The server is the only authority: the picker repaints from the row it
   // writes back, so a refusal leaves the control showing the truth.
@@ -255,16 +271,20 @@ function siteFor(kind: string) {
   const me = session.snapshot.me;
   if (!me) return undefined;
   const owned = session.snapshot.units.filter(unit => unit.owner === me.slot);
-  return trainingSite(kind, myFaction(), owned, battlefield.selected, scheduledTraining(session.snapshot.commands, me.slot), battlefield.fields());
+  // Tab's active subgroup narrows "train here" to those buildings.
+  const active = new Set(battlefield.activeSelection().map(unit => unit.id));
+  return trainingSite(kind, myFaction(), owned, active, scheduledTraining(session.snapshot.commands, me.slot), battlefield.fields());
 }
 
 function productionBuilding() {
   const faction = myFaction();
   const fields = battlefield.fields();
-  const owned = battlefield.ownedSelection().find(unit => isProducer(unit, faction, fields));
+  const owned = battlefield.activeSelection().find(unit => isProducer(unit, faction, fields));
   return owned ?? battlefield.issuer();
 }
 
+/** How long a notice stays before it clears itself: long enough to read, short enough not to go stale. */
+const NOTICE_MS = 4000;
 let warnedMapRoom: bigint | undefined;
 session.onNotice = message => {
   clearTimeout(noticeTimer);
@@ -273,7 +293,7 @@ session.onNotice = message => {
   if (!message) { element("notice").hidden = true; return; }
   element("notice").textContent = message;
   element("notice").hidden = false;
-  noticeTimer = setTimeout(() => { element("notice").hidden = true; }, 6000);
+  noticeTimer = setTimeout(() => { element("notice").hidden = true; }, NOTICE_MS);
 };
 
 function connect(): void {
@@ -290,7 +310,7 @@ function connect(): void {
 }
 
 element("connection-form").addEventListener("submit", event => { event.preventDefault(); connect(); element<HTMLDetailsElement>("connection-settings").open = false; });
-element("practice").addEventListener("click", () => { void practice.start(host.value.trim(), database.value.trim(), callsign.value, chosen(practiceFaction, factionForSlot(PRACTICE_SLOT)), opponentChoice(practiceOpponent.value)); });
+element("practice").addEventListener("click", () => { void practice.start(host.value.trim(), database.value.trim(), callsign.value, chosen(practiceFaction, factionForSlot(PRACTICE_SLOT)), opponentChoice(practiceOpponent.value), delayChoice(practiceDelay.value)); });
 element("name-form").addEventListener("submit", event => {
   event.preventDefault();
   localStorage.setItem("stdbrts:v2:callsign", callsign.value.trim());
@@ -300,7 +320,7 @@ element("create-form").addEventListener("submit", async event => {
   event.preventDefault();
   await session.act(async connection => {
     await connection.reducers.setName({ name: callsign.value.trim() });
-    await connection.reducers.createRoom({ name: element<HTMLInputElement>("room-name").value.trim(), capacity: Number(element<HTMLSelectElement>("capacity").value) });
+    await connection.reducers.createRoom({ name: element<HTMLInputElement>("room-name").value.trim(), capacity: Number(element<HTMLSelectElement>("capacity").value), commandDelay: BigInt(delayChoice(element<HTMLSelectElement>("command-delay").value)) });
   });
 });
 element<HTMLInputElement>("ready").addEventListener("change", event => {
@@ -324,10 +344,29 @@ element("stop").addEventListener("click", () => battlefield.issue("stop"));
 element("return").addEventListener("click", () => battlefield.issue("return"));
 element("hold").addEventListener("click", () => battlefield.issue("hold"));
 element("attack-move").addEventListener("click", () => battlefield.arm("attack_move"));
+/** The Tactics popover: the three behavior buttons live in it, so their ids, handlers and aria-pressed are unchanged. */
+const TACTIC_SUMMARY: Record<BehaviorKind, string> = { harass: "Hit enemy workers, retreat when hurt", guard: "Hold an area, don't chase far", raid: "Push to a target, fall back to heal" };
+function toggleTactics(open: boolean): void {
+  element("tactics-menu").hidden = !open;
+  element("tactics").setAttribute("aria-expanded", String(open));
+}
+for (const kind of Object.keys(BEHAVIORS) as BehaviorKind[]) {
+  const row = element(kind);
+  row.title = `${BEHAVIORS[kind].hint} (${keyLabel(UNIT_KEYS[kind])})`;
+  row.querySelector<HTMLElement>(".swatch")!.style.background = BEHAVIORS[kind].color;
+  row.querySelector<HTMLElement>(".tactic-name")!.textContent = BEHAVIORS[kind].label;
+  row.querySelector<HTMLElement>(".tactic-desc")!.textContent = TACTIC_SUMMARY[kind];
+  row.addEventListener("click", () => { battlefield.arm(kind); toggleTactics(false); });
+}
+element("tactics").addEventListener("click", () => toggleTactics(element("tactics-menu").hidden));
+document.addEventListener("pointerdown", event => { if (!element("tactics-menu").hidden && !element("tactics-wrap").contains(event.target as Node)) toggleTactics(false); });
+document.addEventListener("keydown", event => { if (event.key === "Escape" && !element("tactics-menu").hidden) toggleTactics(false); });
 element("repair").addEventListener("click", () => battlefield.arm("repair"));
 element("teleport").addEventListener("click", () => battlefield.arm("teleport"));
 for (const kind of ["recall", "bloom"] as const) element(kind).addEventListener("click", () => battlefield.arm(kind));
 element("set-rally").addEventListener("click", () => battlefield.arm("rally"));
+element("expand").addEventListener("click", () => { battlefield.arm("expand"); showTab("production"); });
+element("auto-labour").addEventListener("click", () => { operations.toggleAutoLabour(); });
 for (const [id, kind] of [["clear-rally", "clear_rally"], ["cancel-production", "cancel_production"]]) element(id).addEventListener("click", () => {
   const hq = productionBuilding();
   if (hq) void session.order([hq.id], { kind, x: 0, y: 0, target: 0 });
@@ -365,6 +404,9 @@ battlefield.onKey = event => {
   if (event.key === "?") { toggleHelp(); return true; }
   if (key === BUILD_MENU_KEY) { showTab(visibleTab() === "build" ? "production" : "build"); return true; }
   const tab = visibleTab();
+  // Operations: B then V arms Expand; L toggles auto-labour from anywhere.
+  if (tab === "build" && key === OPERATION_KEYS.expand) { element<HTMLButtonElement>("expand").click(); return true; }
+  if (key === OPERATION_KEYS.autoLabour) { element<HTMLButtonElement>("auto-labour").click(); return true; }
   if (event.key === "Escape" && tab !== "production" && !battlefield.targeting) { showTab("production"); return true; }
   const keys: readonly string[] = tab === "build" ? BUILD_KEYS : TRAIN_KEYS;
   const button = cardButtons(tab)[keys.indexOf(key)];
@@ -440,7 +482,7 @@ function renderLobby(): void {
   roster.replaceChildren(...members.map(player => {
     const row = text("div", "", "roster-row");
     const name = text("div", "", "player-name");
-    const swatch = text("span", "", "swatch"); swatch.style.background = COLORS[player.slot];
+    const swatch = text("span", "", "swatch"); swatch.style.background = ownerColor(player.slot, me?.slot);
     name.append(swatch, text("strong", `${player.name}${room.host.isEqual(player.identity) ? " / host" : ""}`));
     // Every player's faction, their own choice or the one their slot dealt, is
     // public in the lobby: you pick yours below, and you can see what you are
@@ -472,6 +514,16 @@ function renderMatch(): void {
   const pending = owned.reduce((count, unit) => count + unit.production.filter(item => !item.kind.startsWith("research_")).length, 0);
   const canOrder = session.ready && session.matchReady && room.state === "playing" && alive;
   const balance: Cost = { material: me.material, catalyst: me.catalyst, terrazine: me.terrazine };
+  // Orders sent but not yet executed have not been charged, yet the money is
+  // spoken for: buttons and readouts work from what is actually left.
+  const committed = pendingSpend(session.snapshot.commands, session.pending.values(), me.slot);
+  const free = availableAfter(balance, committed);
+  for (const currency of CURRENCIES) {
+    const label = pendingLabel(committed, currency);
+    const node = element(`${currency}-pending`);
+    if (node.textContent !== label) node.textContent = label;
+    node.hidden = !label;
+  }
   const faction = myFaction();
   const labour = LABOUR[faction];
   const tier = tierOf(me.research);
@@ -526,7 +578,7 @@ function renderMatch(): void {
     // the first refusal that applies, in the order a player can fix them.
     const needs = LABOUR_KINDS.includes(kind) ? "a finished hub" : armyBuilding(kind) === "factory" ? "a finished factory" : "a finished barracks";
     const why = !canOrder ? "Orders are closed" : locked ? `Requires Tier ${tierNeeded}` : !site ? `Needs ${needs}` : mobile.length + pending >= MAX_UNITS ? `Unit cap ${MAX_UNITS} reached` : `Trains at ${CATALOG[site.kind].label} #${site.id}`;
-    affordability(button, definition.cost, balance, blocked, stockless ? `${describe(kind)} / ${STOCK_REASON}` : `${describe(kind)} / ${why}`);
+    affordability(button, definition.cost, free, blocked, stockless ? `${describe(kind)} / ${STOCK_REASON}` : `${describe(kind)} / ${why}`);
     const tag = button.querySelector<HTMLElement>(":scope > .tier-tag");
     if (tag) tag.hidden = !locked;
     button.classList.toggle("locked", locked);
@@ -547,7 +599,7 @@ function renderMatch(): void {
     // Construction is driven by any labour unit now, not only by a worker:
     // gating this on "worker" left Network and Organic unable to build at all.
     const blocked = !canOrder || !battlefield.issuer() || buildings.length >= MAX_BUILDINGS || ((kind === "factory" || kind === "lab") && !buildings.some(unit => unit.kind === "barracks" && unit.constructionRemaining === 0n));
-    affordability(element<HTMLButtonElement>(`build-${kind}`), definition.cost, balance, blocked, describe(kind));
+    affordability(element<HTMLButtonElement>(`build-${kind}`), definition.cost, free, blocked, describe(kind));
     element(`build-${kind}`).setAttribute("aria-pressed", String(battlefield.targeting === `build_${kind}`));
   }
   element("building-count").textContent = `${buildings.length} / ${MAX_BUILDINGS} structures`;
@@ -559,7 +611,7 @@ function renderMatch(): void {
     const detail = research.tier ? `${TIER_UPGRADES[faction][research.tier - 1].name}: ${TIER_UPGRADES[faction][research.tier - 1].text} / ${research.description}` : research.description;
     // Bought research is never short of anything, so it is priced at nothing
     // and reads as complete rather than unaffordable.
-    affordability(button, bought ? NO_COST : research.cost, balance, !canOrder || !battlefield.issuer() || !!reason, `${detail} / ${bought ? "Complete" : reason ?? "Instant"}`);
+    affordability(button, bought ? NO_COST : research.cost, free, !canOrder || !battlefield.issuer() || !!reason, `${detail} / ${bought ? "Complete" : reason ?? "Instant"}`);
     button.classList.toggle("completed", bought);
   }
   element("research-status").textContent = me.research.length ? me.research.map(researchName).join(" / ") : "No upgrades";
@@ -570,7 +622,7 @@ function renderMatch(): void {
   renderSelectionGrid();
   renderGroupBar();
   const selection = units.filter(unit => battlefield.selected.has(unit.id));
-  element("selection-title").textContent = selection.length === 1 ? VISUALS[selection[0].kind]?.label ?? selection[0].kind : selection.length ? `${selection.length} units` : "No selection";
+  element("selection-title").textContent = selection.length === 1 ? VISUALS[selection[0].kind]?.label ?? selection[0].kind : selection.length ? `${selection.length} units${battlefield.activeKind ? ` / ${CATALOG[battlefield.activeKind]?.label ?? battlefield.activeKind} active` : ""}` : "No selection";
   // Cargo is reported by the currency each carrier is actually carrying, since
   // one load is one currency and the two are not interchangeable. A drifter is
   // deliberately excluded: it holds nothing, ever, so a "0 cargo" line would be
@@ -589,12 +641,28 @@ function renderMatch(): void {
       + (selection.length === 1 && passiveLine(selection[0].kind) ? ` / ${passiveLine(selection[0].kind)}` : "")
       + (faction === "organic" && hubs.length ? ` / ${hubs.reduce((sum, unit) => sum + unit.stock, 0)} / ${hubs.length * HUB_STOCK_CAP} stock` : "")
     : "";
-  element<HTMLButtonElement>("stop").disabled = !canOrder || !battlefield.ownedSelection().some(unit => !isBuilding(unit.kind));
+  // A command that cannot apply to the selection is hidden; `disabled` is left for orders being closed.
+  const mine = battlefield.ownedSelection();
+  const show = (id: string, relevant: boolean): void => { const button = element<HTMLButtonElement>(id); button.hidden = !relevant; button.disabled = !canOrder; };
+  show("stop", mine.some(unit => !isBuilding(unit.kind)));
   // Only a carrier can be told to take a load home. A drifter has no load.
-  element<HTMLButtonElement>("return").disabled = !canOrder || !battlefield.ownedSelection().some(unit => carriesCargo(unit.kind));
+  show("return", mine.some(unit => carriesCargo(unit.kind)));
   // A harvester gathers only: the server refuses it hold and attack-move by name.
-  for (const id of ["hold", "attack-move"]) element<HTMLButtonElement>(id).disabled = !canOrder || !battlefield.ownedSelection().some(unit => fights(unit.kind));
-  element<HTMLButtonElement>("repair").disabled = !canOrder || !battlefield.ownedSelection().some(unit => isLabour(unit.kind));
+  for (const id of ["hold", "attack-move"]) show(id, mine.some(unit => fights(unit.kind)));
+  // Behaviors take army units only; a mixed selection sends just its army. Producers take them as a rally.
+  const rallying = mine.some(unit => RALLIES.includes(unit.kind));
+  const tactical = !!behaviorUnits(mine).length || rallying;
+  show("tactics", tactical);
+  element("tactics").title = rallying && !behaviorUnits(mine).length ? "Tactics: behavior rally for new units (harass, guard, raid)" : "Tactics: give the army a behavior (harass, guard, raid)";
+  element("tactics-head").textContent = rallying && !behaviorUnits(mine).length ? "Rally new units with a tactic" : "Give the army a tactic";
+  if (!tactical && !element("tactics-menu").hidden) toggleTactics(false);
+  for (const kind of Object.keys(BEHAVIORS) as BehaviorKind[]) {
+    element<HTMLButtonElement>(kind).disabled = !canOrder || !tactical;
+    element(kind).setAttribute("aria-pressed", String(battlefield.targeting === kind));
+  }
+  element("tactics").setAttribute("aria-pressed", String(battlefield.targeting === "harass" || battlefield.targeting === "guard" || battlefield.targeting === "raid"));
+  element("selection-behavior").textContent = behaviorLine(selection);
+  show("repair", mine.some(unit => isLabour(unit.kind)));
   // Teleport is Network's alone, and only for units already inside the field.
   element("teleport").hidden = faction !== "network";
   element<HTMLButtonElement>("teleport").disabled = !canOrder || !battlefield.teleporters().length;
@@ -615,6 +683,10 @@ function renderMatch(): void {
     button.title = `${summary} / ${hub ? `Casts from ${CATALOG[hub.kind].label} #${hub.id} (${hub.energy} energy)` : reason ?? "Not ready"}`;
   }
   element<HTMLButtonElement>("set-rally").disabled = !canOrder;
+  element<HTMLButtonElement>("expand").disabled = !canOrder || !battlefield.issuer();
+  element("expand").setAttribute("aria-pressed", String(battlefield.targeting === "expand"));
+  element("auto-labour").setAttribute("aria-pressed", String(operations.autoLabour));
+  element<HTMLButtonElement>("auto-labour").disabled = !canOrder;
   element<HTMLButtonElement>("clear-rally").disabled = !canOrder || !producer?.order.kind.startsWith("rally_");
   // An Organic outpost queues harvesters but is not a production *control*:
   // the server takes rally and cancellation only at an HQ, barracks, factory or
@@ -622,6 +694,10 @@ function renderMatch(): void {
   const controllable = !!producer && isBuilding(producer.kind);
   element<HTMLButtonElement>("cancel-production").disabled = !canOrder || !producer?.production.length || !controllable;
   element<HTMLButtonElement>("idle-worker").disabled = !canOrder || !owned.some(unit => isLabour(unit.kind) && unit.order.kind === "stop");
+  const idleCount = owned.filter(unit => isLabour(unit.kind) && unit.order.kind === "stop").length;
+  element("idle-count").hidden = idleCount === 0;
+  element("idle-count").textContent = String(idleCount);
+  renderArmyRoster(owned, me.slot);
   element("idle-worker").title = `Select idle ${CATALOG[labour].label.toLowerCase()}`;
   element("idle-worker").setAttribute("aria-label", element("idle-worker").title);
   const refund = (producer?.production ?? []).reduce((total, item) => addCost(total, costOf(item.kind)), NO_COST);
@@ -633,10 +709,11 @@ function renderMatch(): void {
     ? `Cancel all unfinished production / refund ${refundParts.join(" + ") || "nothing"}`
     : "Select a building with a production queue";
   const rallyNode = producer?.order.kind === "rally_gather" ? session.snapshot.nodes.find(node => node.id === producer.order.target) : undefined;
-  element("rally-status").textContent = producer?.order.kind === "rally_move" ? `Rally ${Math.round(producer.order.x)}, ${Math.round(producer.order.y)}`
-    : producer?.order.kind === "rally_gather" ? `${rallyNode ? CURRENCY_LABEL[currencyOf(rallyNode.kind)] : "Deposit"} rally #${producer.order.target}` : "Rally unset";
+  // Where a move rally points, in words: the building it sits on, if any.
+  const rallyLandmark = producer?.order.kind === "rally_move" ? units.find(unit => isBuilding(unit.kind) && Math.hypot(unit.x - producer.order.x, unit.y - producer.order.y) <= CATALOG[unit.kind].radius + 15) : undefined;
+  element("rally-status").textContent = producer ? rallyText(producer, rallyNode, rallyLandmark && { label: CATALOG[rallyLandmark.kind].label }) : "Rally unset";
   element("selection-order").textContent = selection.length === 1 ? selection[0].constructionRemaining > 0n ? `Constructing / ${(Number(selection[0].constructionRemaining) / 20).toFixed(1)}s left` : selection[0].order.kind.split("_").join(" ") : "";
-  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : battlefield.targeting === "recall" ? "Recall area / your units near it return home" : battlefield.targeting === "bloom" ? "Bloom site / on your own creep" : battlefield.targeting === "rally" ? "Rally target" : "";
+  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : battlefield.targeting === "recall" ? "Recall area / your units near it return home" : battlefield.targeting === "bloom" ? "Bloom site / on your own creep" : battlefield.targeting === "rally" ? "Rally target" : battlefield.targeting === "expand" ? "Expand toward / click the map or minimap" : battlefield.targeting === "harass" || battlefield.targeting === "guard" || battlefield.targeting === "raid" ? `${BEHAVIORS[battlefield.targeting].label} goal / army units only, click the map or minimap` : "";
   element("targeting-state").hidden = !battlefield.targeting;
   element("targeting-state").textContent = targetLabel;
   for (const [id, kind] of [["attack-move", "attack_move"], ["repair", "repair"], ["set-rally", "rally"], ["teleport", "teleport"], ["recall", "recall"], ["bloom", "bloom"]]) element(id).setAttribute("aria-pressed", String(battlefield.targeting === kind));
@@ -672,12 +749,95 @@ function renderMatch(): void {
       const row = text("div", "", `battle-player${player.online ? "" : " offline"}`);
       // Which economy each opponent is playing is public and decides how the
       // match reads: a drifter line is not a worker line under attack.
-      row.append(text("span", `${player.name}${player.slot === me.slot ? " / you" : ""}${player.online ? "" : " / offline"}`, "battle-player-name"),
+      // The swatch is the colour this player is drawn in on the map; yours is
+      // marked as such, so "which side am I" never needs guessing.
+      const swatch = text("span", "", "swatch"); swatch.style.background = ownerColor(player.slot, me.slot);
+      row.append(swatch, text("span", `${player.name}${player.slot === me.slot ? " / you" : ""}${player.online ? "" : " / offline"}`, player.slot === me.slot ? "battle-player-name you" : "battle-player-name"),
         text("span", FACTION_LABEL[factionOf(player.faction)], `faction-tag ${factionOf(player.faction)}`));
-      row.style.borderColor = COLORS[player.slot]; return row;
+      row.style.borderColor = ownerColor(player.slot, me.slot); return row;
     }));
   }
 }
+
+let armySignature = "";
+let armyCollapsed = false;
+try { armyCollapsed = localStorage.getItem("army-roster-collapsed") === "1"; } catch { /* storage unavailable */ }
+/**
+ * The Army roster over the battlefield: what each cluster of army units is
+ * doing, one clickable row each. Click selects exactly those units and centres
+ * the camera; Shift+click adds them without moving it. The DOM is only rebuilt
+ * when the rows' text changes, so a click is never lost to a per-frame rebuild.
+ */
+function renderArmyRoster(owned: Entity[], slot: number): void {
+  const panel = element("army-roster");
+  const rows = armyRoster(owned, slot, owned);
+  const { shown, more } = visibleRows(rows);
+  const total = rows.reduce((sum, row) => sum + row.count, 0);
+  const signature = JSON.stringify([armyCollapsed, total, more, shown.map(row => [row.activity, row.ids, row.composition, row.location])]);
+  panel.hidden = rows.length === 0;
+  if (signature === armySignature) return;
+  armySignature = signature;
+  const head = text("button", "", "army-head") as HTMLButtonElement;
+  head.append(text("span", `ARMY ${total}`), text("span", armyCollapsed ? "+" : "−"));
+  head.setAttribute("aria-expanded", String(!armyCollapsed));
+  head.title = "Collapse or expand the army roster";
+  head.addEventListener("click", () => {
+    armyCollapsed = !armyCollapsed;
+    try { localStorage.setItem("army-roster-collapsed", armyCollapsed ? "1" : "0"); } catch { /* storage unavailable */ }
+    armySignature = ""; renderMatch();
+  });
+  const children: HTMLElement[] = [head];
+  if (!armyCollapsed) {
+    for (const row of shown) children.push(armyRow(row));
+    if (more > 0) children.push(text("div", `+${more} more`, "army-more"));
+  }
+  panel.replaceChildren(...children);
+}
+
+function armyRow(row: RosterRow): HTMLElement {
+  const button = text("button", "", `army-row${row.forgotten ? " forgotten" : ""}`) as HTMLButtonElement;
+  button.append(text("span", row.activity, "army-act"), text("span", String(row.count), "army-count"), text("span", row.location === "base" ? "at base" : "field", "army-where"), text("span", row.composition, "army-comp"));
+  button.title = `Select ${row.count} unit${row.count === 1 ? "" : "s"} / Shift adds to the selection`;
+  button.addEventListener("click", event => {
+    if (event.shiftKey) battlefield.selected = new Set([...battlefield.selected, ...row.ids]);
+    else {
+      // Rows are only rebuilt when membership changes, so find where the group is *now*.
+      const members = session.snapshot.units.filter(unit => row.ids.includes(unit.id));
+      battlefield.selected = new Set(row.ids);
+      if (members.length) battlefield.centreOn({ x: members.reduce((sum, unit) => sum + unit.x, 0) / members.length, y: members.reduce((sum, unit) => sum + unit.y, 0) / members.length });
+    }
+    renderMatch();
+  });
+  return button;
+}
+
+/**
+ * The Operations list over the battlefield: each running expansion with its
+ * step ("2/4"), what it is doing right now, and a Cancel button; auto-labour
+ * appears while it is on. Hidden when there is nothing running.
+ */
+function renderOperations(): void {
+  const panel = element("operations");
+  const rows: HTMLElement[] = operations.list.map(operation => {
+    const row = text("div", "", "operation-row");
+    const cancel = text("button", "Cancel", "operation-cancel") as HTMLButtonElement;
+    cancel.setAttribute("aria-label", `Cancel ${operation.label}`);
+    cancel.addEventListener("click", () => operations.cancel(operation.id));
+    row.append(text("strong", operation.label), text("span", `${operation.done}/${operation.total}`, "operation-step mono"), text("span", operation.note, "operation-note"), cancel);
+    return row;
+  });
+  if (operations.autoLabour) {
+    const row = text("div", "", "operation-row");
+    const off = text("button", "Cancel", "operation-cancel") as HTMLButtonElement;
+    off.setAttribute("aria-label", "Turn off auto-labour");
+    off.addEventListener("click", () => operations.toggleAutoLabour());
+    row.append(text("strong", "Auto-labour"), text("span", "on", "operation-step mono"), text("span", "Trains labour at idle hubs", "operation-note"), off);
+    rows.push(row);
+  }
+  panel.hidden = rows.length === 0;
+  panel.replaceChildren(text("p", "OPERATIONS", "eyebrow"), ...rows);
+}
+operations.onChange = () => { renderOperations(); if (session.snapshot.room) renderMatch(); };
 
 let selectionSignature = "";
 /**
@@ -691,7 +851,7 @@ function renderSelectionGrid(): void {
   const selection = session.snapshot.units.filter(unit => battlefield.selected.has(unit.id))
     .sort((left, right) => left.kind.localeCompare(right.kind) || left.id - right.id);
   const shown = selection.length > 1 ? selection.slice(0, 32) : [];
-  const signature = shown.map(unit => `${unit.id}:${Math.ceil(unit.hp / Math.max(1, unit.maxHp) * 10)}:${Math.ceil(unit.shields / Math.max(1, unit.maxShields) * 10)}`).join(",") + `/${selection.length}`;
+  const signature = `${battlefield.activeKind ?? ""}|` + shown.map(unit => `${unit.id}:${Math.ceil(unit.hp / Math.max(1, unit.maxHp) * 10)}:${Math.ceil(unit.shields / Math.max(1, unit.maxShields) * 10)}`).join(",") + `/${selection.length}`;
   if (signature === selectionSignature) return;
   selectionSignature = signature;
   grid.hidden = !shown.length;
@@ -700,7 +860,9 @@ function renderSelectionGrid(): void {
     const health = unit.hp / Math.max(1, unit.maxHp);
     tile.title = `${CATALOG[unit.kind]?.label ?? unit.kind} #${unit.id} / ${unit.hp} of ${unit.maxHp} HP`;
     tile.setAttribute("aria-label", tile.title);
-    tile.style.borderColor = COLORS[unit.owner];
+    tile.style.borderColor = battlefield.colorOf(unit.owner);
+    tile.classList.toggle("active", unit.kind === battlefield.activeKind);
+    tile.classList.toggle("dim", battlefield.activeKind !== undefined && unit.kind !== battlefield.activeKind);
     tile.append(icon(CATALOG[unit.kind]?.icon ?? ""));
     const bar = text("span", "", "unit-tile-health");
     bar.style.width = `${Math.round(health * 100)}%`;
@@ -743,17 +905,39 @@ function renderGroupBar(): void {
   }));
 }
 
+/**
+ * The production queue of every selected building that is making something,
+ * or of the whole base when none is, one card per item with its own progress
+ * bar. This used to follow only the one "production building" the dropdown
+ * picked (the HQ by default), so a barracks full of trains showed an empty
+ * queue. Orders still inside the one-second delay are listed too, dimmed.
+ */
+function renderQueue(): void {
+  const { room, me, units, commands } = session.snapshot;
+  if (!room || !me) return;
+  const tick = Number(room.tick) + Math.min(1, (performance.now() - session.tickReceivedAt) / TICK_MS);
+  const view = queueView(units, commands, me.slot, new Set(battlefield.activeSelection().map(unit => unit.id)), tick, kind => (CATALOG[kind]?.seconds ?? 0) * 20);
+  const shown = view.rows.slice(0, 12);
+  const cards = shown.map(row => {
+    const card = text("span", "", `production-item${row.scheduled ? " scheduled" : ""}`);
+    card.title = `${CATALOG[row.kind]?.label ?? row.kind} #${row.building}${row.scheduled ? " / sent, starts in under a second" : ""}`;
+    const bar = text("i", "", "queue-bar"); bar.style.setProperty("--progress", `${Math.round(row.progress * 100)}%`);
+    card.append(text("span", `${CATALOG[row.kind]?.label ?? row.kind} ${row.scheduled ? "sent" : `${row.seconds.toFixed(1)}s`}`), bar);
+    return card;
+  });
+  // Empty stays truly empty (CSS prints "Queue empty" for it).
+  if (!view.rows.length) { element("production-queue").replaceChildren(); return; }
+  const scope = text("span", view.scope === "selected" ? "Selected" : "All buildings", "queue-scope");
+  const more = view.rows.length > shown.length ? [text("span", `+${view.rows.length - shown.length}`, "queue-scope")] : [];
+  element("production-queue").replaceChildren(scope, ...cards, ...more);
+}
+
 function renderTimers(): void {
   const { room, me, commands } = session.snapshot;
   if (!room || !me || room.state === "lobby") return;
   const seconds = Number(room.tick / 20n);
   element("match-clock").textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-  const hq = productionBuilding();
-  // A selected building shows its own queue; otherwise everything in
-  // production, soonest first, because training no longer needs a selection.
-  const selectedProducer = hq && battlefield.selected.has(hq.id) ? hq : undefined;
-  const queued = selectedProducer ? selectedProducer.production : session.snapshot.units.filter(unit => unit.owner === me.slot).flatMap(unit => unit.production).filter(item => !item.kind.startsWith("research_")).sort((left, right) => Number(left.finishTick - right.finishTick));
-  element("production-queue").replaceChildren(...queued.map(item => text("span", `${item.kind} ${Math.max(0, Number(item.finishTick - room.tick) / 20).toFixed(1)}s`, "production-item")));
+  renderQueue();
   element("research-status").textContent = me.research.map(researchName).join(" / ") || "No upgrades";
   const ours = commands.filter(command => command.owner === me.slot).sort((left, right) => left.id > right.id ? -1 : 1);
   element("pending-count").textContent = String(ours.filter(command => command.status === "scheduled").length + session.pending.size);
@@ -797,7 +981,30 @@ function render(): void {
 
 battlefield.onSelection = renderMatch;
 battlefield.onOrder = kind => feedback.ack(kind);
+let alertTimer: ReturnType<typeof setTimeout>;
+/** Your units or base are being hit: a banner at the top of the battlefield and a sound; Space jumps there. */
+battlefield.onAlert = kind => {
+  const banner = element("alert-banner");
+  banner.textContent = `${alertText(kind)} (Space: jump there)`;
+  banner.dataset.kind = kind;
+  banner.hidden = false;
+  // Restart the flash even when the banner is already up from another area.
+  banner.classList.remove("flash"); void banner.offsetWidth; banner.classList.add("flash");
+  clearTimeout(alertTimer);
+  alertTimer = setTimeout(() => { banner.hidden = true; }, ALERT_BANNER_MS);
+  feedback.alert(kind);
+};
+/** A refused purchase blinks the readout of the currency it was short of, beside the reason in the notice line. */
+session.onReject = reason => {
+  const currency = refusedCurrency(reason);
+  if (!currency) return;
+  const readout = element(`${currency}-readout`);
+  readout.classList.remove("refused"); void readout.offsetWidth; readout.classList.add("refused");
+  setTimeout(() => readout.classList.remove("refused"), 1500);
+};
 practice.onChange = render;
 session.onChange = render;
 setInterval(renderTimers, 100);
+// Dev-only handle for the browser tests and for poking the client from the console.
+if (import.meta.env.DEV) (window as unknown as { __rts: unknown }).__rts = { battlefield, session, practice };
 connect();

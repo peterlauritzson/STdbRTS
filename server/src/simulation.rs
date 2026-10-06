@@ -1,12 +1,13 @@
 use crate::maps::MapDefinition;
 use crate::navigation::Navigation;
+use crate::behavior::{self, Behavior, Senses};
 use crate::spatial::SpatialIndex;
 use crate::{
     ability, advance_patch, is_static_defense, passive, veteran_cooldown, veteran_percent, Passive,
     aura_per_interval, blink_cooldown, entrench_hold_ticks, is_research, phase_cooldown,
     required_tier, tier_armour, tier_bonus_hp, tier_building, tier_cooldown, tier_number, tier_of,
     tier_range_bonus, tier_speed_percent,
-    BLINK_DISTANCE, BLINK_THRESHOLD_PERCENT, DEATH_BURST_DAMAGE,
+    BLINK_DISTANCE, BLINK_THRESHOLD_PERCENT, BUILD_RADIUS, DEATH_BURST_DAMAGE,
     DEATH_BURST_RADIUS, ENTRENCH_ARMOUR, ENTRENCH_LINGER_TICKS,
     ENTRENCH_RADIUS, ENTRENCH_RANGE, FORCED_MARCH_IDLE_TICKS, FORCED_MARCH_SPEED_PERCENT,
     GUARDIAN_PERCENT, GUARDIAN_RADIUS, MEDIC_HEAL, MEDIC_INTERVAL_TICKS, MEDIC_RANGE,
@@ -259,6 +260,135 @@ pub fn movement_speed(unit: &Entity, zones: &ZoneField, tier: u8, tick: u64) -> 
         * (tier_speed_percent(&unit.kind, tier) as f32 / 100.0)
 }
 
+/// How far an attack-moving unit looks for a target when its weapon reaches
+/// less than this. Also what a behavior treats as "a fight to rejoin".
+const ACQUIRE_RADIUS: f32 = 180.0;
+/// A unit stopped this close to a behavior's anchor has arrived: its order is
+/// not rewritten just because the walk there completed.
+const ARRIVED_RADIUS: f32 = 8.0;
+
+/// Does this entity count as armed for [`Senses::outnumbered`]? A fighter with
+/// a weapon, or a finished static defense with one.
+fn armed(unit: &Entity) -> bool {
+    unit.construction_remaining == 0
+        && (fights(&unit.kind) || is_static_defense(&unit.kind))
+        && stats(&unit.kind).is_some_and(|definition| definition.damage > 0)
+}
+
+/// What a behavior may read about `unit`, answered from the start-of-tick
+/// snapshot through the spatial index, so every query is radius-bounded.
+struct LocalSenses<'a> {
+    unit: &'a Entity,
+    snapshot: &'a [Entity],
+    nearby: &'a SpatialIndex,
+}
+
+impl Senses for LocalSenses<'_> {
+    fn health(&self) -> (i32, i32) {
+        (
+            self.unit.hp + self.unit.shields,
+            self.unit.max_hp + self.unit.max_shields,
+        )
+    }
+
+    fn position(&self) -> (f32, f32) {
+        (self.unit.x, self.unit.y)
+    }
+
+    fn outnumbered(&self, radius: f32) -> bool {
+        let (mut enemies, mut friends) = (0u32, 1u32);
+        // Counting is order-independent, so the candidate walk is enough.
+        self.nearby
+            .for_each_candidate(self.unit.x, self.unit.y, radius, |at| {
+                let other = &self.snapshot[at];
+                if other.id == self.unit.id
+                    || distance(self.unit.x, self.unit.y, other.x, other.y) > radius
+                    || !armed(other)
+                {
+                    return;
+                }
+                if other.owner != self.unit.owner {
+                    enemies += 1;
+                } else if !is_building(&other.kind) {
+                    friends += 1;
+                }
+            });
+        enemies > friends
+    }
+
+    fn enemy_within(&self, radius: f32) -> bool {
+        self.nearby
+            .any_within(self.unit.x, self.unit.y, radius, false, |at| {
+                self.snapshot[at].owner != self.unit.owner
+            })
+    }
+}
+
+/// Is `unit` already doing what `action` asks? Exact order kind and anchor, or
+/// stopped on the anchor after a completed walk there — with nothing to fight
+/// nearby, for an attack-move, since a stopped unit would not go looking.
+fn obeys(unit: &Entity, running: &Behavior, action: behavior::Action, senses: &LocalSenses) -> bool {
+    let wanted = running.order_for(action);
+    if unit.order.kind == wanted.kind {
+        return action == behavior::Action::Hold
+            || (unit.order.x, unit.order.y) == (wanted.x, wanted.y);
+    }
+    unit.order.kind == "stop"
+        && action != behavior::Action::Hold
+        && distance(unit.x, unit.y, wanted.x, wanted.y) <= ARRIVED_RADIUS
+        && (wanted.kind != "attack_move" || !senses.enemy_within(ACQUIRE_RADIUS))
+}
+
+/// One evaluation of every running behavior, in unit-id order (`units` is
+/// id-sorted and index-aligned with `snapshot`). A unit in a hard state — still
+/// arriving from a teleport, channelling one, or casting — is skipped and
+/// evaluated on a later pass. Its order is rewritten only on a transition, or
+/// when it no longer matches the state (an attack-move that completed into a
+/// stop), so a path is never reset just because a pass ran.
+fn run_behaviors(units: &mut [Entity], snapshot: &[Entity], nearby: &SpatialIndex, tick: u64) {
+    for (at, unit) in units.iter_mut().enumerate() {
+        let Some(running) = unit.behavior.as_mut() else {
+            continue;
+        };
+        if unit.construction_remaining > 0
+            || unit.arrive_tick > tick
+            || unit.order.kind == "teleport"
+            || unit.cast.is_some()
+        {
+            continue;
+        }
+        // A preset this build no longer knows falls back to no behavior: the
+        // unit keeps its last order, which is an ordinary one.
+        let Some(policy) = behavior::policy(&running.preset) else {
+            unit.behavior = None;
+            continue;
+        };
+        let senses = LocalSenses {
+            unit: &snapshot[at],
+            snapshot,
+            nearby,
+        };
+        let entered = match behavior::next_state(policy, running, tick, &senses) {
+            Some(next) => {
+                running.state = next;
+                running.entered_tick = tick;
+                true
+            }
+            None => false,
+        };
+        let Some(state) = policy.states.get(running.state as usize) else {
+            unit.behavior = None;
+            continue;
+        };
+        let running = running.clone();
+        if entered || !obeys(unit, &running, state.action, &senses) {
+            unit.order = running.order_for(state.action);
+            unit.queue.clear();
+            unit.returning = false;
+        }
+    }
+}
+
 /// Would a recall by `owner` at `(x, y)` take `unit`? The owner's mobile
 /// units within `RECALL_RADIUS`.
 fn recallable(unit: &Entity, owner: u8, x: f32, y: f32) -> bool {
@@ -295,6 +425,12 @@ pub struct Production {
 }
 
 /// An ability a caster has started and not yet resolved: today only a
+/// The behavior preset a `rally_<preset>` order names, if it is one.
+fn rally_preset(kind: &str) -> Option<&str> {
+    kind.strip_prefix("rally_")
+        .filter(|preset| behavior::policy(preset).is_some())
+}
+
 /// Network recall channelling. Kept apart from `order` so a hub's rally
 /// survives the cast.
 #[cfg_attr(feature = "stdb", derive(spacetimedb::SpacetimeType))]
@@ -382,6 +518,10 @@ pub struct Entity {
     pub anchor_x: f32,
     pub anchor_y: f32,
     pub anchor_tick: u64,
+    /// The meta command (Harass, Guard, Raid) this unit is running, if any. It
+    /// writes `order` itself between player commands; any explicit order
+    /// clears it. See `crate::behavior`.
+    pub behavior: Option<Behavior>,
 }
 
 /// The part of an [`Entity`] a client needs that changes rarely: stored in the
@@ -449,8 +589,14 @@ pub struct EntityState {
 }
 
 impl Entity {
-    /// Splits into the three persisted parts. `join` is its exact inverse.
-    pub fn split(&self) -> (EntityCold, EntityMotion, EntityVitals, EntityState) {
+    /// Splits into the persisted parts. `join` is its exact inverse.
+    ///
+    /// The behavior is its own part rather than a field of `EntityState`: it
+    /// is stored as a separate column, so adding it did not change the type of
+    /// a column a running database already holds.
+    pub fn split(
+        &self,
+    ) -> (EntityCold, EntityMotion, EntityVitals, EntityState, Option<Behavior>) {
         let e = self.clone();
         (
             EntityCold {
@@ -493,6 +639,7 @@ impl Entity {
                 anchor_y: e.anchor_y,
                 anchor_tick: e.anchor_tick,
             },
+            e.behavior,
         )
     }
 
@@ -501,6 +648,7 @@ impl Entity {
         motion: EntityMotion,
         vitals: EntityVitals,
         state: EntityState,
+        behavior: Option<Behavior>,
     ) -> Entity {
         Entity {
             id: cold.id,
@@ -538,6 +686,7 @@ impl Entity {
             anchor_x: state.anchor_x,
             anchor_y: state.anchor_y,
             anchor_tick: state.anchor_tick,
+            behavior,
         }
     }
 }
@@ -832,6 +981,7 @@ impl World {
             anchor_x: x,
             anchor_y: y,
             anchor_tick: self.tick,
+            behavior: None,
         });
         self.next_id += 1;
     }
@@ -1056,6 +1206,45 @@ impl World {
         }
     }
 
+    /// The one-hop look-ahead build rule: a site is in reach when it is within
+    /// `BUILD_RADIUS` of one of the owner's finished buildings, or of an
+    /// unfinished building that is itself within `BUILD_RADIUS` of a finished
+    /// one. Deliberately not transitive. Used at receipt and at activation.
+    fn within_build_reach(&self, command: &Command, x: f32, y: f32) -> bool {
+        let owner = command.owner;
+        let mine = || {
+            self.units
+                .iter()
+                .filter(|unit| unit.owner == owner && is_building(&unit.kind))
+        };
+        let finished = || mine().filter(|unit| unit.construction_remaining == 0);
+        if finished().any(|unit| distance(x, y, unit.x, unit.y) <= BUILD_RADIUS) {
+            return true;
+        }
+        // Look-ahead sources: unfinished sites, and the owner's own build orders
+        // still inside the command delay that land no later than this one. A
+        // base laid out with Shift in one sequence would otherwise refuse every
+        // site after the first, because the first does not exist for a second.
+        let unfinished = mine()
+            .filter(|site| site.construction_remaining > 0)
+            .map(|site| (site.x, site.y));
+        let scheduled = self
+            .commands
+            .iter()
+            .filter(|other| {
+                other.owner == owner
+                    && other.id != command.id
+                    && other.status == "scheduled"
+                    && other.execute_tick <= command.execute_tick
+                    && other.order.kind.starts_with("build_")
+            })
+            .map(|other| (other.order.x, other.order.y));
+        unfinished
+            .chain(scheduled)
+            .filter(|&(sx, sy)| distance(x, y, sx, sy) <= BUILD_RADIUS)
+            .any(|(sx, sy)| finished().any(|unit| distance(sx, sy, unit.x, unit.y) <= BUILD_RADIUS))
+    }
+
     /// Validates a command against the map the match froze. Every bound that
     /// depends on how big the battlefield is reads `map.size`.
     pub fn validate_on(&self, command: &Command, map: &MapDefinition) -> Result<(), String> {
@@ -1075,6 +1264,12 @@ impl World {
             return Err("Duplicate unit IDs".into());
         }
         let order = &command.order;
+        // A behavior replaces the unit's task and then writes its own orders,
+        // so there is nothing for it to wait behind: queueing one has no
+        // meaning, and is refused by name rather than as a full queue.
+        if command.queued && behavior::policy(&order.kind).is_some() {
+            return Err("Behaviors replace the unit's current task and cannot be queued".into());
+        }
         if let Some(kind) = order.kind.strip_prefix("build_") {
             if !is_building(kind) || kind == "hq" {
                 return Err("Unknown building".into());
@@ -1124,18 +1319,19 @@ impl World {
             {
                 return Err("Building site is obstructed".into());
             }
+            // Only an enemy's units hold a site: your own step aside when the
+            // building is placed (see `execute_on`).
             if self.units.iter().any(|unit| {
-                !is_building(&unit.kind) && distance(site_x, site_y, unit.x, unit.y) < 55.0
+                !is_building(&unit.kind)
+                    && unit.owner != command.owner
+                    && distance(site_x, site_y, unit.x, unit.y) < 55.0
             }) {
-                return Err("Move units clear of the building site".into());
+                return Err("Enemy units block the building site".into());
             }
-            if !self.units.iter().any(|unit| {
-                unit.owner == command.owner
-                    && is_building(&unit.kind)
-                    && unit.construction_remaining == 0
-                    && distance(site_x, site_y, unit.x, unit.y) <= 500.0
-            }) {
-                return Err("Build within 500 units of your established base".into());
+            if !self.within_build_reach(command, site_x, site_y) {
+                return Err(format!(
+                    "Build within {BUILD_RADIUS} units of your established base"
+                ));
             }
             // Tech prerequisites. A completed barracks is the gate to the rest
             // of the tree: it is the first real commitment of the opening, and
@@ -1170,7 +1366,7 @@ impl World {
         let production_control = matches!(
             order.kind.as_str(),
             "rally_move" | "rally_gather" | "clear_rally" | "cancel_production"
-        );
+        ) || rally_preset(&order.kind).is_some();
         if production_control && (command.units.len() != 1 || command.queued) {
             return Err("Select one HQ; production controls cannot be queued".into());
         }
@@ -1218,7 +1414,9 @@ impl World {
             }
             match order.kind.as_str() {
                 kind if kind.starts_with("build_") => {}
-                "rally_move" | "rally_gather" | "clear_rally" | "cancel_production" => {
+                _ if production_control => {
+                    // Includes the behavior rallies (`rally_harass` and kin),
+                    // which are validated exactly as `rally_move` is.
                     // Any building that can hold a queue can have it cancelled
                     // — a relay training drifters, an Organic outpost training
                     // harvesters. Rallies stay with the buildings that produce,
@@ -1234,7 +1432,7 @@ impl World {
                             "Production controls require an HQ or production building".into()
                         );
                     }
-                    if order.kind == "rally_move" {
+                    if order.kind == "rally_move" || rally_preset(&order.kind).is_some() {
                         validate_position(order.x, order.y, map.size)?;
                         if !destination_free() {
                             return Err("Rally destination is obstructed".into());
@@ -1277,6 +1475,22 @@ impl World {
                     }
                     if is_building(&unit.kind) {
                         return Err("HQ and buildings cannot move".into());
+                    }
+                }
+                // Harass, Guard, Raid: (x, y) is the goal anchor. Army only,
+                // refusing the whole selection exactly as attack-move does
+                // when labour or a building is in it. The goal must be a
+                // place the unit could be attack-moved to, since that is the
+                // order the behavior will give.
+                kind if behavior::policy(kind).is_some() => {
+                    if !is_army(&unit.kind) {
+                        return Err(
+                            "Only army units take a behavior; labour and buildings cannot".into(),
+                        );
+                    }
+                    validate_position(order.x, order.y, map.size)?;
+                    if !destination_free() {
+                        return Err("Destination is obstructed".into());
                     }
                 }
                 "teleport" => {
@@ -1436,6 +1650,75 @@ impl World {
         self.execute_on(command, crate::maps::default_map())
     }
 
+    /// A behavior's home anchor for the unit at `at`: beside its owner's
+    /// nearest completed hub (ties on the lower id), else where the unit
+    /// stands. Fixed at activation, so losing that hub later does not move the
+    /// retreat point mid-retreat.
+    ///
+    /// Beside, not on: the hub's centre is inside its footprint, where no unit
+    /// may stand, and a `move` there never arrives. The anchor is
+    /// `HOME_STANDOFF` out from the hub on the unit's side — the side it will
+    /// retreat into — or the nearest free spot to that when it is blocked.
+    fn home_of(&self, at: usize, navigation: &Navigation) -> (f32, f32) {
+        const HOME_STANDOFF: f32 = 90.0;
+        let unit = &self.units[at];
+        let Some(hub) = self
+            .units
+            .iter()
+            .filter(|hub| {
+                hub.owner == unit.owner && is_hub(&hub.kind) && hub.construction_remaining == 0
+            })
+            .min_by(|left, right| {
+                distance(unit.x, unit.y, left.x, left.y)
+                    .total_cmp(&distance(unit.x, unit.y, right.x, right.y))
+                    .then(left.id.cmp(&right.id))
+            })
+        else {
+            return (unit.x, unit.y);
+        };
+        let apart = distance(hub.x, hub.y, unit.x, unit.y);
+        let (towards_x, towards_y) = if apart > 0.0 {
+            ((unit.x - hub.x) / apart, (unit.y - hub.y) / apart)
+        } else {
+            (1.0, 0.0)
+        };
+        let beside = (hub.x + towards_x * HOME_STANDOFF, hub.y + towards_y * HOME_STANDOFF);
+        if navigation.free(beside.0, beside.1) {
+            beside
+        } else {
+            navigation
+                .escape(beside.0, beside.1)
+                .unwrap_or((unit.x, unit.y))
+        }
+    }
+
+    /// Starts `policy` on `unit` with its goal and home anchor. Shared by the
+    /// `issue_order` behavior kinds and by a trained unit inheriting a
+    /// `rally_<preset>`, so both activate identically.
+    fn activate_behavior(
+        unit: &mut Entity,
+        policy: &'static behavior::Policy,
+        goal: (f32, f32),
+        home: (f32, f32),
+        tick: u64,
+    ) {
+        let running = Behavior {
+            preset: policy.name.into(),
+            goal_x: goal.0,
+            goal_y: goal.1,
+            home_x: home.0,
+            home_y: home.1,
+            state: 0,
+            entered_tick: tick,
+        };
+        // The first state's order is given now, so the unit moves on the tick
+        // the behavior activates rather than at the next evaluation.
+        unit.order = running.order_for(policy.states[0].action);
+        unit.behavior = Some(running);
+        unit.returning = false;
+        unit.queue.clear();
+    }
+
     fn execute_on(&mut self, command: &Command, map: &MapDefinition) -> Result<(), String> {
         self.validate_on(command, map)?;
         if let Some(kind) = command.order.kind.strip_prefix("build_") {
@@ -1458,6 +1741,23 @@ impl World {
             // No cancellation and no interruption: from here the site builds
             // itself one tick at a time until it is finished or destroyed.
             debug_assert_eq!(site.id, building_id);
+            // The owner's own units standing on the footprint step aside: the
+            // same nearest-legal-ground search the end-of-tick recovery uses,
+            // in unit order, with their orders left alone.
+            let navigation = Navigation::new(map, &self.units);
+            for unit in &mut self.units {
+                if is_building(&unit.kind)
+                    || unit.owner != command.owner
+                    || distance(site_x, site_y, unit.x, unit.y) >= 55.0
+                    || navigation.free(unit.x, unit.y)
+                {
+                    continue;
+                }
+                if let Some((x, y)) = navigation.escape(unit.x, unit.y) {
+                    unit.x = x;
+                    unit.y = y;
+                }
+            }
             return Ok(());
         }
         if let Some(spell) = ability(&command.order.kind) {
@@ -1485,10 +1785,33 @@ impl World {
             return Ok(());
         }
         let lookup = self.id_lookup();
+        let preset = behavior::policy(&command.order.kind);
+        // Built once per behavior command, for the home anchors, and never for
+        // an ordinary order.
+        let navigation = preset.map(|_| Navigation::new(map, &self.units));
         for id in &command.units {
             let at = lookup.get(*id).expect("validated unit");
+            // Resolved before the unit is borrowed mutably: it reads the rest
+            // of the world.
+            let home = navigation
+                .as_ref()
+                .map(|navigation| self.home_of(at, navigation));
             let unit = &mut self.units[at];
-            if let Some(kind) = command.order.kind.strip_prefix("train_") {
+            // Any explicit order supersedes a running behavior. The behavior's
+            // own order was never the player's task, so a queued order does not
+            // wait behind it: it starts now, as it would on an idle unit.
+            if preset.is_none() && unit.behavior.take().is_some() && command.queued {
+                unit.order = Order::idle();
+            }
+            if let (Some(policy), Some(home)) = (preset, home) {
+                Self::activate_behavior(
+                    unit,
+                    policy,
+                    (command.order.x, command.order.y),
+                    home,
+                    self.tick,
+                );
+            } else if let Some(kind) = command.order.kind.strip_prefix("train_") {
                 let definition = stats(kind).unwrap();
                 // Hub stock is the harvester's whole price. It is spent here,
                 // when the item is queued, exactly as currency is.
@@ -1668,6 +1991,11 @@ impl World {
                 .filter(|(_, unit)| !is_building(&unit.kind))
                 .map(|(at, unit)| (at, unit.x, unit.y)),
         );
+        // Behaviors decide before anything moves, from the same snapshot, so a
+        // unit told to retreat this tick starts walking this tick.
+        if tick % behavior::BEHAVIOR_INTERVAL_TICKS == 0 {
+            run_behaviors(&mut self.units, &snapshot, &nearby, tick);
+        }
         // Every completed hub, the only things a carrier delivers to.
         let hubs: Vec<&Entity> = snapshot
             .iter()
@@ -1915,15 +2243,34 @@ impl World {
                     }
                 }
                 "attack_move" => {
-                    let reach = range.max(180.0);
+                    let reach = range.max(ACQUIRE_RADIUS);
                     // An unarmed unit (the medic) attack-moves as a plain move:
                     // it never walks into a fight it cannot join.
-                    let target = by_id(&snapshot, unit.order.target)
-                        .filter(|target| {
-                            definition.damage > 0
-                                && target.owner != unit.owner
-                                && distance(unit.x, unit.y, target.x, target.y) <= reach
+                    let current = by_id(&snapshot, unit.order.target).filter(|target| {
+                        definition.damage > 0
+                            && target.owner != unit.owner
+                            && distance(unit.x, unit.y, target.x, target.y) <= reach
+                    });
+                    // A behavior that prefers labour (Harass) switches to the
+                    // nearest enemy labour in reach unless it is already on
+                    // some; otherwise target choice is the ordinary one.
+                    let prefers_labour = definition.damage > 0
+                        && unit
+                            .behavior
+                            .as_ref()
+                            .and_then(|running| behavior::policy(&running.preset))
+                            .is_some_and(|policy| policy.prefers_labour)
+                        && !current.is_some_and(|target| is_labour(&target.kind));
+                    let labour = prefers_labour
+                        .then(|| {
+                            nearby.nearest(unit.x, unit.y, reach, |at| {
+                                snapshot[at].owner != unit.owner && is_labour(&snapshot[at].kind)
+                            })
                         })
+                        .flatten()
+                        .map(|at| &snapshot[at]);
+                    let target = labour
+                        .or(current)
                         .or_else(|| {
                             // Nearest enemy in reach, ties on the lower id.
                             if definition.damage == 0 {
@@ -2584,6 +2931,28 @@ impl World {
         for (owner, kind, x, y, rally) in births {
             if survivors.contains(&owner) {
                 self.spawn(owner, &kind, x, y);
+                // A behavior rally: army starts the behavior now, anchored
+                // beside the nearest completed hub as of this tick. Labour
+                // takes the plain move like `rally_move` does.
+                if let Some(policy) = rally_preset(&rally.kind).and_then(behavior::policy) {
+                    if is_army(&kind) {
+                        let at = self.units.len() - 1;
+                        let home = self.home_of(at, &navigation);
+                        let tick = self.tick;
+                        Self::activate_behavior(
+                            &mut self.units[at],
+                            policy,
+                            (rally.x, rally.y),
+                            home,
+                            tick,
+                        );
+                        continue;
+                    }
+                }
+                let rally = match rally_preset(&rally.kind) {
+                    Some(_) => Order { kind: "rally_move".into(), ..rally },
+                    None => rally,
+                };
                 let destination = if rally.kind == "rally_move" {
                     Some(Order {
                         kind: if is_army(&kind) {
@@ -3054,9 +3423,13 @@ mod tests {
             cast: Some(Cast { kind: "recall".into(), x: 9.5, y: 10.5, complete_tick: 107 }),
             passive_ready_tick: 108, last_attacker: 21, contact_tick: 109, kills: 4,
             anchor_x: 11.5, anchor_y: 12.5, anchor_tick: 110,
+            behavior: Some(Behavior {
+                preset: "guard".into(), goal_x: 13.5, goal_y: 14.5, home_x: 15.5,
+                home_y: 16.5, state: 1, entered_tick: 111,
+            }),
         };
-        let (cold, motion, vitals, state) = e.split();
-        assert_eq!(Entity::join(cold, motion, vitals, state), e);
+        let (cold, motion, vitals, state, behavior) = e.split();
+        assert_eq!(Entity::join(cold, motion, vitals, state, behavior), e);
     }
     use super::*;
 
@@ -5018,6 +5391,158 @@ mod tests {
         world.balances.insert(0, Balance::new(150, 0));
         world.execute(&barracks).unwrap();
         assert_eq!(world.balances[&0], Balance::default());
+    }
+
+    /// A two-player world, rich enough to afford anything, and the slot-0 HQ.
+    fn rich_world() -> (World, (f32, f32)) {
+        let mut world = World::new(&[0, 1]);
+        world
+            .balances
+            .insert(0, Balance::new(100_000, 100_000).with_terrazine(100_000));
+        let hq = world
+            .units
+            .iter()
+            .find(|unit| unit.owner == 0 && unit.kind == "hq")
+            .map(|unit| (unit.x, unit.y))
+            .unwrap();
+        (world, hq)
+    }
+
+    fn barracks_order(site: (f32, f32)) -> Command {
+        let mut build = command(1, 0, 2, "build_barracks", 0);
+        build.order.x = site.0;
+        build.order.y = site.1;
+        build
+    }
+
+    /// A site `along` from the HQ in some direction where `check` holds, found
+    /// by sweeping the compass so the test does not depend on the map layout.
+    fn along_some_direction(check: impl Fn(&mut World, (f32, f32), (f32, f32)) -> bool) {
+        for degrees in (0..360).step_by(10) {
+            let (sin, cos) = (degrees as f32).to_radians().sin_cos();
+            let (mut world, hq) = rich_world();
+            if check(&mut world, hq, (cos, sin)) {
+                return;
+            }
+        }
+        panic!("no direction from the HQ had legal ground for the scenario");
+    }
+
+    fn reach_from(hq: (f32, f32), dir: (f32, f32), far: f32) -> (f32, f32) {
+        (hq.0 + dir.0 * far, hq.1 + dir.1 * far)
+    }
+
+    fn unfinished_at(world: &mut World, site: (f32, f32)) {
+        world.spawn(0, "barracks", site.0, site.1);
+        world.units.last_mut().unwrap().construction_remaining = 100;
+    }
+
+    #[test]
+    fn a_site_one_hop_from_an_unfinished_building_near_the_base_is_in_reach() {
+        along_some_direction(|world, hq, dir| {
+            let far = reach_from(hq, dir, 900.0);
+            let order = barracks_order(far);
+            // Without the unfinished stepping stone the site is out of reach.
+            unfinished_at(world, reach_from(hq, dir, 450.0));
+            if world.validate(&order).is_err() {
+                return false;
+            }
+            let units = std::mem::take(&mut world.units);
+            world.units = units
+                .into_iter()
+                .filter(|unit| unit.construction_remaining == 0)
+                .collect();
+            let refusal = world.validate(&order).unwrap_err();
+            assert!(refusal.contains("established base"), "{refusal}");
+            true
+        });
+    }
+
+    #[test]
+    fn a_build_order_still_inside_the_delay_counts_as_a_look_ahead_site() {
+        along_some_direction(|world, hq, dir| {
+            // A Shift-laid base: the first site is ordered but not yet placed.
+            let mut first = barracks_order(reach_from(hq, dir, 450.0));
+            first.id = 7;
+            let mut second = barracks_order(reach_from(hq, dir, 900.0));
+            second.id = 0;
+            second.execute_tick = first.execute_tick + 1;
+            if world.validate(&first).is_err() {
+                return false;
+            }
+            let refusal = world.validate(&second).unwrap_err();
+            assert!(refusal.contains("established base"), "{refusal}");
+            world.commands.push(first.clone());
+            if world.validate(&second).is_err() {
+                return false;
+            }
+            // An order landing *after* this one does not count: it may never exist.
+            world.commands[0].execute_tick = second.execute_tick + 1;
+            let refusal = world.validate(&second).unwrap_err();
+            assert!(refusal.contains("established base"), "{refusal}");
+            true
+        });
+    }
+
+    #[test]
+    fn the_look_ahead_is_one_hop_and_not_transitive() {
+        along_some_direction(|world, hq, dir| {
+            // An unfinished building 700 from the HQ is itself out of reach of
+            // any finished one, so a site 400 beyond it is refused...
+            unfinished_at(world, reach_from(hq, dir, 700.0));
+            let order = barracks_order(reach_from(hq, dir, 1100.0));
+            let Err(refusal) = world.validate(&order) else {
+                panic!("accepted a site two hops from the base");
+            };
+            if !refusal.contains("established base") {
+                return false;
+            }
+            // ...and the geometry is otherwise legal: finish that building and
+            // the same site is accepted.
+            world.units.last_mut().unwrap().construction_remaining = 0;
+            world.validate(&order).is_ok()
+        });
+    }
+
+    #[test]
+    fn your_own_units_step_aside_but_enemy_units_block_the_site() {
+        along_some_direction(|world, hq, dir| {
+            let site = reach_from(hq, dir, 300.0);
+            let order = barracks_order(site);
+            if world.validate(&order).is_err() {
+                return false;
+            }
+            // The issuing worker and a fighter of its own stand on the site.
+            let fighter = crate::basic_fighter(world.faction(0));
+            world.spawn(0, fighter, site.0, site.1);
+            let own_fighter = world.units.last().unwrap().id;
+            let issuer = world.units.iter_mut().find(|unit| unit.id == 2).unwrap();
+            issuer.x = site.0 + 10.0;
+            issuer.y = site.1;
+            assert_eq!(world.validate(&order), Ok(()));
+            world.execute(&order).unwrap();
+            let map = crate::maps::default_map();
+            let navigation = Navigation::new(map, &world.units);
+            for id in [2, own_fighter] {
+                let unit = world.units.iter().find(|unit| unit.id == id).unwrap();
+                assert!(
+                    distance(site.0, site.1, unit.x, unit.y) >= 44.0,
+                    "unit {id} is still inside the footprint"
+                );
+                assert!(navigation.free(unit.x, unit.y), "unit {id} stands on bad ground");
+            }
+
+            // An enemy unit on a fresh site refuses it by name.
+            let (mut world, hq) = rich_world();
+            let site = reach_from(hq, dir, 300.0);
+            let enemy_fighter = crate::basic_fighter(world.faction(1));
+            world.spawn(1, enemy_fighter, site.0 + 20.0, site.1);
+            assert_eq!(
+                world.validate(&barracks_order(site)),
+                Err("Enemy units block the building site".into())
+            );
+            true
+        });
     }
 
     #[test]
@@ -8219,5 +8744,386 @@ mod tests {
         let crusher = spawned(&mut world, 0, "crusher", ARENA);
         assert_eq!(super::mitigated(18, unit_of(&world, crusher), false, 2, Faction::Organic, 0), 18);
         assert_eq!(super::mitigated(18, unit_of(&world, crusher), false, 3, Faction::Organic, 0), 16);
+    }
+}
+
+#[cfg(test)]
+mod behavior_tests {
+    use super::*;
+    use crate::behavior::MIN_DWELL_TICKS;
+
+    const ARENA: (f32, f32) = (1100.0, 520.0);
+
+    fn at(dx: f32, dy: f32) -> (f32, f32) {
+        (ARENA.0 + dx, ARENA.1 + dy)
+    }
+
+    /// Each player's HQ, far from `ARENA`, at tick 1000. Tick 1000 is an
+    /// evaluation tick, so a behavior activated here may first change state at
+    /// tick 1000 + `MIN_DWELL_TICKS`.
+    fn arena() -> World {
+        let mut world = World::new_on_with_factions(
+            crate::maps::default_map(),
+            &[(0, Faction::Industrial), (1, Faction::Industrial)],
+        );
+        world.units.clear();
+        world.spawn(0, "hq", 200.0, 1300.0);
+        world.spawn(1, "hq", 1400.0, 1400.0);
+        world.tick = 1000;
+        world
+    }
+
+    fn spawned(world: &mut World, owner: u8, kind: &str, at: (f32, f32)) -> u32 {
+        world.spawn(owner, kind, at.0, at.1);
+        world.units.last().unwrap().id
+    }
+
+    fn unit_of(world: &World, id: u32) -> &Entity {
+        world.units.iter().find(|unit| unit.id == id).unwrap()
+    }
+
+    fn unit_mut(world: &mut World, id: u32) -> &mut Entity {
+        world.units.iter_mut().find(|unit| unit.id == id).unwrap()
+    }
+
+    fn order(units: Vec<u32>, kind: &str, at: (f32, f32)) -> Command {
+        Command {
+            id: 1,
+            owner: 0,
+            units,
+            order: Order { kind: kind.into(), x: at.0, y: at.1, target: 0 },
+            queued: false,
+            execute_tick: 0,
+            status: "scheduled".into(),
+            reason: String::new(),
+        }
+    }
+
+    /// The state name the public row would show, or "" with no behavior.
+    fn shown(world: &World, id: u32) -> String {
+        behavior::labels(unit_of(world, id).behavior.as_ref())
+            .1
+            .unwrap_or_default()
+    }
+
+    /// Steps until `id` leaves `state`, at most `limit` ticks.
+    fn step_while_in(world: &mut World, id: u32, state: &str, limit: u32) {
+        for _ in 0..limit {
+            if shown(world, id) != state {
+                return;
+            }
+            world.step();
+        }
+        let unit = unit_of(world, id);
+        panic!("still in {state} after {limit} ticks at ({}, {}) order {:?}", unit.x, unit.y, unit.order);
+    }
+
+    #[test]
+    fn harass_advances_retreats_home_below_half_health_holds_and_returns() {
+        let mut world = arena();
+        spawned(&mut world, 0, "outpost", at(-400.0, 0.0));
+        // Beside the nearest completed hub, on the unit's side: its centre is
+        // inside the footprint, where no unit can stand.
+        let home = at(-310.0, 0.0);
+        let soldier = spawned(&mut world, 0, "soldier", ARENA);
+        world.execute(&order(vec![soldier], "harass", at(400.0, 0.0))).unwrap();
+        let unit = unit_of(&world, soldier);
+        let running = unit.behavior.clone().unwrap();
+        assert_eq!((running.home_x, running.home_y), home, "beside the nearest completed hub");
+        assert_eq!(
+            (unit.order.kind.as_str(), unit.order.x, unit.order.y),
+            ("attack_move", ARENA.0 + 400.0, ARENA.1),
+            "the first state's order is given on activation"
+        );
+        assert_eq!(
+            behavior::labels(unit.behavior.as_ref()),
+            (Some("harass".into()), Some("advance".into()))
+        );
+        // Below half health from the first tick, but the dwell holds it in
+        // `advance` until tick 1000 + MIN_DWELL_TICKS.
+        unit_mut(&mut world, soldier).hp = 60;
+        while world.tick < 1000 + MIN_DWELL_TICKS - 1 {
+            world.step();
+            assert_eq!(shown(&world, soldier), "advance", "tick {}", world.tick);
+        }
+        assert!(unit_of(&world, soldier).x > ARENA.0, "it advanced meanwhile");
+        world.step();
+        assert_eq!(world.tick, 1000 + MIN_DWELL_TICKS);
+        assert_eq!(shown(&world, soldier), "retreat");
+        let unit = unit_of(&world, soldier);
+        assert_eq!(
+            (unit.order.kind.as_str(), unit.order.x, unit.order.y),
+            ("move", home.0, home.1)
+        );
+        step_while_in(&mut world, soldier, "retreat", 400);
+        assert_eq!(shown(&world, soldier), "recover");
+        let unit = unit_of(&world, soldier);
+        assert_eq!(unit.order.kind, "hold");
+        assert!(distance(unit.x, unit.y, home.0, home.1) <= 250.0);
+        // A soldier cannot heal, so it stays home as a defender.
+        for _ in 0..100 {
+            world.step();
+        }
+        assert_eq!(shown(&world, soldier), "recover");
+        // Healed to 80% or more: back out to the goal.
+        unit_mut(&mut world, soldier).hp = 140;
+        step_while_in(
+            &mut world,
+            soldier,
+            "recover",
+            behavior::BEHAVIOR_INTERVAL_TICKS as u32 + 1,
+        );
+        assert_eq!(shown(&world, soldier), "advance");
+        assert_eq!(unit_of(&world, soldier).order.kind, "attack_move");
+    }
+
+    #[test]
+    fn harass_retreats_when_outnumbered_but_not_from_an_even_fight() {
+        for (enemies, expected) in [(1, "advance"), (2, "retreat")] {
+            let mut world = arena();
+            spawned(&mut world, 0, "outpost", at(-400.0, 0.0));
+            let soldier = spawned(&mut world, 0, "soldier", ARENA);
+            // Inside the 350 count radius, outside the 180 acquisition reach,
+            // and standing still: nobody fights, only the count differs.
+            for index in 0..enemies {
+                spawned(&mut world, 1, "soldier", at(index as f32 * 40.0, 300.0));
+            }
+            world.execute(&order(vec![soldier], "harass", at(300.0, 0.0))).unwrap();
+            for _ in 0..MIN_DWELL_TICKS {
+                world.step();
+            }
+            assert_eq!(unit_of(&world, soldier).hp, 140, "untouched: health is not the cause");
+            assert_eq!(shown(&world, soldier), expected, "{enemies} enemies");
+        }
+    }
+
+    #[test]
+    fn guard_leash_walks_back_without_fighting_and_resumes_watch() {
+        let mut world = arena();
+        let soldier = spawned(&mut world, 0, "soldier", ARENA);
+        world.execute(&order(vec![soldier], "guard", ARENA)).unwrap();
+        assert_eq!(shown(&world, soldier), "return");
+        assert_eq!(unit_of(&world, soldier).order.kind, "move");
+        step_while_in(&mut world, soldier, "return", 40);
+        assert_eq!(shown(&world, soldier), "watch");
+        // Attack-moving onto the goal it already stands on completes at once;
+        // stopped there with nothing to fight is still watching, and the
+        // order is not rewritten every pass.
+        let unit = unit_of(&world, soldier);
+        assert!(matches!(unit.order.kind.as_str(), "attack_move" | "stop"), "{:?}", unit.order);
+        for _ in 0..20 {
+            world.step();
+        }
+        assert_eq!(unit_of(&world, soldier).order.kind, "stop");
+        // Dragged 800 from the goal (as a long chase would): within the next
+        // dwell it is still more than 600 away, so the leash pulls it back.
+        unit_mut(&mut world, soldier).x = ARENA.0 - 800.0;
+        step_while_in(&mut world, soldier, "watch", 40);
+        assert_eq!(shown(&world, soldier), "return");
+        let unit = unit_of(&world, soldier);
+        assert_eq!((unit.order.kind.as_str(), unit.order.x), ("move", ARENA.0));
+        step_while_in(&mut world, soldier, "return", 300);
+        assert_eq!(shown(&world, soldier), "watch");
+        let unit = unit_of(&world, soldier);
+        assert!(distance(unit.x, unit.y, ARENA.0, ARENA.1) <= 150.0);
+    }
+
+    #[test]
+    fn any_explicit_order_clears_the_behavior() {
+        for kind in ["stop", "hold", "move", "attack_move", "attack", "queued move", "raid"] {
+            let mut world = arena();
+            let soldier = spawned(&mut world, 0, "soldier", ARENA);
+            let enemy = spawned(&mut world, 1, "soldier", at(500.0, 0.0));
+            world.execute(&order(vec![soldier], "harass", at(300.0, 0.0))).unwrap();
+            let mut explicit =
+                order(vec![soldier], kind.trim_start_matches("queued "), at(100.0, 50.0));
+            explicit.queued = kind.starts_with("queued");
+            explicit.order.target = enemy;
+            world.execute(&explicit).unwrap();
+            let unit = unit_of(&world, soldier);
+            if kind == "raid" {
+                // A new behavior replaces the old one.
+                assert_eq!(unit.behavior.as_ref().unwrap().preset, "raid");
+                continue;
+            }
+            assert_eq!(unit.behavior, None, "{kind}");
+            assert_eq!(behavior::labels(unit.behavior.as_ref()), (None, None));
+            // The new order is active now, even the queued one: the behavior's
+            // order was never the player's task to wait behind.
+            assert_eq!(unit.order.kind, explicit.order.kind, "{kind}");
+            assert!(unit.queue.is_empty(), "{kind}");
+            for _ in 0..10 {
+                world.step();
+            }
+            assert_eq!(unit_of(&world, soldier).behavior, None, "{kind} stays cleared");
+        }
+    }
+
+    #[test]
+    fn a_queued_behavior_order_is_rejected() {
+        let mut world = arena();
+        let soldier = spawned(&mut world, 0, "soldier", ARENA);
+        let mut queued = order(vec![soldier], "guard", ARENA);
+        queued.queued = true;
+        let error = world.validate(&queued).unwrap_err();
+        assert!(error.contains("cannot be queued"), "{error}");
+        assert!(world.execute(&queued).is_err());
+        assert_eq!(unit_of(&world, soldier).behavior, None);
+    }
+
+    #[test]
+    fn labour_and_buildings_get_no_behavior() {
+        let mut world = arena();
+        let soldier = spawned(&mut world, 0, "soldier", ARENA);
+        let worker = spawned(&mut world, 0, "worker", at(0.0, 40.0));
+        let outpost = spawned(&mut world, 0, "outpost", at(-400.0, 0.0));
+        for (units, label) in [
+            (vec![worker], "worker"),
+            (vec![outpost], "outpost"),
+            (vec![soldier, worker], "mixed selection"),
+        ] {
+            let error = world.execute(&order(units, "harass", at(200.0, 0.0))).unwrap_err();
+            assert!(error.contains("Only army units"), "{label}: {error}");
+        }
+        assert!(world.units.iter().all(|unit| unit.behavior.is_none()));
+        // Off the map is refused like any other destination.
+        assert!(world.validate(&order(vec![soldier], "raid", (5.0, 5.0))).is_err());
+    }
+
+    #[test]
+    fn harassers_prefer_enemy_labour_within_reach() {
+        for (kind, prefers_labour) in [("harass", true), ("attack_move", false)] {
+            let mut world = arena();
+            let soldier = spawned(&mut world, 0, "soldier", ARENA);
+            let fighter = spawned(&mut world, 1, "soldier", at(60.0, 0.0));
+            let labour = spawned(&mut world, 1, "worker", at(150.0, 0.0));
+            for id in [fighter, labour] {
+                unit_mut(&mut world, id).hp = 10_000;
+                unit_mut(&mut world, id).max_hp = 10_000;
+            }
+            world.execute(&order(vec![soldier], kind, at(300.0, 0.0))).unwrap();
+            world.step();
+            let expected = if prefers_labour { labour } else { fighter };
+            assert_eq!(unit_of(&world, soldier).order.target, expected, "{kind}");
+        }
+    }
+
+    #[test]
+    fn behaviors_survive_the_persisted_split_and_are_deterministic() {
+        let run = || {
+            let mut world = arena();
+            spawned(&mut world, 0, "outpost", at(-400.0, 0.0));
+            spawned(&mut world, 1, "outpost", at(450.0, 150.0));
+            let harassers: Vec<u32> = (0..3)
+                .map(|index| spawned(&mut world, 0, "soldier", at(0.0, index as f32 * 30.0)))
+                .collect();
+            let guards: Vec<u32> = (0..2)
+                .map(|index| spawned(&mut world, 1, "soldier", at(350.0, index as f32 * 30.0)))
+                .collect();
+            spawned(&mut world, 1, "worker", at(380.0, 60.0));
+            // Through the ordinary delayed path, as the reducer schedules them.
+            world.commands.push(Command {
+                id: 1,
+                execute_tick: 1020,
+                ..order(harassers, "harass", at(380.0, 0.0))
+            });
+            world.commands.push(Command {
+                id: 2,
+                owner: 1,
+                execute_tick: 1020,
+                ..order(guards, "guard", at(350.0, 0.0))
+            });
+            let mut seen = BTreeSet::new();
+            for _ in 0..600 {
+                world.step();
+                // What the database stores, read back, is the same unit.
+                for unit in &world.units {
+                    let (cold, motion, vitals, state, running) = unit.split();
+                    assert_eq!(&Entity::join(cold, motion, vitals, state, running), unit);
+                    if let (Some(preset), Some(state)) = behavior::labels(unit.behavior.as_ref()) {
+                        seen.insert(format!("{preset} · {state}"));
+                    }
+                }
+            }
+            assert!(world.commands.iter().all(|command| command.status == "executed"));
+            (world, seen)
+        };
+        let (first, seen) = run();
+        let (second, _) = run();
+        assert_eq!(first, second, "identical inputs give identical worlds");
+        assert!(seen.contains("harass · advance"), "{seen:?}");
+        assert!(seen.contains("guard · watch"), "{seen:?}");
+    }
+
+    fn rally_world() -> (World, u32) {
+        let mut world = arena();
+        let barracks = spawned(&mut world, 0, "barracks", (200.0, 1130.0));
+        unit_mut(&mut world, barracks).construction_remaining = 0;
+        (world, barracks)
+    }
+
+    #[test]
+    fn a_behavior_rally_starts_the_behavior_on_trained_army_not_on_labour() {
+        let (mut world, barracks) = rally_world();
+        let goal = at(0.0, 0.0);
+        world.execute(&order(vec![barracks], "rally_guard", goal)).unwrap();
+        assert_eq!(unit_of(&world, barracks).order.kind, "rally_guard");
+        world.balances.insert(0, Balance::new(1000, 1000));
+        world.execute(&order(vec![barracks], "train_soldier", (0.0, 0.0))).unwrap();
+        let before = world.units.len();
+        for _ in 0..600 {
+            world.step();
+            if world.units.len() > before {
+                break;
+            }
+        }
+        let soldier = world.units.last().unwrap();
+        assert_eq!(soldier.kind, "soldier");
+        let running = soldier.behavior.clone().expect("born running guard");
+        assert_eq!(running.preset, "guard");
+        assert_eq!((running.goal_x, running.goal_y), goal);
+        // Anchored beside the nearest completed hub, as an issued order would.
+        let hub = world.units.iter().find(|unit| unit.owner == 0 && unit.kind == "hq").unwrap();
+        assert!(distance(running.home_x, running.home_y, hub.x, hub.y) < 200.0);
+        assert!(unit_of(&world, barracks).behavior.is_none());
+
+        // Labour from the same kind of rally gets a plain move, no behavior.
+        let mut world = arena();
+        let hq = world.units.iter().find(|unit| unit.owner == 0 && unit.kind == "hq").unwrap().id;
+        world.execute(&order(vec![hq], "rally_raid", goal)).unwrap();
+        world.balances.insert(0, Balance::new(1000, 1000));
+        world.execute(&order(vec![hq], "train_worker", (0.0, 0.0))).unwrap();
+        while !world.units.iter().any(|unit| unit.kind == "worker") {
+            world.step();
+            assert!(world.tick < 3000, "the worker was never trained");
+        }
+        let worker = world.units.iter().find(|unit| unit.kind == "worker").unwrap();
+        assert!(worker.behavior.is_none());
+        assert_eq!(worker.order.kind, "move");
+    }
+
+    #[test]
+    fn behavior_rally_validation_mirrors_rally_move() {
+        let (mut world, barracks) = rally_world();
+        let hq = world.units.iter().find(|unit| unit.owner == 0 && unit.kind == "hq").unwrap().id;
+        let soldier = spawned(&mut world, 0, "soldier", at(50.0, 50.0));
+        for kind in ["rally_move", "rally_harass", "rally_guard", "rally_raid"] {
+            let ok = order(vec![barracks], kind, at(100.0, 0.0));
+            assert_eq!(world.validate(&ok), Ok(()), "{kind}");
+            let mut queued = ok.clone();
+            queued.queued = true;
+            assert!(world.validate(&queued).is_err(), "{kind} queued");
+            let two = order(vec![barracks, hq], kind, at(100.0, 0.0));
+            assert!(world.validate(&two).is_err(), "{kind} two producers");
+            let not_producer = order(vec![soldier], kind, at(100.0, 0.0));
+            assert!(world.validate(&not_producer).is_err(), "{kind} non-producer");
+            let off_map = order(vec![barracks], kind, (-50.0, -50.0));
+            assert!(world.validate(&off_map).is_err(), "{kind} off map");
+        }
+        assert!(world.validate(&order(vec![barracks], "rally_bogus", at(0.0, 0.0))).is_err());
+        // clear_rally clears a behavior rally.
+        world.execute(&order(vec![barracks], "rally_guard", at(0.0, 0.0))).unwrap();
+        world.execute(&order(vec![barracks], "clear_rally", (0.0, 0.0))).unwrap();
+        assert_eq!(unit_of(&world, barracks).order.kind, "stop");
     }
 }

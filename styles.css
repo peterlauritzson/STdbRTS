@@ -149,10 +149,48 @@ kbd.tab-key { position: static; margin-left: 6px; }
 .help dt { color: var(--accent); }
 .help dd { margin: 0; color: #d3ddc5; }
 .camera-tools button, .input-modes { background: #14231eec; }
-.battle-players { position: absolute; left: 16px; top: 16px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; max-width: 45%; }
+.hud-left { position: absolute; left: 16px; top: 16px; display: flex; flex-direction: column; gap: 10px; max-width: 45%; pointer-events: none; }
+.battle-players { display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+/* Running operations: a compact list under the player list. */
+.operations { background: #14231ed9; border-left: 2px solid #8fd8ff; padding: 6px 8px; display: grid; gap: 4px; pointer-events: auto; font-size: 11px; }
+.operations .eyebrow { margin: 0 0 2px; }
+/* Army roster: one line per activity cluster, click to select and jump. */
+.army-roster { background: #14231ed9; border-left: 2px solid #ffa94d; padding: 4px 6px; display: grid; gap: 2px; pointer-events: auto; font-size: 10px; font-family: ui-monospace, Consolas, monospace; max-width: 300px; }
+.army-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0; color: #b5c4a8; letter-spacing: .08em; cursor: pointer; background: none; border: 0; padding: 0; min-height: 0; font: inherit; text-align: left; }
+.army-row { display: grid; grid-template-columns: auto auto 1fr; gap: 2px 6px; align-items: baseline; text-align: left; min-height: 0; padding: 2px 4px; border: 0; border-left: 2px solid transparent; background: none; color: #e4eddf; font: inherit; cursor: pointer; }
+.army-row:hover { background: #ffffff14; }
+.army-row .army-count { color: #ffa94d; }
+.army-row .army-where { color: #7f9174; grid-column: 3; justify-self: end; }
+.army-row .army-comp { grid-column: 1 / -1; color: #b5c4a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.army-row.forgotten { border-left-color: #ff5f6d; background: #ff5f6d1f; }
+.army-row.forgotten .army-act { color: #ff8b94; }
+.army-roster[hidden] { display: none; }
+#idle-worker { position: relative; }
+.idle-badge { position: absolute; top: -4px; right: -4px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: #ff5f6d; color: #14231e; font: 700 10px/15px ui-monospace, Consolas, monospace; text-align: center; pointer-events: none; }
+.idle-badge[hidden] { display: none; }
+.army-more { color: #7f9174; padding: 0 4px; }
+.operation-row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; color: #e4eddf; }
+.operation-step { color: #8fd8ff; }
+.operation-note { color: #b5c4a8; flex: 1; min-width: 80px; }
+.operation-cancel { min-height: 20px; padding: 1px 8px; font-size: 10px; }
+.operation-button { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 6px; justify-content: start; padding: 6px 8px; font-size: 12px; text-align: left; }
+.operation-button small { display: block; font: 9px "IBM Plex Mono", monospace; color: #b5c4a8; margin-top: 3px; }
 .battle-player { font-size: 11px; color: #e4eddf; background: #14231ed9; display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-left: 2px solid; overflow-wrap: anywhere; }
 .battle-player.offline { opacity: 0.55; }
 .battle-player-name { min-width: 0; }
+.battle-player-name.you { font-weight: 700; color: #ffffff; }
+.battle-player .swatch { border-radius: 50%; }
+/* Money already promised to an order inside the command delay: "5275 (-150)". */
+.readout .pending { margin-left: 4px; font-size: 11px; color: #ffb4a8; }
+.readout.refused { animation: refused 1.5s ease-out; }
+@keyframes refused { 0%, 40% { background: #7a2a32; border-color: #ff6b78; } 100% { } }
+/* The attack banner: top centre of the battlefield, red, flashes when it (re)appears. */
+.alert-banner { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 6; padding: 9px 18px; border: 1px solid #ff6b6b; background: #3a1519f0; color: #ffd6d6; font: 600 13px "IBM Plex Mono", monospace; pointer-events: none; white-space: nowrap; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; }
+.alert-banner[data-kind="base"] { background: #5a1018f2; border-width: 2px; color: #fff; }
+.alert-banner.flash { animation: alert-flash 0.9s ease-out; }
+@keyframes alert-flash { 0%, 30%, 60% { background: #c42b36; } 15%, 45% { background: #3a1519f0; } }
+.unit-tile.active { outline: 2px solid #f3d570; outline-offset: -2px; }
+.unit-tile.dim { opacity: 0.5; }
 .battle-player .faction-tag { font-size: 9px; padding: 1px 5px; margin-left: auto; }
 /* The mode switch is a touch control; a mouse has two buttons and a wheel. */
 body.no-touch .input-modes { display: none !important; }
@@ -241,7 +279,7 @@ body.no-touch .targeting-state { bottom: 14px; }
 .score-table-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 18px; max-height: 300px; overflow: auto; padding-top: 6px; }
 .score-table-block h4 { font-size: 11px; font-weight: 500; margin: 0 0 5px; color: var(--muted); }
 #sound[aria-pressed="false"] { opacity: 0.6; }
-.command-deck { display: grid; grid-template-columns: 206px minmax(200px, 1fr) minmax(360px, 1.25fr) minmax(190px, 0.7fr); gap: 0; padding: 12px 16px; background: #17231f; border-top: 1px solid #697b59; min-height: 0; overflow: hidden; }
+.command-deck { display: grid; grid-template-columns: 206px minmax(200px, 1fr) minmax(360px, 1.25fr) minmax(190px, 0.7fr); gap: 0; padding: 12px 16px; background: #17231f; border-top: 1px solid #697b59; min-height: 0; overflow: visible; }
 .command-deck section { padding: 0 16px; border-left: 1px solid var(--line); min-width: 0; min-height: 0; }
 .minimap-section { padding-right: 14px; }
 #minimap { display: block; width: 188px; max-width: 100%; aspect-ratio: 1; cursor: crosshair; border: 1px solid #6b7b61; touch-action: none; }
@@ -250,7 +288,24 @@ body.no-touch .targeting-state { bottom: 14px; }
 .selection-section h2 { font-size: 15px; margin-bottom: 3px; }
 #selection-details { font-size: 10px; min-height: 13px; overflow-wrap: anywhere; }
 .tool-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: auto; padding-top: 6px; }
-.tool-row .icon-button { width: 34px; height: 34px; min-height: 34px; padding: 7px; }
+.tool-row { position: relative; align-items: flex-start; }
+.tool-row .icon-button { width: 50px; height: 44px; min-height: 44px; padding: 4px 2px 3px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.tool-row .icon-button svg { width: 16px; height: 16px; }
+.tool-row .icon-button[hidden], .tool-global[hidden] { display: none; }
+.cmd-label { font: 9px/11px "IBM Plex Mono", ui-monospace, Consolas, monospace; letter-spacing: 0; color: var(--muted, #9fb0a3); pointer-events: none; }
+.tool-row .icon-button[aria-pressed="true"] .cmd-label { color: inherit; }
+/* Select-army and idle-worker are about the whole army, not the selection: a group of their own at the row's end. */
+.tool-global { display: flex; gap: 5px; margin-left: auto; padding-left: 8px; border-left: 1px solid #3a4b42; }
+.tactics-wrap { position: relative; display: contents; }
+.tactics-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 30; width: 250px; max-width: calc(100vw - 24px); padding: 8px; display: flex; flex-direction: column; gap: 4px; background: #14231e; border: 1px solid #56684f; border-radius: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, .55); }
+.tactics-menu[hidden] { display: none; }
+.tactics-head { margin: 0 0 2px; font: 10px/14px "IBM Plex Mono", ui-monospace, Consolas, monospace; color: var(--muted, #9fb0a3); text-transform: uppercase; }
+.tactic-row { position: relative; display: flex; justify-content: flex-start; align-items: center; gap: 8px; width: 100%; height: auto; min-height: 40px; padding: 5px 34px 5px 8px; text-align: left; }
+.tactic-row .swatch { flex: none; width: 10px; height: 26px; border-radius: 2px; }
+.tactic-text { display: flex; flex-direction: column; min-width: 0; }
+.tactic-name { font-weight: 700; font-size: 12px; }
+.tactic-desc { font-size: 10px; line-height: 13px; opacity: .8; white-space: normal; }
+.tactic-row kbd.key { top: 50%; right: 8px; bottom: auto; transform: translateY(-50%); }
 /* SC2's wireframe panel: a tile per selected unit, health along its foot. */
 .selection-grid { display: flex; flex-wrap: wrap; align-content: start; gap: 3px; margin-top: 6px; max-height: 70px; overflow: auto; }
 .unit-tile { position: relative; width: 30px; height: 30px; min-height: 30px; padding: 0; border: 1px solid; border-radius: 2px; background: #1f2d27; overflow: hidden; }
@@ -294,7 +349,13 @@ button[aria-pressed="true"] { border-color: var(--accent); background: #4a603d; 
    which one, instead of fading out with everything else. */
 .production-buttons button:disabled[data-shortfall] { opacity: 0.58; }
 .production-queue { font-size: 10px; color: #cde18d; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px; max-height: 50px; overflow: auto; }
-.production-item { border-bottom: 2px solid #a4c578; padding-bottom: 4px; }
+.production-item { display: grid; gap: 3px; min-width: 74px; }
+.production-item.scheduled { opacity: 0.55; }
+/* Each queued item carries its own bar: --progress is set from script. */
+.queue-bar { display: block; height: 4px; background: #1d2b24; border: 1px solid #3b4a3f; position: relative; }
+.queue-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--progress, 0%); background: #a4c578; }
+.queue-scope { color: #8fa089; align-self: center; }
+.production-queue:empty::before { content: "Queue empty"; color: #8fa089; }
 .orders-section .section-heading { margin-bottom: 4px; }
 .orders-section .eyebrow { margin: 0; }
 .command-list { height: 150px; max-height: 80px; overflow: auto; font-size: 10px; color: #b8caaa; }
@@ -344,7 +405,8 @@ dialog p { margin-top: 14px; color: var(--muted); font-size: 14px; }
   .selection-section h2 { font-size: 14px; margin-bottom: 2px; }
   .selection-grid { max-height: 44px; }
   .tool-row { gap: 4px; }
-  .tool-row .icon-button { width: 30px; height: 30px; min-height: 30px; padding: 6px; }
+  .tool-row .icon-button { width: 46px; height: 42px; min-height: 42px; padding: 3px 1px; }
+  .tool-global { padding-left: 4px; gap: 4px; }
   .industry-tabs { margin-bottom: 5px; }
   .industry-tabs button { min-height: 26px; padding-block: 4px; }
   #producer-select { min-height: 26px; margin-bottom: 5px; }
@@ -358,6 +420,7 @@ dialog p { margin-top: 14px; color: var(--muted); font-size: 14px; }
   .telemetry { padding-top: 5px; }
 }
 @media (max-width: 760px) {
+  .army-roster { display: none; }
   .masthead { height: 58px; padding: 0 14px; gap: 12px; }
   .brand { font-size: 12px; gap: 6px; }.brand svg { width: 20px; height: 20px; }
   .connection-status { font-size: 10px; gap: 5px; }#connection-settings { font-size: 10px; }
@@ -384,7 +447,7 @@ dialog p { margin-top: 14px; color: var(--muted); font-size: 14px; }
   .orders-section { grid-column: 1 / -1; border-left: 0 !important; padding: 0 !important; }.command-list { height: 75px; }
   .production-buttons button { font-size: 13px; }.production-buttons small { font-size: 10px; }
   .camera-tools { top: auto; bottom: 66px; right: 10px; flex-direction: column; }.camera-tools .icon-button { width: 34px; height: 34px; min-height: 34px; }
-  .battle-players { top: 10px; left: 10px; }.battle-player { font-size: 10px; }.result { top: 80px; padding: 12px 22px; }#result-title { font-size: 24px; }
+  .hud-left { top: 10px; left: 10px; }.battle-player { font-size: 10px; }.result { top: 80px; padding: 12px 22px; }#result-title { font-size: 24px; }
   /* On a phone the page itself scrolls, so a score screen pinned under the
      match bar would leave a strip of match showing above it. It takes the
      whole viewport instead — and carries its own way out, so nothing is lost. */

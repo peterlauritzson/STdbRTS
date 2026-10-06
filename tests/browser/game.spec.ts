@@ -290,7 +290,7 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     // space instead. The regex matters too: "Rally " also matches "Rally unset",
     // so the old assertion passed even when no rally had been set.
     await worldClick(host, 1000, 1000);
-    await expect(host.locator("#rally-status")).toHaveText(/Rally \d+, \d+/);
+    await expect(host.locator("#rally-status")).toHaveText(/Rally set \/ .*\d+ away/);
     await expect(host.getByRole("button", { name: "Clear rally", exact: true })).toBeEnabled();
     // The opening stipend pays material every few ticks, so an absolute balance
     // is no longer a stable readout. Each purchase is asserted as a dip of at

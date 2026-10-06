@@ -427,6 +427,24 @@ export function buildSite(kind: string, x: number, y: number, units: Entity[], n
   return "node" in site ? { x: site.node.x, y: site.node.y } : { x, y };
 }
 
+/** `rules::BUILD_RADIUS`: how far a site may be from the base. */
+export const BUILD_RADIUS = 500;
+
+/**
+ * The one-hop look-ahead: a site is in reach of `owned` (the owner's buildings)
+ * within 500 of a finished one, or within 500 of an unfinished one that is
+ * itself within 500 of a finished one. Not transitive. Mirrors `World::within_build_reach`.
+ */
+export function buildReachCircles(owned: Entity[]): { x: number; y: number; finished: boolean }[] {
+  const finished = owned.filter(unit => unit.constructionRemaining === 0n);
+  const stepping = owned.filter(unit => unit.constructionRemaining !== 0n && finished.some(base => Math.hypot(base.x - unit.x, base.y - unit.y) <= BUILD_RADIUS));
+  return [...finished.map(unit => ({ x: unit.x, y: unit.y, finished: true })), ...stepping.map(unit => ({ x: unit.x, y: unit.y, finished: false }))];
+}
+
+export function inBuildReach(x: number, y: number, owned: Entity[]): boolean {
+  return buildReachCircles(owned).some(circle => Math.hypot(circle.x - x, circle.y - y) <= BUILD_RADIUS);
+}
+
 export function placementError(kind: string, aimX: number, aimY: number, owner: number, units: Entity[], nodes: Node[]): string | undefined {
   let x = aimX, y = aimY;
   if (kind === "refinery") {
@@ -438,10 +456,12 @@ export function placementError(kind: string, aimX: number, aimY: number, owner: 
   // confined building to the top-left quarter of a larger map.
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 60 || x > worldSize - 60 || y < 60 || y > worldSize - 60) return "Map boundary";
   if (terrain.some(([left, top, width, height]) => x > left - 50 && x < left + width + 50 && y > top - 50 && y < top + height + 50)) return "Terrain obstructed";
-  // A refinery stands on a deposit by definition, so only other buildings and units obstruct it.
-  if (units.some(unit => Math.hypot(unit.x - x, unit.y - y) < (isBuilding(unit.kind) ? 110 : 55)) || (kind !== "refinery" && nodes.some(node => Math.hypot(node.x - x, node.y - y) < 75))) return "Site occupied";
+  // A refinery stands on a deposit by definition, so the deposit clearance only applies to other kinds.
+  if (units.some(unit => isBuilding(unit.kind) && Math.hypot(unit.x - x, unit.y - y) < 110) || (kind !== "refinery" && nodes.some(node => Math.hypot(node.x - x, node.y - y) < 75))) return "Site occupied";
+  // Only an enemy's units hold a site; your own step aside when the building is placed.
+  if (units.some(unit => !isBuilding(unit.kind) && unit.owner !== owner && Math.hypot(unit.x - x, unit.y - y) < 55)) return "Enemy units block the site";
   const owned = units.filter(unit => unit.owner === owner && isBuilding(unit.kind));
-  if (!owned.some(unit => unit.constructionRemaining === 0n && Math.hypot(unit.x - x, unit.y - y) <= 500)) return "Outside build radius";
+  if (!inBuildReach(x, y, owned)) return "Outside build radius";
   if (owned.length >= MAX_BUILDINGS) return "Building limit reached";
   if ((kind === "factory" || kind === "lab") && !owned.some(unit => unit.kind === "barracks" && unit.constructionRemaining === 0n)) return "Barracks required";
   return undefined;

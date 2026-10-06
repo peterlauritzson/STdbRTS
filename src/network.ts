@@ -74,6 +74,8 @@ export class Session {
   snapshot: Snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [] };
   onChange: () => void = () => {};
   onNotice: (message: string) => void = () => {};
+  /** Called with the server's reason when one of your own commands is refused. */
+  onReject: (reason: string) => void = () => {};
   private epoch = 0;
   private matchId = 0n;
   private matchSubscription: SubscriptionHandle | undefined;
@@ -166,7 +168,7 @@ export class Session {
         refresh();
       });
       connection.db.command.onUpdate((_context, previous, command) => {
-        if (command.issuer.isEqual(connection.identity!) && command.status !== previous.status && command.status === "rejected") this.onNotice(command.reason);
+        if (command.issuer.isEqual(connection.identity!) && command.status !== previous.status && command.status === "rejected") { this.onNotice(command.reason); this.onReject(command.reason); }
         refresh();
       });
       connection.db.command.onDelete(refresh);

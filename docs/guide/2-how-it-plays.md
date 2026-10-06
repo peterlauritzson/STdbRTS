@@ -6,7 +6,7 @@ This page explains the ideas behind the rules so the numbers in the [encyclopedi
 
 ## The command delay
 
-Every order you give, including training, building, stop and hold, runs about **one second** after you give it. The match room fixes the exact delay when it is created, anywhere from half a second to one and a half seconds. The lobby shows it.
+Every order you give, including training, building, stop and hold, runs about **one second** after you give it. The match room fixes the exact delay when it is created, whoever creates the room picks 0.5, 1.0 (the default) or 1.5 seconds in the lobby, including for Practice vs AI.
 
 Why would a game do this on purpose? Because the server decides everything, and a delay that is the same for everybody is the fairest way to deal with the internet. Each order is stamped with the moment you saw when you gave it, so it lands exactly one delay after that moment, however your connection wobbled in between. Only if your ping is above about 0.3 seconds does the delay stretch a little.
 
@@ -15,7 +15,7 @@ What it means for you:
 - You cannot win by reflex clicking. Two armies that meet are not saved by one frantic retreat order; the enemy's order is delayed as well.
 - You plan ahead. Give the order for where your army will need to be, not where it is.
 - Units that act on their own matter far more. That is the reason every unit has a passive ability that triggers automatically (see below).
-- Money is charged when the order runs, not when you click. If you queue three things with the money for two, the third fails when its turn comes.
+- Money is charged when the order runs, not when you click. If you queue three things with the money for two, the third fails when its turn comes. The screen helps with this: money already promised to orders still waiting out the delay shows next to the balance, as **278 (−160)**, and the train, build and research buttons are worked out from what is left, so rapid clicks cannot overspend. A refused order flashes the readout it was short of and names the reason in the notice line.
 
 ## Three economies, three kinds of exposure
 
@@ -103,9 +103,40 @@ Turrets and your faction's own defense (bunker, bastion or spine) shoot on their
 The map is huge and travel takes time. A basic unit needs well over a minute to cross it, so you cannot defend everywhere. A few rules of thumb:
 
 - Build an **outpost** (100 material) next to new patches. It works as a drop-off point, a second hub that trains labour, and, for Organic, a creep source and a stock tank.
-- You may only build within 500 units of a finished building of your own, so an expansion grows in steps from where you already stand.
+- You may only build within 500 units of a finished building of your own, or within 500 of an unfinished building of yours that is itself within 500 of a finished one (one hop of look-ahead, not a chain: your reach is at most about 1000 from finished structures, so you can queue the next building before the last one completes). Your own units standing on the site step aside when it is placed; only enemy units block it. You do not have to place every step by hand: **Expand toward** (Build tab, or **B** then **V**) plans the chain for you. It picks the base site nearest your click, walks from your nearest finished building toward it in hops of at most 488 units (each hop an outpost, 100 material, 6 seconds), puts the last outpost 150 to 250 units from the deposits on the side facing your base, and then builds two refineries on the site's catalyst. The chain is drawn as a dashed line with numbered ghost outposts on the map and minimap, and it is carried out one step at a time: the next outpost is ordered when the previous one is finished and the material is there.
+- **Auto-labour** keeps your hubs busy: any finished hub with an empty queue trains one labour unit, until you have one per live material patch on your hubs' mineral lines (within 320 of a finished hub) plus two, or exactly one per patch for Network, since a drifter never leaves its patch and a patch takes one miner at a time. It is a convenience, not a strategy; it will happily build workers you do not need if you stop spending.
 - Catalyst deposits are the prize. A refinery on a deposit produces 8 catalyst a second with no workers; a deposit holds 2000 or 2500 before it is empty. Material patches hold 1200 or 1500.
 - Patches empty. By the middle of the game your first base will thin out, and the new one has to be ready.
+
+## Behaviors: orders that think
+
+Because every order is delayed, a unit that must wait for you to tell it to run away will usually die first. A **behavior** is one order that carries its own rules, which the server re-checks four times a second without further delay. Pick army units, press **J** (Harass), **K** (Guard) or **N** (Raid), then click the goal on the map or minimap. The **Tactics** button in the selection panel opens the same three as a small menu, each with a one-line summary; the encyclopedia has the exact numbers.
+
+- **Harass** goes after enemy labour near the goal and pulls back when hurt or outnumbered. Use it to bleed an economy with a small, fast group.
+- **Guard** holds a spot and fights around it, walking back if chased far away. Use it for the approach to an outpost.
+- **Raid** is a plain push: units retreat below 35% health and come back at 90%.
+- On screen, selected units draw a faint line to their goal and a marker labelled with the preset; each unit wears a coloured dot for its state, and a unit that is retreating or recovering is ringed and labelled, so you can see why it left the fight. Any ordinary order you give a unit ends its behavior. Behaviors are sent to the army part of a selection only and cannot be Shift-queued.
+
+Setting up a strategy by hand is a chore, so a production building can carry a behavior in its rally: select the barracks, press **K**, click the north ramp, and every soldier it trains walks out already guarding that ramp, with no re-selecting. Workers from the same building just walk to the point. The rally line and marker read "GUARD RALLY" and the production panel says "Rally: Guard at ...". Clear it with the clear-rally button.
+
+## Macro without the clicking
+
+Three small rules remove the busywork of running several bases, none of them changing what the server allows.
+
+- **Snap placement.** Building sites used to refuse whenever a unit stood within 55 units or a building within 110 of the aim (now only an enemy unit within 55 blocks a site; your own units are moved out of the way). The click now slides to the closest valid spot within 160 units (searched in rings), and the ghost drawn at the cursor already shows where it will land, with a faint line back to your aim. A site refused for another reason (outside build radius, building limit, missing Barracks, no catalyst deposit for a refinery) is still refused, with its reason.
+- **Base labels.** Each finished hub shows miners/patches. A material patch belongs to the nearest of your finished hubs within 600 units. A labour unit counts as mining a base while it holds a gather order on one of its patches, which the server keeps through the walk home, so the number does not flicker with each delivery. Idle labour is counted at the hub nearest it, so a base that is draining or a squad that finished a build shows up without hunting for it.
+- **Transfer.** Splitting workers to a new base is one right click on that hub. Each selected labour unit is sent to a different patch of the target base with no miner and no worker already headed for it, closest pair first. If there are more workers than free patches the rest go to the patches nearest the hub; the server moves a worker that finds its patch taken to a free one on the same line, or has it wait. Workers already mining that base are left to it.
+
+## Knowing what your army is doing
+
+Selecting units to read one line of text does not scale past a handful of squads, and the usual failure is a squad that finished its order and has stood idle in a corner since. The army roster lists every cluster of army units with its activity, size and makeup, so a forgotten squad is a red row rather than something you notice ten minutes later. Behaviors (Harass, Guard, Raid) show under their own name, since the preset, not the raw order underneath it, is what the units are doing. The F1 button carries a count of idle labour for the same reason.
+
+## Knowing you are under attack
+
+- A red banner at the top of the battlefield says **Your units are under attack** or **Your base is under attack** the first time something of yours is hit in an area, and at most once per area every 8 seconds after that. A sound plays with it.
+- **Space** (a tap) jumps the camera to the most recent attack. Holding Space and dragging still pans.
+- Off-screen fights also pulse as a red ring on the minimap for a few seconds; a ring with a dot means a building was hit.
+- A building that is training shows a small bar with the number queued and the progress of the first item above it. The **queue** panel in the Production tab lists every item with its own progress bar, for the selected buildings or, if none are selected, all of them.
 
 ## First five minutes: a suggestion per faction
 

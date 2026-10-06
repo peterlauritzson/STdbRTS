@@ -1,4 +1,4 @@
-import { COLORS } from "./presentation";
+import { ownerColor } from "./presentation";
 import { CURRENCIES, FACTION_ECONOMY, FACTION_LABEL, factionForSlot, type Cost, type FactionName } from "./catalog";
 import { buildScoreboard, formatClock, formatValue, type IncomeMode, type Sample, type ScoreFacet, type Scoreboard } from "./scoreboard";
 
@@ -101,14 +101,21 @@ function marker(slot: number, x: number, y: number, size: number, fill: string):
   return node("polygon", { points, ...common });
 }
 
+/**
+ * The colour of a slot on this screen: the same as in the match, where the
+ * viewer is always green (`ownerColor`). Set once per render from the viewer's slot.
+ */
+let viewer: number | undefined;
+const slotColor = (slot: number): string => ownerColor(slot, viewer);
+
 /** The legend key: one slot's colour, dash pattern and marker shape together. */
 export function keySwatch(slot: number): SVGSVGElement {
   const svg = node("svg", { viewBox: "0 0 38 14", class: "score-key", "aria-hidden": "true", focusable: "false" });
   svg.append(node("line", {
-    x1: 2, y1: 7, x2: 27, y2: 7, stroke: COLORS[slot % COLORS.length], "stroke-width": 2,
+    x1: 2, y1: 7, x2: 27, y2: 7, stroke: slotColor(slot), "stroke-width": 2,
     "stroke-linecap": "round", "stroke-dasharray": DASHES[slot % DASHES.length],
   }));
-  svg.append(marker(slot, 31, 7, 4, COLORS[slot % COLORS.length]));
+  svg.append(marker(slot, 31, 7, 4, slotColor(slot)));
   return svg;
 }
 
@@ -213,6 +220,7 @@ export class ScoreScreen {
   }
 
   render(state: ScoreState): void {
+    viewer = state.mySlot;
     this.redraw = () => this.render(state);
     this.board.hidden = false;
     for (const player of state.players) this.names.set(player.slot, player.name);
@@ -366,7 +374,7 @@ export class ScoreScreen {
 
     const endLabels: { y: number; slot: number; name: string; value: string }[] = [];
     for (const series of facet.series) {
-      const color = COLORS[series.slot % COLORS.length];
+      const color = slotColor(series.slot);
       const dash = DASHES[series.slot % DASHES.length];
       const point = (index: number) => `${x(index)},${y(series.values[index])}`;
       const cut = series.outIndex;
@@ -408,7 +416,7 @@ export class ScoreScreen {
     const hairline = node("line", { x1: 0, y1: plot.top, x2: 0, y2: plot.bottom, class: "score-hairline" });
     hover.append(hairline);
     const dots = facet.series.map(series => {
-      const dot = node("circle", { cx: 0, cy: 0, r: 4, fill: COLORS[series.slot % COLORS.length], stroke: SURFACE, "stroke-width": 2 });
+      const dot = node("circle", { cx: 0, cy: 0, r: 4, fill: slotColor(series.slot), stroke: SURFACE, "stroke-width": 2 });
       hover.append(dot);
       return dot as SVGElement;
     });

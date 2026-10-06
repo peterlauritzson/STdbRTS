@@ -11,9 +11,12 @@ import type { EntityCold, EntityMotion, EntityVitals } from "./bindings/types";
  *
  * The server-only bookkeeping lives in a private table that is never sent.
  */
-export type Entity = EntityCold & EntityMotion & EntityVitals;
+export type Entity = EntityCold & EntityMotion & EntityVitals & Behaving;
 
-interface Keyed<T> { id: bigint; matchId: bigint; data: T }
+/** A running behavior preset ("harass", "guard", "raid") and its current state, kept on the unit row beside the cold data. */
+export interface Behaving { behavior?: string | undefined; behaviorState?: string | undefined }
+
+interface Keyed<T> extends Behaving { id: bigint; matchId: bigint; data: T }
 interface Table<T> { iter(): Iterable<Keyed<T>>; id: { find(id: bigint): Keyed<T> | null | undefined } }
 /** The three tables, structurally, so connections, tests and bots can all be merged. */
 export interface UnitTables {
@@ -22,7 +25,7 @@ export interface UnitTables {
   unit_vitals: Table<EntityVitals>;
 }
 
-interface Merged { cold: EntityCold; motion: EntityMotion; vitals: EntityVitals; entity: Entity }
+interface Merged { row: Keyed<EntityCold>; cold: EntityCold; motion: EntityMotion; vitals: EntityVitals; entity: Entity }
 
 /**
  * Joins the three rows of each unit by id into one object. A merged object is
@@ -34,11 +37,12 @@ interface Merged { cold: EntityCold; motion: EntityMotion; vitals: EntityVitals;
 export class UnitMerger {
   private cache = new Map<bigint, Merged>();
 
-  private join(id: bigint, cold: EntityCold, motion: EntityMotion, vitals: EntityVitals, next: Map<bigint, Merged>): Entity {
+  private join(id: bigint, row: Keyed<EntityCold>, motion: EntityMotion, vitals: EntityVitals, next: Map<bigint, Merged>): Entity {
     const hit = this.cache.get(id);
-    const merged = hit && hit.cold === cold && hit.motion === motion && hit.vitals === vitals
+    const cold = row.data;
+    const merged = hit && hit.row === row && hit.cold === cold && hit.motion === motion && hit.vitals === vitals
       ? hit
-      : { cold, motion, vitals, entity: { ...cold, ...motion, ...vitals } };
+      : { row, cold, motion, vitals, entity: { ...cold, ...motion, ...vitals, behavior: row.behavior, behaviorState: row.behaviorState } };
     next.set(id, merged);
     return merged.entity;
   }
@@ -55,7 +59,7 @@ export class UnitMerger {
       if (row.matchId !== matchId) continue;
       const motion = motions.get(row.id);
       const vital = vitals.get(row.id);
-      if (motion && vital) out.push(this.join(row.id, row.data, motion, vital, next));
+      if (motion && vital) out.push(this.join(row.id, row, motion, vital, next));
     }
     this.cache = next;
     return out;
@@ -67,6 +71,6 @@ export class UnitMerger {
     const motion = db.unit_motion.id.find(key);
     const vitals = db.unit_vitals.id.find(key);
     if (!cold || !motion || !vitals) return undefined;
-    return { ...cold.data, ...motion.data, ...vitals.data };
+    return { ...cold.data, ...motion.data, ...vitals.data, behavior: cold.behavior, behaviorState: cold.behaviorState };
   }
 }

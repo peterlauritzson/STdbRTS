@@ -395,7 +395,7 @@ fn state_len() -> usize {
     1 + 8 + 4 + 8 + 4 + 4 + 8
 }
 fn full_len(entity: &Entity) -> usize {
-    let (cold, _, _, _) = entity.split();
+    let (cold, _, _, _, _) = entity.split();
     ROW_KEYS + cold_len(&cold) + motion_len() + vitals_len() + state_len()
 }
 
@@ -475,7 +475,7 @@ fn measure(map: &MapDefinition, players: usize, mobiles: usize, churn: bool) -> 
             })
             .count();
         for unit in &rows_after {
-            let (cold, motion, vitals, _) = unit.split();
+            let (cold, motion, vitals, _, _) = unit.split();
             let parts = ROW_KEYS + cold_len(&cold);
             match rows_before.binary_search_by_key(&unit.id, |old| old.id) {
                 Err(_) => {
@@ -485,7 +485,7 @@ fn measure(map: &MapDefinition, players: usize, mobiles: usize, churn: bool) -> 
                 }
                 Ok(at) if rows_before[at] != *unit => {
                     bytes_before += full_len(unit);
-                    let (old_cold, old_motion, old_vitals, _) = rows_before[at].split();
+                    let (old_cold, old_motion, old_vitals, _, _) = rows_before[at].split();
                     if old_cold != cold {
                         split_rows += 1;
                         bytes_after += parts;
@@ -505,7 +505,7 @@ fn measure(map: &MapDefinition, players: usize, mobiles: usize, churn: bool) -> 
         for old in &rows_before {
             if rows_after.binary_search_by_key(&old.id, |unit| unit.id).is_err() {
                 bytes_before += full_len(old);
-                let (cold, _, _, _) = old.split();
+                let (cold, _, _, _, _) = old.split();
                 split_rows += 3;
                 bytes_after += ROW_KEYS + cold_len(&cold) + 2 * ROW_KEYS + motion_len() + vitals_len();
             }

@@ -3,7 +3,7 @@ use rts_core::{
     faction_for_slot,
     maps::{by_id, DEFAULT_MATCH_MAP},
     simulation::World,
-    validate_command_delay, Faction, DEFAULT_COMMAND_DELAY, RULESET_VERSION, STARTING_BALANCE,
+    validate_command_delay, Faction, RULESET_VERSION, STARTING_BALANCE,
 };
 use spacetimedb::{ReducerContext, Table};
 
@@ -91,7 +91,7 @@ pub fn set_name(ctx: &ReducerContext, name: String) -> Result<(), String> {
 }
 
 #[spacetimedb::reducer]
-pub fn create_room(ctx: &ReducerContext, name: String, capacity: u8) -> Result<(), String> {
+pub fn create_room(ctx: &ReducerContext, name: String, capacity: u8, command_delay: u64) -> Result<(), String> {
     let mut player = current_player(ctx)?;
     if player.match_id != 0 {
         return Err("Leave your current room first".into());
@@ -105,9 +105,9 @@ pub fn create_room(ctx: &ReducerContext, name: String, capacity: u8) -> Result<(
     // The delay the match will run under is validated before it is frozen, not
     // clamped: a ruleset whose default sits outside its own bounds fails room
     // creation loudly instead of quietly shipping a delay nobody chose. The
-    // requested value is the ruleset default until the lobby gains a control
-    // for it (M4); the bounds check is on the live path either way.
-    let command_delay = validate_command_delay(DEFAULT_COMMAND_DELAY)?;
+    // requested value comes from the lobby's delay control (0.5/1.0/1.5s =
+    // 10/20/30 ticks); anything outside the ruleset bounds is rejected.
+    let command_delay = validate_command_delay(command_delay)?;
     // The match freezes the map it was created on; `game_tick` resolves this id
     // back to the same definition for the match's whole life.
     let map = by_id(DEFAULT_MATCH_MAP)

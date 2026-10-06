@@ -10,6 +10,17 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const Behavior = __t.object("Behavior", {
+  preset: __t.string(),
+  goalX: __t.f32(),
+  goalY: __t.f32(),
+  homeX: __t.f32(),
+  homeY: __t.f32(),
+  state: __t.u8(),
+  enteredTick: __t.u64(),
+});
+export type Behavior = __Infer<typeof Behavior>;
+
 export const Cast = __t.object("Cast", {
   kind: __t.string(),
   x: __t.f32(),
@@ -257,6 +268,8 @@ export const Unit = __t.object("Unit", {
   get data() {
     return EntityCold;
   },
+  behavior: __t.option(__t.string()),
+  behaviorState: __t.option(__t.string()),
 });
 export type Unit = __Infer<typeof Unit>;
 
@@ -274,6 +287,9 @@ export const UnitState = __t.object("UnitState", {
   matchId: __t.u64(),
   get data() {
     return EntityState;
+  },
+  get behavior() {
+    return __t.option(Behavior);
   },
 });
 export type UnitState = __Infer<typeof UnitState>;

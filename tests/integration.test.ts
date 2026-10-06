@@ -25,7 +25,7 @@ test("laboratory construction, a refinery and logistics research use mined resou
   const builder = (await connectClient()).connection;
   const opponent = (await connectClient()).connection;
   try {
-    await builder.reducers.createRoom({ name: "Research integration", capacity: 2 });
+    await builder.reducers.createRoom({ name: "Research integration", capacity: 2, commandDelay: 20n });
     await until(() => me(builder).matchId !== 0n, "research room");
     const matchId = me(builder).matchId;
     await opponent.reducers.joinRoom({ matchId });
@@ -125,7 +125,7 @@ test("workers repair real combat damage through delayed reducers", { timeout: 24
   const defender = (await connectClient()).connection;
   const attacker = (await connectClient()).connection;
   try {
-    await defender.reducers.createRoom({ name: "Repair integration", capacity: 2 });
+    await defender.reducers.createRoom({ name: "Repair integration", capacity: 2, commandDelay: 20n });
     await until(() => me(defender).matchId !== 0n, "repair room");
     const matchId = me(defender).matchId;
     await attacker.reducers.joinRoom({ matchId });
@@ -195,13 +195,13 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
   let otherMatchId = 0n;
   try {
     await context.test("capacity, membership, readiness and host authorization", async () => {
-      await host.reducers.createRoom({ name: "Integration squad", capacity: 4 });
+      await host.reducers.createRoom({ name: "Integration squad", capacity: 4, commandDelay: 20n });
       await until(() => me(host).matchId !== 0n, "host membership");
       matchId = me(host).matchId;
       await assert.rejects(host.reducers.startMatch({}), /two players|ready/);
       for (const client of [second, third, fourth]) await client.reducers.joinRoom({ matchId });
       await assert.rejects(outsider.reducers.joinRoom({ matchId }), /full/);
-      await assert.rejects(second.reducers.createRoom({ name: "Duplicate", capacity: 2 }), /Leave/);
+      await assert.rejects(second.reducers.createRoom({ name: "Duplicate", capacity: 2, commandDelay: 20n }), /Leave/);
       await assert.rejects(second.reducers.startMatch({}), /host/);
       for (const client of [host, second, third, fourth]) await client.reducers.setReady({ ready: true });
       await host.reducers.startMatch({});
@@ -363,7 +363,7 @@ test("authoritative multiplayer lifecycle", { timeout: 120000 }, async context =
     });
 
     await context.test("independent matches cannot control each other's units", async () => {
-      await outsider.reducers.createRoom({ name: "Isolated squad", capacity: 2 });
+      await outsider.reducers.createRoom({ name: "Isolated squad", capacity: 2, commandDelay: 20n });
       await until(() => me(outsider).matchId !== 0n, "second room");
       otherMatchId = me(outsider).matchId;
       await outsiderPeer.reducers.joinRoom({ matchId: otherMatchId });

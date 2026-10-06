@@ -1,11 +1,11 @@
 import type { Snapshot } from "./network";
-import { CATALOG, isBuilding } from "./catalog";
+import { CATALOG } from "./catalog";
+import type { AlertKind } from "./alerts";
 
 export class Feedback {
   enabled = localStorage.getItem("stdbrts:sound") !== "off";
   private audio: AudioContext | undefined;
   private previous: Snapshot | undefined;
-  private lastAlert = 0;
 
   constructor(private notice: (message: string) => void) {
     document.addEventListener("pointerdown", () => {
@@ -31,10 +31,16 @@ export class Feedback {
       if (old && old.constructionRemaining > 0n && unit.constructionRemaining === 0n) {
         this.notice(`${CATALOG[unit.kind].label} complete`); this.play([660, 880]);
       }
-      if (old && unit.hp + unit.shields < old.hp + old.shields && isBuilding(unit.kind) && performance.now() - this.lastAlert > 8000) {
-        this.lastAlert = performance.now(); this.notice(`${CATALOG[unit.kind].label} under attack`); this.play([180, 110]);
-      }
     }
+  }
+
+  /**
+   * The sound of an attack on you. The battlefield decides when (once per area
+   * per 8s, see alerts.ts) and shows the banner; this is only the voice: two
+   * low notes for units, three falling ones for a base.
+   */
+  alert(kind: AlertKind): void {
+    this.play(kind === "base" ? [220, 165, 110] : [180, 110], 0.05);
   }
 
   private lastAck = 0;

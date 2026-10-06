@@ -756,3 +756,64 @@ list (`tier_1` to `tier_3`), so no schema change is needed. H0's fourth tier
 
 **Would overturn it.** Play showing tiers too cheap (everything unlocked by
 4:00) or too dear, or the author's own tier contents.
+
+---
+
+## 2026-10-06 — The command delay is chosen at room creation
+
+**Decision.** `create_room` takes the delay as a `command_delay` argument in
+ticks. The lobby offers the three trial points, 10 / 20 / 30 (0.5s / 1.0s /
+1.5s), both in the create-room form and beside "Practice vs AI"; the default
+is 20. The value is validated against `COMMAND_DELAY_MIN`/`MAX` (rejected,
+never clamped) and then frozen for the match exactly as before.
+
+**Why.** This is the lobby control the bounded-field decision above was
+waiting for, so the trial points can be compared in play. The mechanism is
+unchanged: one delay per match, no per-player or mid-match changes.
+
+**Would overturn it.** Trials settling on one value, which would remove the
+control and move the default.
+
+---
+
+## 2026-10-06 — One-hop build reach, and your own units step aside
+
+**Decision.** A building site is in reach when it is within 500
+(`rules::BUILD_RADIUS`) of a finished building of yours, or within 500 of an
+unfinished building of yours that is itself within 500 of a finished one. One
+hop, deliberately not transitive. Separately, only enemy mobile units within 55
+refuse a site ("Enemy units block the building site"); your own units standing
+on it are moved to the nearest legal ground when the construction site is
+created (`Navigation::escape`, the search the end-of-tick recovery already
+uses, in unit order, orders untouched). The client mirrors both in
+`placementError`, and the placement overlay draws the look-ahead circles.
+`RULESET_VERSION` 19. No schema change.
+
+**Why.** Building out a base felt click-heavy: you waited for each structure to
+finish before the next could be placed, and had to walk workers off every site.
+One hop lets you queue the next building off one under construction, but not
+chain static defense across the map in seconds: reach is at most about 1000
+from finished structures.
+
+**Would overturn it.** Play showing the look-ahead abused for forward turret
+creep (then drop it or shrink the second hop), or players still waiting on
+completions (then allow a second hop).
+
+## 2026-10-06 - A rally can carry a behavior
+
+**Decision.** A producer's rally may carry a behavior preset: orders
+`rally_harass`, `rally_guard`, `rally_raid` (x, y = goal), validated exactly as
+`rally_move` is. When a unit finishes training there, army units start the
+behavior at spawn via the same `activate_behavior` the `issue_order` kinds use
+(home anchor beside the nearest completed hub, computed at spawn time); labour
+walks to the point as with `rally_move`. Client: with only producers selected,
+J/K/N arm and the click sends `rally_<preset>` to every selected producer; the
+rally marker and panel text name the preset. `RULESET_VERSION` 20. No schema
+change, no reducer signature change.
+
+**Why.** Setting up strats meant re-selecting every new soldier. Select the
+barracks, press K, click the ramp: every soldier it trains guards the ramp.
+
+**Would overturn it.** Players wanting different behaviors per unit type from
+one building (then a per-unit rally), or labour needing the goal as something
+better than a plain move.

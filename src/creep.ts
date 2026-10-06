@@ -72,3 +72,25 @@ export function lifetimeFraction(unit: Pick<Entity, "kind" | "expiresTick">, tic
   if (!lifetime) return undefined;
   return clamp(Number(unit.expiresTick - tick) / lifetime, 0, 1);
 }
+
+/** A "creep fades" caption: where to write it and the tick the patch it speaks for is gone. */
+export interface CreepLabel { x: number; y: number; owner: number; gone: bigint }
+
+/**
+ * The captions for every receding patch, one per spot. Overlapping patches of
+ * one owner (a hub's patch and the bloom it grew) each printed their own
+ * countdown on top of the other, an unreadable stack; here the soonest-gone
+ * patch of a cluster speaks for it. `gap` is how far apart, in world units,
+ * two captions must be to both be shown: about one caption's width on screen.
+ */
+export function creepLabels(patches: readonly Pick<CreepPatch, "owner" | "x" | "y" | "radius" | "lostTick">[], tick: bigint, gap: number): CreepLabel[] {
+  const labels: CreepLabel[] = [];
+  const candidates = patches
+    .map(patch => ({ x: patch.x, y: patch.y - patch.radius, owner: patch.owner, gone: creepGoneTick(patch, tick) }))
+    .filter((label): label is CreepLabel => label.gone !== undefined)
+    .sort((left, right) => (left.gone < right.gone ? -1 : left.gone > right.gone ? 1 : 0));
+  for (const label of candidates) {
+    if (!labels.some(shown => shown.owner === label.owner && Math.hypot(shown.x - label.x, shown.y - label.y) < gap)) labels.push(label);
+  }
+  return labels;
+}

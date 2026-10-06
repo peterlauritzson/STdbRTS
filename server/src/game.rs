@@ -88,8 +88,11 @@ pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
                 .unit_state()
                 .match_id()
                 .filter(room.id)
-                .map(|row| (row.id, row.data))
+                .map(|row| (row.id, (row.data, row.behavior)))
                 .collect();
+            // The public `behavior` / `behavior_state` columns on `unit` are
+            // derived on save and never read back: the private row is the
+            // behavior's only source.
             ctx.db
                 .unit()
                 .match_id()
@@ -97,8 +100,10 @@ pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
                 .filter_map(|row| {
                     let motion = motions.remove(&row.id)?;
                     let vital = vitals.remove(&row.id)?;
-                    let state = states.remove(&row.id)?;
-                    Some(rts_core::simulation::Entity::join(row.data, motion, vital, state))
+                    let (state, behavior) = states.remove(&row.id)?;
+                    Some(rts_core::simulation::Entity::join(
+                        row.data, motion, vital, state, behavior,
+                    ))
                 })
                 .collect()
         },
@@ -246,15 +251,26 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
     // moved rewrites (and rebroadcasts) just its small motion row.
     for entity in &world.units {
         let id = (room.id << 32) | entity.id as u64;
-        let (cold, motion, vitals, state) = entity.split();
+        let (cold, motion, vitals, state, behavior) = entity.split();
+        let (preset, preset_state) = rts_core::behavior::labels(behavior.as_ref());
+        let unit_row = |data| Unit {
+            id,
+            match_id: room.id,
+            data,
+            behavior: preset.clone(),
+            behavior_state: preset_state.clone(),
+        };
         match ctx.db.unit().id().find(id) {
             Some(old) => {
-                if old.data != cold {
-                    ctx.db.unit().id().update(Unit { id, match_id: room.id, data: cold });
+                if old.data != cold
+                    || old.behavior != preset
+                    || old.behavior_state != preset_state
+                {
+                    ctx.db.unit().id().update(unit_row(cold));
                 }
             }
             None => {
-                ctx.db.unit().insert(Unit { id, match_id: room.id, data: cold });
+                ctx.db.unit().insert(unit_row(cold));
             }
         }
         match ctx.db.unit_motion().id().find(id) {
@@ -279,12 +295,12 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
         }
         match ctx.db.unit_state().id().find(id) {
             Some(old) => {
-                if old.data != state {
-                    ctx.db.unit_state().id().update(UnitState { id, match_id: room.id, data: state });
+                if old.data != state || old.behavior != behavior {
+                    ctx.db.unit_state().id().update(UnitState { id, match_id: room.id, data: state, behavior });
                 }
             }
             None => {
-                ctx.db.unit_state().insert(UnitState { id, match_id: room.id, data: state });
+                ctx.db.unit_state().insert(UnitState { id, match_id: room.id, data: state, behavior });
             }
         }
     }

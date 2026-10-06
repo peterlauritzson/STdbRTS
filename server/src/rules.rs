@@ -1,3 +1,4 @@
+pub mod behavior;
 pub mod maps;
 pub mod navigation;
 pub mod spatial;
@@ -9,7 +10,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 18;
+pub const RULESET_VERSION: u32 = 20;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -497,6 +498,10 @@ pub fn validate_world_size(size: f32) -> Result<f32, String> {
 pub const MAX_UNITS: usize = 400;
 pub const MAX_QUEUE: usize = 8;
 pub const MAX_BUILDINGS: usize = 150;
+/// How far a building site may be from the owner's base: from a finished
+/// building, or from an unfinished one that is itself this close to a finished
+/// one (one hop, never transitive). Mirrored by `placementError` in catalog.ts.
+pub const BUILD_RADIUS: f32 = 500.0;
 
 pub fn is_building(kind: &str) -> bool {
     matches!(
@@ -3227,7 +3232,7 @@ mod tests {
         // base income. 15: unit cap 400 and building cap 150, and routes from
         // shared breadth-first fields (equally short routes may tie-break
         // differently from the old per-unit A*).
-        assert_eq!(RULESET_VERSION, 18);
+        assert_eq!(RULESET_VERSION, 20);
         assert!(RULESET_VERSION > 0);
     }
 
