@@ -18,7 +18,9 @@ import { arriving, canTeleport, channelFraction, fieldsOf, powered, POWER_FIELD_
 interface Point { x: number; y: number }
 interface Motion { from: Point; to: Point; at: number }
 type InputMode = "select" | "order" | "pan";
-type TargetMode = "attack_move" | "repair" | "rally" | "teleport" | "expand" | BehaviorKind | AbilityKind | `build_${string}`;
+type TargetMode = "attack_move" | "repair" | "rally" | "teleport" | "expand" | `mission_${BehaviorKind}` | AbilityKind | `build_${string}`;
+/** What the battlefield needs to draw and click a mission; the rules live in missions.ts. */
+export interface MissionView { id: number; kind: BehaviorKind; x: number; y: number; label: string }
 
 /** How long a click ping, a target flash and a death burst last, in ms. */
 const PING_MS = 520;
@@ -90,6 +92,13 @@ export class Battlefield {
   onExpand: (point: Point) => string | undefined = () => undefined;
   /** The chains of running expansions, drawn dashed and numbered on the map and the minimap. */
   overlays: () => OverlayPath[] = () => [];
+  /** A mission was placed at a point (with these army units selected); see missions.ts. */
+  onMission: (kind: BehaviorKind, point: Point, selected: number[]) => void = () => {};
+  /** The standing missions, drawn as markers on the map and the minimap. */
+  missions: () => MissionView[] = () => [];
+  /** The mission under a point, and sending army units into it (right-click on its marker). */
+  missionAt: (point: Point) => number | undefined = () => undefined;
+  onAssign: (id: number, selected: number[]) => void = () => {};
   /** The chain an expansion aimed at this point would build, previewed under the cursor. */
   expandPreview: (point: Point) => OverlayPath | undefined = () => undefined;
   /** Called when one of your units or buildings is hit and the area is not already alerting. */
@@ -202,9 +211,9 @@ export class Battlefield {
       else if (key === UNIT_KEYS.returnCargo) this.issue("return");
       else if (key === UNIT_KEYS.teleport) this.arm("teleport");
       else if (key === UNIT_KEYS.rally) this.arm("rally");
-      else if (key === UNIT_KEYS.harass) this.arm("harass");
-      else if (key === UNIT_KEYS.guard) this.arm("guard");
-      else if (key === UNIT_KEYS.raid) this.arm("raid");
+      else if (key === UNIT_KEYS.harass) this.arm("mission_harass");
+      else if (key === UNIT_KEYS.guard) this.arm("mission_guard");
+      else if (key === UNIT_KEYS.raid) this.arm("mission_raid");
       else if (key === UNIT_KEYS.ability) { const rule = abilityOf(this.factionAt(this.session.snapshot.me?.slot ?? -1)); if (rule) this.arm(rule.kind); }
       else if (event.key === "." || event.key === "F1") this.selectIdleWorker();
       else if (event.key === "F2") this.selectArmy();
@@ -469,8 +478,8 @@ export class Battlefield {
   zoom(amount: number): void { this.camera.zoom = clamp(this.camera.zoom * amount, this.minZoom(), 2.2); this.boundCamera(); }
 
   arm(kind: TargetMode): void {
-    // With army selected a behavior goes to the army; with only producers it becomes their rally.
-    const allowed = isBehavior(kind) ? behaviorUnits(this.ownedSelection()).length > 0 || this.ownedSelection().some(unit => RALLIES.includes(unit.kind))
+    // A mission is about a place, not a selection: it can be placed whenever a match is on.
+    const allowed = kind.startsWith("mission_") ? this.session.matchReady
       : kind === "rally"
       ? this.session.snapshot.units.some(unit => RALLIES.includes(unit.kind) && unit.owner === this.session.snapshot.me?.slot)
       : kind.startsWith("build_") || kind === "expand" ? !!this.issuer()
@@ -687,24 +696,18 @@ export class Battlefield {
     // rally-gather target; clicking one with labour explains why instead.
     const node = clicked && currencyOf(clicked.kind) === "material" ? clicked : undefined;
     const owned = this.ownedSelection();
-    if (isBehavior(this.targeting)) {
-      // A behavior goes to army units only (the server refuses a mixed selection
-      // whole) and is never queued: the server rejects queued behaviors.
-      const army = behaviorUnits(owned);
-      const kind = this.targeting;
-      if (!army.length) {
-        // Producers only: the behavior becomes their rally, so every unit they train starts it.
-        const producers = owned.filter(unit => RALLIES.includes(unit.kind));
-        if (!producers.length) { this.session.onNotice("Select army units or production buildings for this command"); return; }
-        void this.session.order(producers.map(unit => unit.id), { kind: `rally_${kind}`, x: clampToMap(point.x), y: clampToMap(point.y), target: 0 });
-        this.acknowledge(kind, point);
-        this.spend(false);
-        return;
-      }
-      void this.session.order(army.map(unit => unit.id), { kind, x: clampToMap(point.x), y: clampToMap(point.y), target: 0 });
+    if (this.targeting?.startsWith("mission_")) {
+      // Missions are standing and managed by missions.ts; selected army units join this one.
+      const kind = this.targeting.slice(8) as BehaviorKind;
+      this.onMission(kind, { x: clampToMap(point.x), y: clampToMap(point.y) }, behaviorUnits(owned).map(unit => unit.id));
       this.acknowledge(kind, point);
-      this.spend(false);
+      this.spend(queued);
       return;
+    }
+    if (!this.targeting) {
+      const mission = this.missionAt(point);
+      const army = behaviorUnits(owned);
+      if (mission !== undefined && army.length) { this.onAssign(mission, army.map(unit => unit.id)); this.acknowledge("move", point); return; }
     }
     if (this.targeting === "expand") {
       // Orders are planned and sent by the expansion operation, pass by pass.
@@ -997,6 +1000,7 @@ export class Battlefield {
       if (target) this.intent(pending.units, pending.order.kind, target, 1 - left(pending.executeTick) * 20 / delay, now);
     }
     this.drawBehaviors(now);
+    this.drawMissions();
     if (this.targeting?.startsWith("build_") && this.session.snapshot.me) this.drawPlacementZones(this.session.snapshot.me.slot);
     for (const path of this.overlays()) this.drawChain(path, false);
     if (this.targeting === "expand" && this.pointer) {
@@ -1890,7 +1894,22 @@ export class Battlefield {
         context.strokeStyle = `${color}70`; context.lineWidth = 1.5 / zoom; context.setLineDash([10 / zoom, 8 / zoom]);
         context.beginPath(); context.arc(goal.x, goal.y, 600, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
       }
-      this.marker(goal, color, `${BEHAVIORS[preset].label.toUpperCase()} ×${count}`);
+      // A goal that is a mission's point is labelled by the mission marker instead.
+      if (!this.missions().some(mission => mission.kind === preset && Math.hypot(mission.x - goal.x, mission.y - goal.y) <= 1)) this.marker(goal, color, `${BEHAVIORS[preset].label.toUpperCase()} ×${count}`);
+    }
+  }
+
+  /** Each standing mission: its marker in the preset's colour, labelled "HARASS 3/4"; a guard also shows its 600-unit leash. */
+  private drawMissions(): void {
+    const context = this.context;
+    const zoom = this.camera.zoom;
+    for (const mission of this.missions()) {
+      const color = BEHAVIORS[mission.kind].color;
+      if (mission.kind === "guard") {
+        context.strokeStyle = `${color}70`; context.lineWidth = 1.5 / zoom; context.setLineDash([10 / zoom, 8 / zoom]);
+        context.beginPath(); context.arc(mission.x, mission.y, 600, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
+      }
+      this.marker(mission, color, mission.label);
     }
   }
 
@@ -1981,6 +2000,11 @@ export class Battlefield {
         context.beginPath(); context.arc(point.x * scale, point.y * scale, 4.5, 0, Math.PI * 2); context.fill(); context.stroke();
         context.fillStyle = index < path.done ? "#10201f" : "#e9f8ff"; context.fillText(String(index + 1), point.x * scale, point.y * scale + 3);
       }
+    }
+    for (const mission of this.missions()) {
+      const x = mission.x * scale, y = mission.y * scale;
+      context.fillStyle = BEHAVIORS[mission.kind].color; context.strokeStyle = "#10201f"; context.lineWidth = 1;
+      context.beginPath(); context.moveTo(x, y - 6); context.lineTo(x + 6, y); context.lineTo(x, y + 6); context.lineTo(x - 6, y); context.closePath(); context.fill(); context.stroke();
     }
     const me = this.session.snapshot.me?.slot;
     for (const unit of this.session.snapshot.units) {

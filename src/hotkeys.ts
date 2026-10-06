@@ -29,8 +29,8 @@ export const TRAIN_KEYS = ["q", "w", "e", "r", "d", "z", "x"] as const;
 export const BUILD_KEYS = ["q", "w", "e", "r", "t", "y", "u", "i"] as const;
 export const BUILD_MENU_KEY = "b";
 /**
- * Operations (src/operations.ts). Expand is pressed on the Build card, so B then
- * V, and V is clear of every build key; auto-labour is a plain toggle.
+ * Operations (src/operations.ts), both buttons of the Strategy panel and live from anywhere:
+ * V arms Expand (clear of every train and build key); L toggles Saturate workers.
  */
 export const OPERATION_KEYS = { expand: "v", autoLabour: "l" } as const;
 

@@ -31,6 +31,8 @@ test("a rejected command explains itself inline at a short desktop height", asyn
   // Every control the player needs mid-match survives the compaction.
   await expect(page.getByRole("button", { name: "Set rally destination", exact: true })).toBeVisible();
   await expect(page.locator("#minimap")).toBeVisible();
+  // The order log is folded under the Strategy panel; open it to read the rows.
+  await page.locator("#order-log summary").click();
   await expect(page.locator("#command-list")).toBeVisible();
 
   // Finding 1: provoke a genuine rejection the way the playtest did. Both

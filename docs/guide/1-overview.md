@@ -46,20 +46,27 @@
 - **Left click / drag** selects (a drag takes your units; it takes buildings only when there are no units in the box); **Shift + click** adds a building or a unit; **double-click** or **Ctrl + click** takes every one of that kind on screen. **Right click** moves, attacks, mines or rallies; with only production buildings selected it sets their rally point. Hold **Shift** to queue.
 - **Tab** switches between the kinds in a mixed selection (the highlighted kind is the one train, rally and production act on).
 - **A** then click: attack-move. **S** stops, **H** holds position.
-- **J** Harass, **K** Guard, **N** Raid, then click a goal on the map or minimap: army units follow a behavior on their own (retreat when hurt, recover, return). The selection panel shows each unit's state, e.g. "Harass: 6 advance, 2 retreat". With only production buildings selected, the same keys set a **behavior rally**: every soldier they train starts that behavior on its own.
+- **J** Harass, **K** Guard, **N** Raid (or the buttons in the **Strategy** panel), then click a place on the map or minimap: that places a **mission**. Idle and newly trained army units fill missions on their own and follow a behavior there (retreat when hurt, recover, return); army you had selected joins it at once. Giving a unit an order yourself takes it out of its mission until it is idle again. The selection panel shows each unit's state, e.g. "Harass: 6 advance, 2 retreat".
 - **Q W E R D Z X** train labour and then your six army units. **B** then a letter builds; a site that is blocked (a worker walking by, a neighbouring building) **slides to the nearest valid spot**, shown by the ghost, instead of refusing the click.
 - **Right click one of your other hubs** with labour selected: they transfer to that base's free mineral patches, one each. Right-clicking the hub they already work still drops their load.
 - **Ctrl + number** saves a control group; the number recalls it.
 - **F1** selects idle labour, **F2** your army, **Backspace** jumps to your base.
 - **Army roster** (top left, under the player list): your army grouped by what it is doing and where. Click a row to select those units and jump to them; Shift+click adds them. Idle units in the field are highlighted red. The F1 button shows how many labour units are idle.
 - **Space** (a tap) jumps to the latest attack on you; hold **Space** and drag to pan. An alert banner and a pulsing red ring on the minimap show where.
-- **B** then **V**, or the Expand button: **Expand toward** a spot on the map or minimap. The game builds a chain of outposts and two refineries there for you. **L** toggles **auto-labour**. See "Operations" below.
+- **Strategy panel** (right end of the bottom bar, always visible): the mission buttons, **Expand** (**V**) and **Saturate workers** (**L**), then one list of your missions and operations with size controls, a go-to click on the name, and a cancel button. See "Missions" and "Operations" below.
 - **?** (or the keyboard button) shows the full control list. Scroll to zoom; middle-drag or arrow keys pan.
+
+## Missions: say where, not who
+
+- A **mission** is a standing objective at a place: **Harass** (default 4 units), **Guard** (6) or **Raid** (all the army not needed elsewhere). Place one with **J** / **K** / **N** or its button, then click the map or minimap. **Shift** keeps placing more.
+- Missions fill themselves from idle and newly trained army units, nearest first, in the order you made them; a Raid or any "all rest" mission takes what is left. Select army before placing and those units join it first.
+- Order a unit yourself and it leaves its mission and is left alone until it is idle again. Right-click a mission's marker with army selected to put them in it.
+- Change a mission's size with the minus and plus buttons in the Strategy panel, make it "All" (rest), or cancel it. Missions are remembered if you reload the page, but they only staff themselves while the tab is open.
 
 ## Operations: let the game do the legwork
 
-- **Expand toward** (Build tab, or **B** then **V**): click anywhere on the map or minimap. The nearest free base site is chosen, a dashed numbered line shows the outposts that will be built to reach it, and the game places them one after another as each finishes, then two refineries on the site's catalyst. It waits when material runs short. Several can run at once; each shows in the Operations list (top left) with its step and a Cancel button.
-- **Auto-labour** (the labour button on the Production tab, or **L**): idle hubs train one labour unit each until you have one per mining patch on your hubs' own mineral lines, plus two spare (no spares for drifters, which never leave their patch). It pauses while an expansion is waiting for material.
+- **Expand toward** (Strategy panel, or **V**): click anywhere on the map or minimap. The nearest free base site is chosen, a dashed numbered line shows the outposts that will be built to reach it, and the game places them one after another as each finishes, then two refineries on the site's catalyst. It waits when material runs short. Several can run at once; each shows in the Strategy panel's list with its step and a cancel button.
+- **Saturate workers** (Strategy panel, or **L**; this was called auto-labour): idle hubs train one labour unit each until you have one per mining patch on your hubs' own mineral lines, plus two spare (no spares for drifters, which never leave their patch). It pauses while an expansion is waiting for material.
 - Operations only send the same orders you could, so they obey the same one-second delay and the same costs, and they stop when the match ends.
 
 ## Reading the screen

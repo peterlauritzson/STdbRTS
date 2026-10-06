@@ -817,3 +817,27 @@ barracks, press K, click the ramp: every soldier it trains guards the ramp.
 **Would overturn it.** Players wanting different behaviors per unit type from
 one building (then a per-unit rally), or labour needing the goal as something
 better than a plain move.
+
+## 2026-10-06 - Strategy is missions (client-side), not per-selection behaviors
+
+**Decision.** The client places behaviors on the map as **missions** (kind,
+point, size, members; `src/missions.ts`) and keeps them staffed with ordinary
+`harass`/`guard`/`raid` orders, one pass a second after the normal command
+delay, exactly like operations: they need the tab open, as the practice AI does,
+and nothing about them is on the server. Idle and newly trained army units are
+dealt to missions (numeric sizes first in creation order, nearest first, then
+"rest" missions split the remainder evenly); a unit the player re-orders is
+released and not recruited again until idle. State is persisted per room in
+localStorage. The Tactics popover and the producer behavior rally flow are
+removed from the UI (the server still accepts `rally_<preset>`; the client
+no longer sends it). Expand and auto-labour (now "Saturate workers") moved from
+the Build and Production tabs to a Strategy panel with the missions; V and L
+work from anywhere. No schema, reducer or ruleset change.
+
+**Why.** Select-army, raid, then new units idle anyway: the behavior followed the
+selection, but strategy is about places. A mission says "harass over here" once
+and keeps working as the army grows.
+
+**Would overturn it.** Players needing missions to run with the tab closed or
+across devices (then a server-side mission table), or the one-second pass
+staffing too slowly for fast reinforcement (then a server-side rally mission).

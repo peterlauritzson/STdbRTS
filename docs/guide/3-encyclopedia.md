@@ -203,7 +203,7 @@ Army units can be given a behavior instead of a single order. It goes through th
 
 Home is a spot beside your hub nearest the unit when the behavior started.
 
-Behavior rally (also the Tactics menu, whose header then reads "Rally new units with a tactic"): with only HQ/outpost/barracks/factory/lab selected, J/K/N then a click sends `rally_harass`/`rally_guard`/`rally_raid` to every selected producer (same rules as a move rally: goal on the map and unobstructed; not queueable). Each army unit a producer trains starts that behavior the tick it appears, with its home spot taken beside the nearest completed hub at that moment. Labour trained there walks to the goal as it does for a move rally. If army units are selected too, the behavior goes to them as usual and the rally is unchanged. The clear-rally button removes it.
+Behavior rally (`rally_harass`, `rally_guard`, `rally_raid`): still accepted by the server, no longer sent by the client, which uses missions instead (below). A producer that already carries one still starts it on each army unit it trains.
 
 | Behavior | States |
 | --- | --- |
@@ -213,14 +213,29 @@ Behavior rally (also the Tactics menu, whose header then reads "Rally new units 
 
 Health is hit points plus shields.
 
+## Missions
+
+Client-side standing objectives, in the spirit of operations: only ordinary orders, one pass a second, after the normal command delay. They live in the tab; the point, size and members are saved in localStorage under the room id and restored on reload in the same room, and dropped when the room ends or you leave it.
+
+| Rule | Details |
+| --- | --- |
+| Placing | J / K / N or the Strategy panel buttons arm placement; the next map or minimap click places it (Shift keeps the mode armed, Escape or right-click cancels). Works with any selection. Selected army units join it at once (taken from other missions) and a numeric size is raised to at least their number |
+| Size | Default Harass 4, Guard 6, Raid "rest". Numeric sizes run 1 to 99. "Rest" takes every recruit left after the numeric missions. Several rest missions split the recruits evenly, in creation order: each takes its nearest ceil(left / rest missions left) |
+| Army | Your own living units for which the army test passes (labour, buildings and temporary units never join) |
+| Pass | 1: members that died drop out. 2: a member whose behavior is not the mission's preset, or whose newest accepted behavior command has another goal, is released as player-controlled; a unit with an order of its own or of the pass still in the command delay is never judged (plus 3.5 s of grace after the pass sent it one). 3: a mission over its size stops its farthest members. 4: the pool is dealt out, numeric missions in creation order, nearest first, then rest missions. A numeric mission still short after the free pool takes the nearest members of rest missions (leftovers by definition); rest missions only ever take free units. 5: one behavior order per mission per pass |
+| Pool | Own army, in no mission, not player-controlled, not mid-order, running no behavior, and either idle (order stop) or newly seen since the last pass and walking a plain move (a fresh unit going to its rally point). A player-controlled unit is forgotten once it is idle again, which is also why a plain Stop does not remove a unit from the pool for long |
+| Limits | At most 8 orders per pass, none while 24 or more of your orders are pending (the server refuses more than 8 per tick and 32 pending); what does not fit waits for the next pass |
+| Removing | Cancelling a mission sends its members a Stop, so they are idle and the remaining missions recruit them on the next pass |
+| Display | Marker at the point in the preset's colour (guard also its 600 leash), label "HARASS 3/4" or "RAID 7", a diamond on the minimap. Right-click a marker with army selected: those units join it |
+
 ## Operations
 
 Client-side helpers that send ordinary orders for you, once a second. They exist only in your browser tab: closing it forgets them (buildings already ordered stay ordered). They end when the match ends.
 
 | Operation | Details |
 | --- | --- |
-| Expand toward | Armed with the Expand button or B, then V. Click the map or minimap. Base sites are clusters of deposits within 400 of each other with no hub (anyone's, finished or not) within 600 of their centre. The plan starts at your finished building nearest the site, hops at most 488 units per outpost, ends with an outpost 150-250 from the deposits (at least 112 from any catalyst deposit, so a refinery still fits), and then orders up to two refineries on the site's catalysts. One order per pass; none while an earlier build of yours is still waiting out the command delay |
-| Auto-labour | Toggled with the labour button on the Production tab or L. Each pass, every finished hub with an empty queue and no train order pending trains one labour unit while your labour (including queued) is below the number of non-empty material patches within 320 of your finished hubs (their mineral lines; a natural counts once it has its own hub) plus 2 (plus 0 for Network: a drifter holds its patch for good), you can afford it (Organic: the hub has stock) and you are under the unit cap. Paused while an expansion waits for material. Newly trained labour goes to work on its own |
+| Expand toward | Armed with the Strategy panel's Expand button or V. Click the map or minimap. Base sites are clusters of deposits within 400 of each other with no hub (anyone's, finished or not) within 600 of their centre. The plan starts at your finished building nearest the site, hops at most 488 units per outpost, ends with an outpost 150-250 from the deposits (at least 112 from any catalyst deposit, so a refinery still fits), and then orders up to two refineries on the site's catalysts. One order per pass; none while an earlier build of yours is still waiting out the command delay |
+| Saturate workers (auto-labour) | Toggled with the Strategy panel's Saturate workers button or L. Each pass, every finished hub with an empty queue and no train order pending trains one labour unit while your labour (including queued) is below the number of non-empty material patches within 320 of your finished hubs (their mineral lines; a natural counts once it has its own hub) plus 2 (plus 0 for Network: a drifter holds its patch for good), you can afford it (Organic: the hub has stock) and you are under the unit cap. Paused while an expansion waits for material. Newly trained labour goes to work on its own |
 | Pending spend | Not an operation: the money readouts show (−N) for build, train and research orders that are sent but not yet run, and buttons use the balance after them |
 
 ## Macro helpers
@@ -249,9 +264,9 @@ Client-side helpers that send ordinary orders for you, once a second. They exist
 | T / C | Teleport / faction ability (Recall, Bloom) |
 | Q W E R D Z X | Train: labour, then your six army units in card order. With the Research tab open: Weapons, Armor, Logistics, Tier 1, Tier 2, Tier 3 |
 | B, then Q W E R T Y U I | Build menu: barracks, outpost, turret, factory, laboratory, then your faction structure, refinery, faction defense |
-| B, then V | Expand toward a spot (operation, see above) |
-| J / K / N (or Tactics menu), then click | Harass / Guard / Raid the clicked goal (army units only, never queued) |
-| L | Toggle auto-labour |
+| V | Expand toward a spot (operation, see above) |
+| J / K / N, then click | Place a Harass / Guard / Raid mission at the clicked point (selected army joins it; see Missions) |
+| L | Toggle Saturate workers (auto-labour) |
 | Space (tap) | Jump to the latest attack on you |
 | Ctrl or Alt + 0-9 | Set control group |
 | Shift + 0-9 | Add to control group |

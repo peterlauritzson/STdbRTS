@@ -75,7 +75,7 @@
           <details id="score-table" class="score-data"><summary>Show every sample as a table</summary><div class="score-table-body"></div></details>
         </div>
       </div>
-      <div class="hud-left"><div id="battle-players" class="battle-players"></div><div id="operations" class="operations" aria-label="Operations" hidden></div><div id="army-roster" class="army-roster" aria-label="Army" hidden></div></div>
+      <div class="hud-left"><div id="battle-players" class="battle-players"></div><div id="army-roster" class="army-roster" aria-label="Army" hidden></div></div>
       <div class="camera-tools"><button id="sound" class="icon-button" title="Sound on" aria-label="Sound" aria-pressed="true"><i data-lucide="volume-2"></i></button><button id="camera-home" class="icon-button" title="Center on HQ" aria-label="Center on HQ"><i data-lucide="house"></i></button><button id="camera-fit" class="icon-button" title="Show whole map" aria-label="Show whole map"><i data-lucide="maximize-2"></i></button><button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button><button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button><button id="guide-open" class="icon-button" title="Game guide (opens in a new tab)" aria-label="Game guide (opens in a new tab)"><i data-lucide="book-open"></i></button><button id="help-toggle" class="icon-button" title="Controls (?)" aria-label="Controls" aria-expanded="false" aria-controls="help"><i data-lucide="keyboard"></i></button></div>
       <div id="group-bar" class="group-bar" aria-label="Control groups"></div>
       <aside id="help" class="help mono" hidden>
@@ -95,10 +95,11 @@
           <div><dt>Wheel</dt><dd>Zoom</dd></div>
           <div><dt>Q W E R D Z X</dt><dd>Train labour, then your six army units (hover for each passive)</dd></div>
           <div><dt>B then Q..I</dt><dd>Build (the key is on each button)</dd></div>
-          <div><dt>B then V</dt><dd>Expand toward a spot: outpost chain, then refineries</dd></div>
-          <div><dt>L</dt><dd>Auto-labour on or off</dd></div>
+          <div><dt>V</dt><dd>Expand toward a spot: outpost chain, then refineries (Strategy panel)</dd></div>
+          <div><dt>L</dt><dd>Saturate workers on or off: train labour until every patch has one (Strategy panel)</dd></div>
           <div><dt>A / S / H</dt><dd>Attack-move / stop / hold</dd></div>
-          <div><dt>J / K / N</dt><dd>Harass / guard / raid, also in the Tactics menu: a behavior toward the clicked goal (army only); with production buildings selected: sets a behavior rally</dd></div>
+          <div><dt>J / K / N</dt><dd>Place a mission: harass / guard / raid here, then click the map or minimap. Selected army joins it; idle and new army units fill it automatically. Right-click a mission marker with army selected to join it</dd></div>
+          <div><dt>Strategy panel</dt><dd>Missions and operations in one list: change size, cancel, click a name to go there. Ordering a unit yourself takes it out of its mission until it is idle again</dd></div>
           <div><dt>F / G / Y</dt><dd>Repair / return cargo / set rally</dd></div>
           <div><dt>T / C</dt><dd>Teleport / faction ability</dd></div>
           <div><dt>Ctrl or Alt + 0-9</dt><dd>Set control group</dd></div>
@@ -117,12 +118,6 @@
         <button id="stop" class="icon-button" title="Stop: cancel orders and stand still" aria-label="Stop selected units"><i data-lucide="square"></i><span class="cmd-label">Stop</span></button>
         <button id="attack-move" class="icon-button" title="Attack-move: move, fighting anything met on the way" aria-label="Attack-move" aria-pressed="false"><i data-lucide="crosshair"></i><span class="cmd-label">Attack</span></button>
         <button id="hold" class="icon-button" title="Hold position: stay put and fire only at what comes in range" aria-label="Hold position"><i data-lucide="shield"></i><span class="cmd-label">Hold</span></button>
-        <div class="tactics-wrap" id="tactics-wrap"><button id="tactics" class="icon-button" title="Tactics: give the army a behavior (harass, guard, raid)" aria-label="Tactics" aria-pressed="false" aria-haspopup="true" aria-expanded="false"><i data-lucide="flag"></i><span class="cmd-label">Tactics</span></button>
-          <div id="tactics-menu" class="tactics-menu" role="group" aria-label="Tactics" hidden><p id="tactics-head" class="tactics-head">Give the army a tactic</p>
-            <button id="harass" class="tactic-row" title="" aria-label="Harass" aria-pressed="false"><span class="swatch"></span><span class="tactic-text"><span class="tactic-name"></span><span class="tactic-desc"></span></span></button>
-            <button id="guard" class="tactic-row" title="" aria-label="Guard" aria-pressed="false"><span class="swatch"></span><span class="tactic-text"><span class="tactic-name"></span><span class="tactic-desc"></span></span></button>
-            <button id="raid" class="tactic-row" title="" aria-label="Raid" aria-pressed="false"><span class="swatch"></span><span class="tactic-text"><span class="tactic-name"></span><span class="tactic-desc"></span></span></button>
-          </div></div>
         <button id="repair" class="icon-button" title="Repair: 1 material per 5 HP" aria-label="Repair" aria-pressed="false"><i data-lucide="wrench"></i><span class="cmd-label">Repair</span></button>
         <button id="return" class="icon-button" title="Return cargo: carry the current load to the nearest hub" aria-label="Return cargo"><i data-lucide="corner-down-left"></i><span class="cmd-label">Return</span></button>
         <button id="teleport" class="icon-button" title="Teleport within your power field / 1s channel, 2s arrival, 30s cooldown" aria-label="Teleport" aria-pressed="false" hidden><i data-lucide="sparkles"></i><span class="cmd-label">Teleport</span></button>
@@ -135,12 +130,24 @@
         <div class="industry-tabs" role="tablist" aria-label="Base controls"><button role="tab" id="tab-production" aria-controls="production-pane" aria-selected="true">Production</button><button role="tab" id="tab-build" aria-controls="build-pane" aria-selected="false">Build<kbd class="key tab-key" aria-hidden="true">B</kbd></button><button role="tab" id="tab-research" aria-controls="research-pane" aria-selected="false">Research</button></div>
         <div id="production-pane" role="tabpanel" aria-labelledby="tab-production"><select id="producer-select" aria-label="Production building"></select>
         <div id="training-buttons" class="production-buttons"></div>
-        <div class="production-controls"><button id="set-rally" class="icon-button" title="Set rally destination" aria-label="Set rally destination" aria-pressed="false"><i data-lucide="flag"></i></button><button id="clear-rally" class="icon-button" title="Clear rally" aria-label="Clear rally"><i data-lucide="flag-off"></i></button><button id="auto-labour" class="icon-button" title="Auto-labour: train labour at idle hubs until there is one per patch (L)" aria-label="Auto-labour" aria-pressed="false"><i data-lucide="repeat"></i></button><button id="cancel-production" class="icon-button danger" title="Cancel all unfinished production" aria-label="Cancel all unfinished production"><i data-lucide="x"></i></button><span id="rally-status" class="mono muted">Rally unset</span></div>
+        <div class="production-controls"><button id="set-rally" class="icon-button" title="Set rally destination" aria-label="Set rally destination" aria-pressed="false"><i data-lucide="flag"></i></button><button id="clear-rally" class="icon-button" title="Clear rally" aria-label="Clear rally"><i data-lucide="flag-off"></i></button><button id="cancel-production" class="icon-button danger" title="Cancel all unfinished production" aria-label="Cancel all unfinished production"><i data-lucide="x"></i></button><span id="rally-status" class="mono muted">Rally unset</span></div>
         <div id="production-queue" class="production-queue mono"></div></div>
-        <div id="build-pane" role="tabpanel" aria-labelledby="tab-build" hidden><div id="building-buttons" class="production-buttons"></div><button id="expand" class="operation-button" aria-pressed="false" title="Expand toward a spot: click the map or minimap; builds a chain of outposts to the nearest free resource site, then two refineries"><i data-lucide="waypoints"></i><span>Expand toward<small>chain of outposts, then refineries</small></span></button><p id="building-count" class="mono muted"></p></div>
+        <div id="build-pane" role="tabpanel" aria-labelledby="tab-build" hidden><div id="building-buttons" class="production-buttons"></div><p id="building-count" class="mono muted"></p></div>
         <div id="research-pane" role="tabpanel" aria-labelledby="tab-research" hidden><div id="research-buttons" class="production-buttons"></div><p id="research-status" class="mono muted"></p></div>
       </section>
-      <section class="orders-section"><div class="section-heading"><p class="eyebrow">COMMANDS</p><span id="pending-count" class="mono">0</span></div><div id="command-list" class="command-list mono"></div><div id="telemetry" class="telemetry mono"></div></section>
+      <section class="orders-section strategy-section" aria-label="Strategy">
+        <div class="section-heading"><p class="eyebrow">STRATEGY</p></div>
+        <div class="strategy-buttons" role="group" aria-label="Missions and economy">
+          <button id="mission-harass" class="strategy-button" aria-label="Harass mission" aria-pressed="false"><span class="swatch"></span><span class="strategy-name">Harass</span></button>
+          <button id="mission-guard" class="strategy-button" aria-label="Guard mission" aria-pressed="false"><span class="swatch"></span><span class="strategy-name">Guard</span></button>
+          <button id="mission-raid" class="strategy-button" aria-label="Raid mission" aria-pressed="false"><span class="swatch"></span><span class="strategy-name">Raid</span></button>
+          <button id="expand" class="strategy-button" aria-label="Expand toward" aria-pressed="false" title="Expand toward a spot: click the map or minimap; builds a chain of outposts to the nearest free resource site, then two refineries"><i data-lucide="waypoints"></i><span class="strategy-name">Expand</span></button>
+          <button id="auto-labour" class="strategy-button" aria-label="Saturate workers" aria-pressed="false" title="Saturate workers: train labour at idle hubs until there is one per patch"><i data-lucide="repeat"></i><span class="strategy-name">Saturate workers</span></button>
+        </div>
+        <div id="strategy-list" class="strategy-list" aria-label="Active missions and operations"></div>
+        <p id="last-reject" class="last-reject mono" hidden></p>
+        <div class="strategy-foot"><details id="order-log" class="order-log"><summary class="mono">Orders <span id="pending-count">0</span></summary><div id="command-list" class="command-list mono"></div></details><div id="telemetry" class="telemetry mono"></div></div>
+      </section>
     </footer>
   </main>
   <div id="notice" class="notice" role="alert" hidden></div>

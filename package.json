@@ -14,7 +14,7 @@
     "test": "npm run test:core && npm run test:client",
     "test:core": "cargo test --manifest-path server/core/Cargo.toml",
     "validate:maps": "cargo run --manifest-path server/core/Cargo.toml --example validate_map -- shared/maps/skirmish.json",
-    "test:client": "node --import tsx --test tests/presentation.test.ts tests/macro.test.ts tests/roster.test.ts",
+    "test:client": "node --import tsx --test tests/presentation.test.ts tests/macro.test.ts tests/roster.test.ts tests/missions.test.ts",
     "test:integration": "node --import tsx --test tests/integration.test.ts",
     "test:browser": "playwright test",
     "bot": "tsx scripts/bot.ts",
