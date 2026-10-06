@@ -841,3 +841,26 @@ and keeps working as the army grows.
 **Would overturn it.** Players needing missions to run with the tab closed or
 across devices (then a server-side mission table), or the one-second pass
 staffing too slowly for fast reinforcement (then a server-side rally mission).
+
+## 2026-10-06 - Outpost 300, sensor 100, and the Organic creep tumor
+
+**Decision.**
+
+- **Outpost 100 -> 300 material.** It is a mineral hub and a town hall, so it
+  should be an investment, not a pylon.
+- **Sensor tower 175 -> 100 material.** Territory links are cheap. The relay
+  stays 75.
+- **New Organic building, the creep tumor ("tumor", label "Creep tumor"):**
+  250 hp, 75 material, 100 build ticks (the relay's), Organic only, cannot
+  shoot, produce or receive cargo, not static defense. It is a creep source of
+  radius 250 (HQ 360, outpost 300), growing and receding by the same rules as
+  every other patch. Placement follows the normal building rules; there is no
+  on-creep requirement.
+- **This reverses** the 2026-09-24 "only hubs make creep" decision, at the
+  author's request, so every faction has a territory link: Industrial's sensor,
+  Network's relay, Organic's tumor.
+- `RULESET_VERSION` 20 -> 21.
+
+**Would overturn it.** Organic expansion proving too cheap (raise the tumor's
+price or require creep to place it), or the practice AI starving behind a 300
+outpost (then lower it again).

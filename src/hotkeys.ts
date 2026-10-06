@@ -30,9 +30,9 @@ export const BUILD_KEYS = ["q", "w", "e", "r", "t", "y", "u", "i"] as const;
 export const BUILD_MENU_KEY = "b";
 /**
  * Operations (src/operations.ts), both buttons of the Strategy panel and live from anywhere:
- * V arms Expand (clear of every train and build key); L toggles Saturate workers.
+ * V arms Expand and O arms Territory (clear of every train and unit key; U/I are build keys, so O avoids them); L toggles Saturate workers.
  */
-export const OPERATION_KEYS = { expand: "v", autoLabour: "l" } as const;
+export const OPERATION_KEYS = { expand: "v", territory: "o", autoLabour: "l" } as const;
 
 /** Two presses of a control group key within this window centre the camera on it. */
 export const DOUBLE_TAP_MS = 350;

@@ -10,7 +10,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 20;
+pub const RULESET_VERSION: u32 = 21;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -330,6 +330,8 @@ pub const TURRET_TERRAZINE_COST: u32 = 100;
 pub const FACTION_DEFENSE_TERRAZINE_COST: u32 = 125;
 /// Material price of a refinery. **Experimental.**
 pub const REFINERY_MATERIAL_COST: u32 = 75;
+/// Material price of an outpost (a mineral hub and town hall).
+pub const OUTPOST_MATERIAL_COST: u32 = 300;
 
 /// What every player starts a match holding.
 pub const STARTING_BALANCE: Balance = Balance::new(250, STARTING_CATALYST);
@@ -513,6 +515,7 @@ pub fn is_building(kind: &str) -> bool {
             | "lab"
             | "sensor"
             | "relay"
+            | "tumor"
             | "refinery"
             | "bunker"
             | "bastion"
@@ -538,7 +541,7 @@ pub fn building_faction(kind: &str) -> Option<Faction> {
         "sensor" => Some(Faction::Industrial),
         "relay" | "bastion" => Some(Faction::Network),
         "bunker" => Some(Faction::Industrial),
-        "spine" => Some(Faction::Organic),
+        "spine" | "tumor" => Some(Faction::Organic),
         _ => None,
     }
 }
@@ -1061,7 +1064,7 @@ pub fn stats(kind: &str) -> Option<Stats> {
             training_ticks: 0,
         }),
         "barracks" | "factory" | "turret" | "bunker" | "bastion" | "spine" | "outpost" | "lab"
-        | "sensor" | "relay" | "refinery" => {
+        | "sensor" | "relay" | "tumor" | "refinery" => {
             let (hp, cost, training_ticks) = match kind {
                 "barracks" => (700, Cost::material(150), 160),
                 "factory" => (900, Cost::material(250), 240),
@@ -1078,18 +1081,23 @@ pub fn stats(kind: &str) -> Option<Stats> {
                 // Extracts catalyst from the deposit it stands on, with no
                 // workers. Material only, like every structure.
                 "refinery" => (400, Cost::material(REFINERY_MATERIAL_COST), 120),
-                "outpost" => (650, Cost::material(100), 120),
+                // A mineral hub and a town hall: an investment, not a pylon.
+                "outpost" => (650, Cost::material(OUTPOST_MATERIAL_COST), 120),
                 // Industrial's territory projector. A support structure, not a
                 // fortress: it has the least health of any building, it cannot
                 // shoot, produce or receive cargo, and the only thing it does
                 // is stand somewhere useful. Catalyst-gated at the same 50 as
                 // the lab and the factory, because territory is technology.
-                "sensor" => (450, Cost::material(175), 140),
+                "sensor" => (450, Cost::material(100), 140),
                 // Network's territory projector, and the pylon of this game:
                 // cheap, quick, fragile, and the thing the whole faction's
                 // mobility hangs off. Material only, unlike the sensor,
                 // because a Network player needs one before anything else.
                 "relay" => (300, Cost::material(75), 100),
+                // Organic's territory projector: the relay's price and build
+                // time, a creep source of radius 250. It cannot shoot, produce
+                // or receive cargo.
+                "tumor" => (250, Cost::material(75), 100),
                 _ => (650, Cost::material(200), 200),
             };
             Some(Stats {
@@ -2092,6 +2100,8 @@ pub const CREEP_RECESSION_PER_SECOND: u16 = 20;
 pub const CREEP_HQ_RADIUS: u16 = 360;
 /// Full creep radius around an Organic outpost.
 pub const CREEP_OUTPOST_RADIUS: u16 = 300;
+/// Full creep radius around an Organic creep tumor.
+pub const CREEP_TUMOR_RADIUS: u16 = 250;
 /// Speed, in percent of normal, of an Organic harvester standing on none of
 /// its owner's creep. On creep it is 100.
 pub const CREEP_OFF_SPEED_PERCENT: i32 = 60;
@@ -2140,12 +2150,14 @@ fn off_creep_percent() -> i32 {
 }
 
 /// The full radius creep reaches around a finished Organic building of
-/// `kind`, or `None` for one that spreads none. **Only hubs make creep**: the
-/// HQ and the outpost. Every other building, Organic or not, spreads nothing.
+/// `kind`, or `None` for one that spreads none. The hubs (HQ, outpost) and the
+/// creep tumor make creep; every other building spreads nothing. (The tumor
+/// reverses the 2026-09-24 "only hubs make creep" decision.)
 pub fn creep_max_radius(kind: &str) -> Option<u16> {
     match kind {
         "hq" => Some(CREEP_HQ_RADIUS),
         "outpost" => Some(CREEP_OUTPOST_RADIUS),
+        "tumor" => Some(CREEP_TUMOR_RADIUS),
         _ => None,
     }
 }
@@ -3004,7 +3016,8 @@ mod tests {
     fn creep_radius_is_fixed_by_the_source_kind() {
         assert_eq!(creep_max_radius("hq"), Some(360));
         assert_eq!(creep_max_radius("outpost"), Some(300));
-        // Only hubs make creep.
+        assert_eq!(creep_max_radius("tumor"), Some(250));
+        // Hubs and the tumor make creep, nothing else.
         for kind in ["barracks", "factory", "turret", "lab", "sensor"] {
             assert_eq!(creep_max_radius(kind), None, "{kind} spreads no creep");
         }
@@ -3232,7 +3245,7 @@ mod tests {
         // base income. 15: unit cap 400 and building cap 150, and routes from
         // shared breadth-first fields (equally short routes may tie-break
         // differently from the old per-unit A*).
-        assert_eq!(RULESET_VERSION, 20);
+        assert_eq!(RULESET_VERSION, 21);
         assert!(RULESET_VERSION > 0);
     }
 
@@ -3253,11 +3266,12 @@ mod tests {
             ("crusher", 0, 250, 0),
             ("barracks", 150, 0, 0),
             ("turret", 0, 0, 100),
-            ("outpost", 100, 0, 0),
+            ("outpost", 300, 0, 0),
             ("factory", 250, 0, 0),
             ("lab", 200, 0, 0),
-            ("sensor", 175, 0, 0),
+            ("sensor", 100, 0, 0),
             ("relay", 75, 0, 0),
+            ("tumor", 75, 0, 0),
             ("refinery", 75, 0, 0),
             ("research_weapons", 150, 0, 0),
             ("research_armor", 150, 0, 0),
@@ -3302,6 +3316,7 @@ mod tests {
             "lab",
             "sensor",
             "relay",
+            "tumor",
             "refinery",
             "research_weapons",
             "research_armor",
@@ -3340,6 +3355,7 @@ mod tests {
             ("outpost", 650, 120),
             ("lab", 650, 200),
             ("sensor", 450, 140),
+            ("tumor", 250, 100),
             ("research_weapons", 0, 0),
             ("tier_1", 0, 0),
         ] {

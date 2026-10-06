@@ -77,8 +77,8 @@ test("the command card prices everything exactly as the ruleset does", () => {
     ["soldier", 0, 100, 0], ["scout", 0, 80, 0], ["siege", 0, 200, 0],
     ["sentinel", 0, 150, 0], ["skimmer", 0, 90, 0], ["lancer", 0, 250, 0],
     ["swarmer", 0, 50, 0], ["spitter", 0, 90, 0], ["crusher", 0, 250, 0],
-    ["barracks", 150, 0, 0], ["turret", 0, 0, 100], ["outpost", 100, 0, 0], ["factory", 250, 0, 0], ["lab", 200, 0, 0],
-    ["sensor", 175, 0, 0], ["relay", 75, 0, 0], ["refinery", 75, 0, 0],
+    ["barracks", 150, 0, 0], ["turret", 0, 0, 100], ["outpost", 300, 0, 0], ["factory", 250, 0, 0], ["lab", 200, 0, 0],
+    ["sensor", 100, 0, 0], ["relay", 75, 0, 0], ["tumor", 75, 0, 0], ["refinery", 75, 0, 0],
   ];
   for (const [kind, material, catalyst, terrazine] of expected) assert.deepEqual(CATALOG[kind].cost, { material, catalyst, terrazine }, kind);
   for (const kind of ["research_weapons", "research_armor", "research_logistics"]) assert.deepEqual(costOf(kind), { material: 150, catalyst: 0, terrazine: 0 }, kind);
@@ -918,7 +918,7 @@ test("power fields come from Network relays and hubs only, and only once finishe
   assert.ok(!powered(1, 200, 200, fields), "owner only");
   assert.ok(!powered(0, 1000, 200, fields), "an unfinished relay projects nothing");
   assert.ok(!powered(1, 2400, 2000, fields), "a sensor field is not power");
-  assert.deepEqual(BUILDING_FACTION, { sensor: "industrial", relay: "network", bunker: "industrial", bastion: "network", spine: "organic" });
+  assert.deepEqual(BUILDING_FACTION, { sensor: "industrial", relay: "network", bunker: "industrial", bastion: "network", spine: "organic", tumor: "organic" });
 });
 
 test("a drifter trains at any finished structure in its owner's field; nothing else changes", () => {
@@ -1370,7 +1370,7 @@ test("Tab cycles the kinds in a mixed selection and a stale subgroup is dropped"
 // --- Operations: expand toward, auto-labour ---------------------------------
 
 import expanseMap from "../shared/maps/expanse.json";
-import { autoLabourOrders, depositClusters, expansionSites, nearestSite, planExpansion, stepExpansion, type Expansion, type Plan, type View } from "../src/operations";
+import { autoLabourOrders, depositClusters, expansionSites, nearestSite, planExpansion, planTerritory, stepExpansion, TERRITORY_LINK, type Expansion, type Plan, type View } from "../src/operations";
 
 const expanseNodes: Node[] = expanseMap.deposits.map(entry => ({ id: entry.id, x: entry.x, y: entry.y, amount: entry.amount, miner: 0, kind: entry.kind === "catalyst" ? ResourceKind.Catalyst : ResourceKind.Material }));
 const homes = (): Entity[] => [placed(1, 1, "hq", 8750, 850), placed(2, 0, "hq", 850, 850)];
@@ -1402,6 +1402,8 @@ test("an expansion plan is a legal, connected chain ending beside the deposits w
       assert.ok(error === undefined || error === "Outside build radius", `link at ${link.x},${link.y}: ${error}`);
       previous = link;
     }
+    assert.equal((plan as Plan).link, "sensor", "hops are the faction's territory link");
+    assert.equal((plan as Plan).last, "outpost", "only the building at the site is an outpost");
     const last = chain[chain.length - 1];
     const gap = Math.hypot(last.x - site.x, last.y - site.y);
     assert.ok(gap >= 140 && gap <= 260, `the outpost stands ${Math.round(gap)} from the deposits`);
@@ -1416,6 +1418,38 @@ test("an expansion plan is a legal, connected chain ending beside the deposits w
   assert.deepEqual(none, { error: "No finished building to expand from" });
 });
 
+test("each faction links its territory with its own building", () => {
+  assert.deepEqual(TERRITORY_LINK, { industrial: "sensor", network: "relay", organic: "tumor" });
+  const units = homes();
+  const site = nearestSite({ x: 7275, y: 1049 }, expansionSites(expanseNodes, units))!;
+  assert.equal((planExpansion(site, 1, units, expanseNodes, "network") as Plan).link, "relay");
+});
+
+test("a territory chain runs from the nearest finished building to the clicked point, links all the way", () => {
+  const units = homes();
+  const target = { x: 3000, y: 900 };
+  const plan = planTerritory(target, 1, units, expanseNodes, "industrial") as Plan;
+  assert.ok(!("error" in plan));
+  assert.equal(plan.link, "sensor");
+  assert.equal(plan.last, "sensor");
+  assert.equal(plan.refineries.length, 0);
+  let previous = plan.origin;
+  for (const link of plan.chain) {
+    assert.ok(Math.hypot(link.x - previous.x, link.y - previous.y) <= 500, "every hop is inside the build radius");
+    previous = link;
+  }
+  const last = plan.chain[plan.chain.length - 1];
+  assert.ok(Math.hypot(last.x - target.x, last.y - target.y) <= 200, "the last link is at or beside the clicked point");
+  assert.ok(Math.hypot(plan.origin.x - 850, plan.origin.y - 850) < 5 || Math.hypot(plan.origin.x - 8750, plan.origin.y - 850) < 5);
+  assert.deepEqual(planTerritory(target, 1, [], expanseNodes, "industrial"), { error: "No finished building to extend from" });
+  assert.ok(chainWalk(plan, 1, units).length === plan.chain.length);
+});
+
+/** The building each link of a plan is ordered as, in order. */
+function chainWalk(plan: Plan, owner: number, units: Entity[]): string[] {
+  return plan.chain.map((link, index) => (index === plan.chain.length - 1 ? plan.last : plan.link) + `@${link.x},${link.y}:${owner}:${units.length}`);
+}
+
 test("an expansion places one link at a time, waits for material and builds refineries last", () => {
   const units = homes();
   const site = nearestSite({ x: 7275, y: 1049 }, expansionSites(expanseNodes, units))!;
@@ -1426,28 +1460,32 @@ test("an expansion places one link at a time, waits for material and builds refi
   const rich = purse(1000);
   const total = plan.chain.length + 2;
 
+  const kindOf = (index: number) => (index === plan.chain.length - 1 ? "outpost" : "sensor");
   // Link 1 is ordered in the HQ's name at the planned point.
   let step = stepExpansion(operation, view([]), hq, false, rich);
   assert.equal(step.total, total);
   assert.equal(step.done, 0);
   assert.equal(step.intents.length, 1);
-  assert.deepEqual(step.intents[0], { units: [hq.id], order: { kind: "build_outpost", x: plan.chain[0].x, y: plan.chain[0].y, target: 0 } });
+  assert.deepEqual(step.intents[0], { units: [hq.id], order: { kind: `build_${kindOf(0)}`, x: plan.chain[0].x, y: plan.chain[0].y, target: 0 } });
   // Short of material: it waits and says so, and lets others know it is starved.
-  step = stepExpansion(operation, view([]), hq, false, purse(99));
+  step = stepExpansion(operation, view([]), hq, false, purse(CATALOG[kindOf(0)].cost.material - 1));
   assert.equal(step.intents.length, 0);
   assert.equal(step.starved, true);
   // While the order is in the delay, or the HQ is busy, it does not order again.
-  assert.equal(stepExpansion(operation, view([], [{ units: [hq.id], order: { kind: "build_outpost", x: plan.chain[0].x, y: plan.chain[0].y, target: 0 } }]), hq, true, rich).intents.length, 0);
+  assert.equal(stepExpansion(operation, view([], [{ units: [hq.id], order: { kind: `build_${kindOf(0)}`, x: plan.chain[0].x, y: plan.chain[0].y, target: 0 } }]), hq, true, rich).intents.length, 0);
   assert.equal(stepExpansion(operation, view([]), hq, true, rich).intents.length, 0);
 
-  // Each link waits for the one before to finish.
+  // A link under construction is waited for, but the next may be ordered beside it (one hop ahead).
   const stood: Entity[] = [];
   for (const [index, link] of plan.chain.entries()) {
-    const building = placed(100 + index, 1, "outpost", link.x, link.y, 100n);
+    const building = placed(100 + index, 1, kindOf(index), link.x, link.y, 100n);
     step = stepExpansion(operation, view([...stood, building]), hq, false, rich);
-    assert.equal(step.intents.length, 0, "an outpost under construction is waited for");
     assert.equal(step.done, index);
-    stood.push(placed(100 + index, 1, "outpost", link.x, link.y));
+    if (index + 1 < plan.chain.length && step.intents.length) {
+      assert.equal(step.intents[0].order.x, plan.chain[index + 1].x, "the next link runs one hop ahead");
+      assert.equal(step.intents[0].order.kind, `build_${kindOf(index + 1)}`);
+    } else assert.equal(step.intents.length, 0, "nothing else to order while it builds");
+    stood.push(placed(100 + index, 1, kindOf(index), link.x, link.y));
     step = stepExpansion(operation, view(stood), hq, false, rich);
     assert.equal(step.done, index + 1);
     if (index + 1 < plan.chain.length) {

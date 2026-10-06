@@ -13,7 +13,7 @@
 
 - **Industrial**: the conventional one. Workers carry ore home; sensor towers speed up your army; strong, simple defenses.
 - **Network**: fewer, tougher units that are half shield. Drifters mine in place, and relays project a power field where shields recharge fast and units can teleport.
-- **Organic**: cheap fast swarms. Harvesters are free but limited by hub stock, and your hubs spread creep that makes dying units leave temporary fighters behind.
+- **Organic**: cheap fast swarms. Harvesters are free but limited by hub stock, and your hubs and creep tumors spread creep that makes dying units leave temporary fighters behind.
 
 ## Money: three currencies, one job each
 
@@ -53,7 +53,7 @@
 - **F1** selects idle labour, **F2** your army, **Backspace** jumps to your base.
 - **Army roster** (top left, under the player list): your army grouped by what it is doing and where. Click a row to select those units and jump to them; Shift+click adds them. Idle units in the field are highlighted red. The F1 button shows how many labour units are idle.
 - **Space** (a tap) jumps to the latest attack on you; hold **Space** and drag to pan. An alert banner and a pulsing red ring on the minimap show where.
-- **Strategy panel** (right end of the bottom bar, always visible): the mission buttons, **Expand** (**V**) and **Saturate workers** (**L**), then one list of your missions and operations with size controls, a go-to click on the name, and a cancel button. See "Missions" and "Operations" below.
+- **Strategy panel** (right end of the bottom bar, always visible): the mission buttons, **Expand** (**V**), **Territory** (**O**) and **Saturate workers** (**L**), then one list of your missions and operations with size controls, a go-to click on the name, and a cancel button. See "Missions" and "Operations" below.
 - **?** (or the keyboard button) shows the full control list. Scroll to zoom; middle-drag or arrow keys pan.
 
 ## Missions: say where, not who
@@ -65,7 +65,8 @@
 
 ## Operations: let the game do the legwork
 
-- **Expand toward** (Strategy panel, or **V**): click anywhere on the map or minimap. The nearest free base site is chosen, a dashed numbered line shows the outposts that will be built to reach it, and the game places them one after another as each finishes, then two refineries on the site's catalyst. It waits when material runs short. Several can run at once; each shows in the Strategy panel's list with its step and a cancel button.
+- **Expand** (Strategy panel, or **V**): click anywhere on the map or minimap. The nearest free base site is chosen, a dashed numbered line shows the chain, and the game places it one step at a time: your faction's territory links (sensor towers, relays or creep tumors) to reach the site, an outpost beside the deposits, then two refineries on the site's catalyst. It runs one hop ahead of construction and waits when material runs short. Several can run at once; each shows in the Strategy panel's list with its step and a cancel button.
+- **Territory** (Strategy panel, or **O**): click the map or minimap and your faction strings its territory link (sensor towers for Industrial, relays for Network, creep tumors for Organic) from your nearest finished building toward that point, the last one at or beside it. No outpost, no refineries: it extends reach, not income.
 - **Saturate workers** (Strategy panel, or **L**; this was called auto-labour): idle hubs train one labour unit each until you have one per mining patch on your hubs' own mineral lines, plus two spare (no spares for drifters, which never leave their patch). It pauses while an expansion is waiting for material.
 - Operations only send the same orders you could, so they obey the same one-second delay and the same costs, and they stop when the match ends.
 

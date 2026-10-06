@@ -76,7 +76,19 @@ export function nearestSite(point: Point, sites: readonly Cluster[]): Cluster | 
   return [...sites].sort((left, right) => Math.hypot(left.x - point.x, left.y - point.y) - Math.hypot(right.x - point.x, right.y - point.y))[0];
 }
 
-export interface Plan { site: Cluster; origin: Point; chain: Point[]; refineries: number[] }
+/**
+ * The building each faction strings along a chain to extend its territory: the
+ * one that projects its reach (Industrial's sensor tower speeds units, Network's
+ * relay is a power field, Organic's tumor spreads creep). Looked up in CATALOG at use.
+ */
+export const TERRITORY_LINK: Record<FactionName, string> = { industrial: "sensor", network: "relay", organic: "tumor" };
+
+/**
+ * A chain to build: `link` at every hop and `last` at the end (an outpost at a
+ * resource site for Expand, another link for Territory). `site` and `refineries`
+ * are only for Expand.
+ */
+export interface Plan { site?: Cluster; origin: Point; chain: Point[]; refineries: number[]; link: string; last: string }
 
 /** A stand-in for a planned outpost, so later links are planned around the earlier ones. */
 const planned = (owner: number, index: number, point: Point): Entity =>
@@ -99,7 +111,8 @@ function plannable(x: number, y: number, owner: number, units: Entity[], nodes: 
  * and clear of the catalyst so its refineries still fit. Nothing is ordered;
  * the caller shows it and `stepExpansion` carries it out.
  */
-export function planExpansion(site: Cluster, owner: number, units: readonly Entity[], nodes: readonly Node[]): Plan | { error: string } {
+export function planExpansion(site: Cluster, owner: number, units: readonly Entity[], nodes: readonly Node[], faction: FactionName = "industrial"): Plan | { error: string } {
+  if (!CATALOG[TERRITORY_LINK[faction]]) return { error: "Your faction has no territory building yet" };
   const all = [...units];
   const homes = all.filter(unit => unit.owner === owner && isBuilding(unit.kind) && unit.constructionRemaining === 0n);
   const origin = [...homes].sort((left, right) => Math.hypot(left.x - site.x, left.y - site.y) - Math.hypot(right.x - site.x, right.y - site.y))[0];
@@ -121,19 +134,52 @@ export function planExpansion(site: Cluster, owner: number, units: readonly Enti
   // legal point: the candidate nearest the spot among a fan of bearings around
   // the straight line. Walls and obstacles are walked around instead of
   // failing the whole plan, and the line is as short as it can be.
+  const chain = walkChain(origin, spot, owner, all, nodes as Node[]);
+  if (!chain) return { error: "Could not find a connected line of territory links to that site" };
+  const refineries = [...site.catalysts].sort((left, right) => Math.hypot(left.x - spot.x, left.y - spot.y) - Math.hypot(right.x - spot.x, right.y - spot.y) || left.id - right.id)
+    .slice(0, REFINERIES_WANTED).map(node => node.id);
+  return { site, origin: { x: origin.x, y: origin.y }, chain, refineries, link: TERRITORY_LINK[faction], last: "outpost" };
+}
+
+/** Hops from `origin` to `spot`, each at most `CHAIN_STEP`, the last one `spot` itself; nothing if the line cannot be walked. */
+function walkChain(origin: Point, spot: Point, owner: number, all: Entity[], nodes: Node[]): Point[] | undefined {
   const chain: Point[] = [];
   let previous: Point = origin;
   while (Math.hypot(spot.x - previous.x, spot.y - previous.y) > CHAIN_STEP) {
     const extra = chain.map((point, index) => planned(owner, index, point));
-    const link = nextHop(previous, spot, owner, [...all, ...extra], nodes as Node[]);
-    if (!link || chain.length >= MAX_CHAIN) return { error: "Could not find a connected line of outposts to that site" };
+    const link = nextHop(previous, spot, owner, [...all, ...extra], nodes);
+    if (!link || chain.length >= MAX_CHAIN) return undefined;
     chain.push(link);
     previous = link;
   }
   chain.push(spot);
-  const refineries = [...site.catalysts].sort((left, right) => Math.hypot(left.x - spot.x, left.y - spot.y) - Math.hypot(right.x - spot.x, right.y - spot.y) || left.id - right.id)
-    .slice(0, REFINERIES_WANTED).map(node => node.id);
-  return { site, origin: { x: origin.x, y: origin.y }, chain, refineries };
+  return chain;
+}
+
+/**
+ * The territory chain toward `point`: links from the finished building of yours
+ * nearest to it, the last one on the legal spot nearest `point` (within 200 of it).
+ */
+export function planTerritory(point: Point, owner: number, units: readonly Entity[], nodes: readonly Node[], faction: FactionName): Plan | { error: string } {
+  const link = TERRITORY_LINK[faction];
+  if (!CATALOG[link]) return { error: "Your faction has no territory building yet" };
+  const all = [...units];
+  const homes = all.filter(unit => unit.owner === owner && isBuilding(unit.kind) && unit.constructionRemaining === 0n);
+  const origin = [...homes].sort((left, right) => Math.hypot(left.x - point.x, left.y - point.y) - Math.hypot(right.x - point.x, right.y - point.y))[0];
+  if (!origin) return { error: "No finished building to extend from" };
+  let spot: Point | undefined;
+  search: for (const ring of [0, 40, 80, 120, 160, 200]) {
+    for (let bearing = 0; bearing < (ring === 0 ? 1 : 16); bearing++) {
+      const angle = bearing / 16 * Math.PI * 2;
+      const x = Math.round(point.x + Math.cos(angle) * ring);
+      const y = Math.round(point.y + Math.sin(angle) * ring);
+      if (plannable(x, y, owner, all, nodes as Node[])) { spot = { x, y }; break search; }
+    }
+  }
+  if (!spot) return { error: "No legal spot for a territory link there (terrain or buildings in the way)" };
+  const chain = walkChain(origin, spot, owner, all, nodes as Node[]);
+  if (!chain) return { error: `Could not find a connected line of ${CATALOG[link].label.toLowerCase()}s to that point` };
+  return { origin: { x: origin.x, y: origin.y }, chain, refineries: [], link, last: link };
 }
 
 /** More links than this is not a plan, it is a map crossing. */
@@ -172,7 +218,7 @@ export interface View {
 
 export interface Expansion {
   id: number;
-  kind: "expand";
+  kind: "expand" | "territory";
   label: string;
   plan: Plan;
   /** The chain as it stands: a link is re-planned in place if its point stops being legal. */
@@ -210,10 +256,13 @@ function ordered(view: View, kind: string, point: Point): boolean {
 export function stepExpansion(operation: Expansion, view: View, issuer: Entity | undefined, issuerBusy: boolean, available: Cost): StepResult {
   const { owner, units, nodes } = view;
   const total = operation.chain.length + operation.plan.refineries.length;
-  const ownOutposts = units.filter(unit => unit.owner === owner && unit.kind === "outpost");
-  const outpostAt = (point: Point) => ownOutposts.find(unit => near(unit, point, LINK_TOLERANCE));
-  const linkDone = (point: Point) => outpostAt(point)?.constructionRemaining === 0n;
-  const stepsDone = operation.chain.filter(linkDone).length;
+  const kindAt = (index: number) => (index === operation.chain.length - 1 ? operation.plan.last : operation.plan.link);
+  const own = units.filter(unit => unit.owner === owner && isBuilding(unit.kind));
+  // A hop may be any of your buildings standing on it (the link, an outpost, anything); the last
+  // building of an expansion must be the outpost itself.
+  const standingAt = (index: number) => own.find(unit => near(unit, operation.chain[index], LINK_TOLERANCE) && (kindAt(index) !== "outpost" || unit.kind === "outpost"));
+  const linkDone = (index: number) => standingAt(index)?.constructionRemaining === 0n;
+  const stepsDone = operation.chain.filter((_, index) => linkDone(index)).length;
   const result = (partial: Partial<StepResult> & { note: string }): StepResult => ({ intents: [], done: stepsDone, total, finished: false, starved: false, ...partial });
   const place = (kind: string, point: Point, cost: Cost, what: string): StepResult => {
     if (shortfall(available, cost)) return result({ note: `Waiting for ${shortfall(available, cost)} (${what})`, starved: shortfall(available, cost) === "material" });
@@ -222,26 +271,34 @@ export function stepExpansion(operation: Expansion, view: View, issuer: Entity |
     return result({ note: `Placing ${what}`, intents: [{ units: [issuer.id], order: { kind: `build_${kind}`, x: point.x, y: point.y, target: 0 } }] });
   };
 
-  const next = operation.chain.findIndex(point => !linkDone(point));
-  if (next >= 0) {
+  // Walk the chain: finished links are behind us; an unfinished one that stands is waited on, but the next
+  // link may be placed beside it (the build radius counts a building under construction that is itself in
+  // reach of a finished one), so the chain runs one hop ahead. An order still in the delay is waited for.
+  let building: string | undefined;
+  for (let next = 0; next < operation.chain.length; next++) {
+    if (linkDone(next)) continue;
     const point = operation.chain[next];
-    const label = `outpost ${next + 1}/${operation.chain.length}`;
-    if (outpostAt(point) || ordered(view, "outpost", point)) return result({ note: `Building ${label}` });
+    const kind = kindAt(next);
+    const label = `${CATALOG[kind]?.label.toLowerCase() ?? kind} ${next + 1}/${operation.chain.length}`;
+    if (ordered(view, kind, point)) return result({ note: `Building ${label}` });
+    if (standingAt(next)) { building ??= label; continue; }
     // The point may have been taken since it was planned (a unit standing on it,
     // someone building beside it). Move this link to the nearest legal point in
     // range, or report why it cannot.
-    const error = placementError("outpost", point.x, point.y, owner, units as Entity[], nodes as Node[]);
+    const error = placementError(kind, point.x, point.y, owner, units as Entity[], nodes as Node[]);
+    if (error === "Outside build radius" && building) return result({ note: `Building ${building}` });
     if (error) {
       const from = next === 0 ? operation.plan.origin : operation.chain[next - 1];
-      const home = units.filter(unit => unit.owner === owner && isBuilding(unit.kind) && unit.constructionRemaining === 0n);
+      const home = own.filter(unit => unit.constructionRemaining === 0n);
       const anchor = [...home].sort((left, right) => Math.hypot(left.x - point.x, left.y - point.y) - Math.hypot(right.x - point.x, right.y - point.y))[0] ?? from;
-      const moved = nearLegalLive(point, anchor, owner, units as Entity[], nodes as Node[]);
+      const moved = nearLegalLive(point, anchor, kind, owner, units as Entity[], nodes as Node[]);
       if (!moved) return result({ note: `Blocked at ${label}: ${error}` });
       operation.chain[next] = moved;
-      return place("outpost", moved, CATALOG.outpost.cost, label);
+      return place(kind, moved, CATALOG[kind].cost, label);
     }
-    return place("outpost", point, CATALOG.outpost.cost, label);
+    return place(kind, point, CATALOG[kind].cost, label);
   }
+  if (building) return result({ note: `Building ${building}` });
 
   // Every outpost stands: the refineries, on the site's catalyst deposits.
   const targets = operation.plan.refineries.map(id => nodes.find(node => node.id === id));
@@ -265,13 +322,13 @@ export function stepExpansion(operation: Expansion, view: View, issuer: Entity |
 }
 
 /** `nearLegal`, but strict: the live rules, build radius included, measured from `anchor`. */
-function nearLegalLive(ideal: Point, anchor: Point, owner: number, units: Entity[], nodes: Node[]): Point | undefined {
+function nearLegalLive(ideal: Point, anchor: Point, kind: string, owner: number, units: Entity[], nodes: Node[]): Point | undefined {
   for (const ring of [0, 40, 80, 120, 160]) {
     for (let bearing = 0; bearing < (ring === 0 ? 1 : 12); bearing++) {
       const angle = bearing / 12 * Math.PI * 2;
       const x = Math.round(ideal.x + Math.cos(angle) * ring);
       const y = Math.round(ideal.y + Math.sin(angle) * ring);
-      if (Math.hypot(x - anchor.x, y - anchor.y) <= CHAIN_STEP && !placementError("outpost", x, y, owner, units, nodes)) return { x, y };
+      if (Math.hypot(x - anchor.x, y - anchor.y) <= CHAIN_STEP && !placementError(kind, x, y, owner, units, nodes)) return { x, y };
     }
   }
   return undefined;
@@ -354,19 +411,45 @@ export class Operations {
     return { owner: me.slot, units, nodes, sent };
   }
 
+  private faction(): FactionName { const me = this.session.snapshot.me; return me ? factionOf(me.faction) : "industrial"; }
+
   /** Plans an expansion toward the site nearest `point`. Returns why it could not, or nothing on success. */
   begin(point: Point): string | undefined {
     const view = this.view();
     if (!view) return "Not in a match";
-    const sites = expansionSites(view.nodes, view.units).filter(site => !this.list.some(operation => near(operation.plan.site, site, 300)));
+    const sites = expansionSites(view.nodes, view.units).filter(site => !this.list.some(operation => operation.plan.site && near(operation.plan.site, site, 300)));
     const site = nearestSite(point, sites);
     if (!site) return this.list.length ? "No other free resource site on the map" : "No free resource site on the map";
-    const plan = planExpansion(site, view.owner, view.units, view.nodes);
+    const plan = planExpansion(site, view.owner, view.units, view.nodes, this.faction());
     if ("error" in plan) return plan.error;
     this.list.push({ id: this.nextId++, kind: "expand", label: `Expand to ${Math.round(site.x)}, ${Math.round(site.y)}`, plan, chain: plan.chain.map(link => ({ ...link })), done: 0, total: plan.chain.length + plan.refineries.length, note: "Planned" });
     this.onChange();
     this.pass();
     return undefined;
+  }
+
+  /** Plans a territory chain toward `point`. Returns why it could not, or nothing on success. */
+  beginTerritory(point: Point): string | undefined {
+    const view = this.view();
+    if (!view) return "Not in a match";
+    const plan = planTerritory(point, view.owner, view.units, view.nodes, this.faction());
+    if ("error" in plan) return plan.error;
+    const last = plan.chain[plan.chain.length - 1];
+    this.list.push({ id: this.nextId++, kind: "territory", label: `Territory to ${Math.round(last.x)}, ${Math.round(last.y)}`, plan, chain: plan.chain.map(link => ({ ...link })), done: 0, total: plan.chain.length, note: "Planned" });
+    this.onChange();
+    this.pass();
+    return undefined;
+  }
+
+  /** The chain a territory operation armed at `point` would build, for the preview under the cursor. */
+  previewTerritory(point: Point): OverlayPath | undefined {
+    const view = this.view();
+    if (!view) return undefined;
+    const buildings = view.units.filter(unit => unit.owner === view.owner && isBuilding(unit.kind)).length;
+    const key = `t${Math.round(point.x / 20)},${Math.round(point.y / 20)}:${buildings}`;
+    let plan = this.previews.get(key);
+    if (!plan) { if (this.previews.size > 40) this.previews.clear(); plan = planTerritory(point, view.owner, view.units, view.nodes, this.faction()); this.previews.set(key, plan); }
+    return "error" in plan ? undefined : { origin: plan.origin, points: plan.chain, done: 0 };
   }
 
   cancel(id: number): void {
@@ -381,10 +464,11 @@ export class Operations {
     const sites = expansionSites(view.nodes, view.units);
     const site = nearestSite(point, sites);
     if (!site) return undefined;
+    const faction = this.faction();
     const buildings = view.units.filter(unit => unit.owner === view.owner && isBuilding(unit.kind)).length;
     const key = `${Math.round(site.x)},${Math.round(site.y)}:${buildings}`;
     let plan = this.previews.get(key);
-    if (!plan) { if (this.previews.size > 20) this.previews.clear(); plan = planExpansion(site, view.owner, view.units, view.nodes); this.previews.set(key, plan); }
+    if (!plan) { if (this.previews.size > 20) this.previews.clear(); plan = planExpansion(site, view.owner, view.units, view.nodes, faction); this.previews.set(key, plan); }
     return "error" in plan ? undefined : { origin: plan.origin, points: plan.chain, done: 0 };
   }
 

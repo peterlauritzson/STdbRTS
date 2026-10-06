@@ -77,13 +77,14 @@ export const CATALOG: Record<string, Definition> = {
   bastion: { label: "Bastion", hp: 500, radius: 30, cost: price(0, 0, 125), seconds: 7.5, building: true, icon: "castle", role: "Network defense / 190 range / costs terrazine" },
   spine: { label: "Spine", hp: 600, radius: 30, cost: price(0, 0, 125), seconds: 7.5, building: true, icon: "triangle", role: "Organic defense / 170 range / costs terrazine" },
   refinery: { label: "Refinery", hp: 400, radius: 28, cost: price(75), seconds: 6, building: true, icon: "fuel", role: "Extracts catalyst from the deposit it stands on, with no workers / build on a catalyst deposit" },
-  outpost: { label: "Outpost", hp: 650, radius: 30, cost: price(100), seconds: 6, building: true, icon: "warehouse", role: "Resource drop-off / base expansion" },
+  outpost: { label: "Outpost", hp: 650, radius: 30, cost: price(300), seconds: 6, building: true, icon: "warehouse", role: "Resource drop-off / base expansion / an investment" },
   lab: { label: "Laboratory", hp: 650, radius: 32, cost: price(200), seconds: 10, building: true, icon: "flask-conical", role: "Tier 3 gate / requires barracks" },
   // Faction buildings: each projects its faction's zone and nobody else can
   // build it. `hp` is the listed total; a Network entity carries half of it as
   // shields, and the row's own `maxHp`/`maxShields` are what to draw against.
-  sensor: { label: "Sensor tower", hp: 450, radius: 26, cost: price(175), seconds: 7, building: true, icon: "satellite-dish", role: "Industrial / your units move 30% faster within 450" },
+  sensor: { label: "Sensor tower", hp: 450, radius: 26, cost: price(100), seconds: 7, building: true, icon: "satellite-dish", role: "Industrial / your units move 30% faster within 450" },
   relay: { label: "Relay", hp: 300, radius: 22, cost: price(75), seconds: 5, building: true, icon: "zap", role: "Network / power field 320: drifters train at any structure in it, shields regenerate 3x, units teleport within it" },
+  tumor: { label: "Creep tumor", hp: 250, radius: 20, cost: price(75), seconds: 5, building: true, icon: "sprout", role: "Organic / spreads creep out to 250; cannot shoot, produce or take cargo" },
   // Temporary units creep spawns where one of its owner's units dies on it —
   // mirrors `rules::stats` and `rules::temporary_lifetime`. Never trained (so
   // no training time and no button), free, not army, and take no supply.

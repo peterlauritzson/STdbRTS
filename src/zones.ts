@@ -23,7 +23,7 @@ export const TELEPORT_CHANNEL_TICKS = 20;
 export const TELEPORT_ARRIVAL_TICKS = 40;
 
 /** The faction-owned structure that projects each faction's building zone. */
-export const BUILDING_FACTION: Readonly<Record<string, FactionName>> = { sensor: "industrial", relay: "network", bunker: "industrial", bastion: "network", spine: "organic" };
+export const BUILDING_FACTION: Readonly<Record<string, FactionName>> = { sensor: "industrial", relay: "network", bunker: "industrial", bastion: "network", spine: "organic", tumor: "organic" };
 
 type Placed = Pick<Entity, "owner" | "kind" | "x" | "y" | "constructionRemaining">;
 

@@ -86,13 +86,14 @@ Every structure is built by placing it on the map; it then raises itself and nee
 | **Barracks** | Everyone | 700 | 150 material | 8 | - | Trains each faction's fighters and raiders (the second unit of each needs tier 1). Required before a factory or laboratory, and for buying tier 1. |
 | **Factory** | Everyone | 900 | 250 material | 12 | barracks | Trains the heavy units: siege, lancer, crusher (no tier) and bulwark, warden, behemoth (tier 2). Required for buying tier 2. |
 | **Laboratory** | Everyone | 650 | 200 material | 10 | barracks | Required for buying tier 3. It researches nothing itself: research is instant and needs no building. |
-| **Outpost** | Everyone | 650 | 100 material | 6 | - | A second hub. Receives mined material and trains labour. For Organic it also spreads creep and stores harvester stock; for Network it projects a power field. |
+| **Outpost** | Everyone | 650 | 300 material | 6 | - | A second hub, and an investment. Receives mined material and trains labour. For Organic it also spreads creep and stores harvester stock; for Network it projects a power field. |
 | **Refinery** | Everyone | 400 | 75 material | 6 | catalyst deposit | Must be built on a catalyst deposit (it snaps to one within 60 units; one per deposit). Extracts 4 catalyst every half second with no workers. |
 | **Turret** | Everyone | 500 | 100 terrazine | 7 | - | Static defense. Range 210, damage 16, cooldown 0.9 s. |
-| **Sensor tower** | Industrial | 450 | 175 material | 7 | - | Projects a sensor field (radius 450) that speeds up your units by 30%. Cannot shoot or train. |
+| **Sensor tower** | Industrial | 450 | 100 material | 7 | - | Projects a sensor field (radius 450) that speeds up your units by 30%. Cannot shoot or train. |
 | **Bunker** | Industrial | 800 | 125 terrazine | 8 | - | Static defense. Range 150, damage 20, cooldown 0.9 s. Passive: Fortified. |
 | **Relay** | Network | 300 | 75 material | 5 | - | Projects a power field (radius 320). Cannot shoot. |
 | **Bastion** | Network | 500 | 125 terrazine | 7.5 | - | Static defense. Range 190, damage 14, cooldown 0.7 s. Passive: Ricochet (one bounce). |
+| **Creep tumor** | Organic | 250 | 75 material | 5 | - | Spreads creep out to a radius of 250. Cannot shoot, train or receive cargo. Can be built anywhere in your build reach, on creep or not. |
 | **Spine** | Organic | 600 | 125 terrazine | 7.5 | - | Static defense. Range 170, damage 12, cooldown 0.6 s. Passive: Predator. |
 
 Static defense (turret, bunker, bastion, spine) fires automatically at the nearest enemy in range and in line of sight.
@@ -130,9 +131,9 @@ Zones belong to their owner only: an enemy standing in your zone gets nothing fr
 | --- | --- | --- | --- | --- |
 | **Sensor field** | Industrial | Finished sensor tower | 450 | +30% movement speed for your units. Overlapping fields do not add up; the strongest applies. |
 | **Power field** | Network | Finished relay, HQ or outpost | 320 | Shield regeneration at 300% (6 shields per second instead of 2). When a unit of yours dies in it, each friendly unit within 180 of the death point regains 20% of the dead unit's total health. Drifters can be trained at any finished structure in it. Units can teleport inside it. |
-| **Creep** | Organic | Finished HQ or outpost | 360 (HQ), 300 (outpost) | Starts at radius 60 and grows 10 per second to its full size. When its source dies it holds for 5 s, then recedes 20 per second. Harvesters move at full speed on it, and only 60% speed off it. When one of your own units dies on it, a brood or brute spawns (see [temporary units](#temporary-units)). |
+| **Creep** | Organic | Finished HQ, outpost or creep tumor | 360 (HQ), 300 (outpost), 250 (tumor) | Starts at radius 60 and grows 10 per second to its full size. When its source dies it holds for 5 s, then recedes 20 per second. Harvesters move at full speed on it, and only 60% speed off it. When one of your own units dies on it, a brood or brute spawns (see [temporary units](#temporary-units)). |
 
-Only hubs make creep. A Bloom also makes creep for its duration.
+Only hubs and creep tumors make creep. A Bloom also makes creep for its duration.
 
 ### Shields
 
@@ -192,7 +193,7 @@ Bought in order, instantly, with material. The finished building is needed only 
 - Each building queues up to 8 items; production is one item at a time.
 - Build within 500 units (`BUILD_RADIUS`) of one of your own finished buildings, or within 500 of an unfinished building of yours that is itself within 500 of a finished one (one hop, not transitive). A site must be 110 clear of other buildings, 55 clear of enemy units (your own units standing there are moved to the nearest legal ground when the site is placed, orders kept), 75 clear of deposits (except a refinery), off terrain, and 60 from the map edge.
 - A factory and a laboratory each need a finished barracks first. Tiers need the building of their number (barracks, factory, laboratory) finished when bought, and the tier before.
-- Only Industrial can build sensor towers and bunkers; only Network relays and bastions; only Organic spines. Each faction trains only its own labour and army.
+- Only Industrial can build sensor towers and bunkers; only Network relays and bastions; only Organic spines and creep tumors. Each faction trains only its own labour and army.
 - Every faction chooses in the lobby; with no choice, slots are dealt Industrial, Network, Organic in order.
 - You are out when your last finished hub falls. If the last hubs of two players fall on the same tick, it is a draw.
 - The map is 9600 by 9600 with four start positions. 240 deposits, grouped into about 24 base sites.
@@ -234,7 +235,8 @@ Client-side helpers that send ordinary orders for you, once a second. They exist
 
 | Operation | Details |
 | --- | --- |
-| Expand toward | Armed with the Strategy panel's Expand button or V. Click the map or minimap. Base sites are clusters of deposits within 400 of each other with no hub (anyone's, finished or not) within 600 of their centre. The plan starts at your finished building nearest the site, hops at most 488 units per outpost, ends with an outpost 150-250 from the deposits (at least 112 from any catalyst deposit, so a refinery still fits), and then orders up to two refineries on the site's catalysts. One order per pass; none while an earlier build of yours is still waiting out the command delay |
+| Expand | Armed with the Strategy panel's Expand button or V. Click the map or minimap. Base sites are clusters of deposits within 400 of each other with no hub (anyone's, finished or not) within 600 of their centre. The plan starts at your finished building nearest the site and hops at most 488 units per link, each hop your faction's territory link (Industrial sensor, Network relay, Organic tumor); the last building is an outpost 150-250 from the deposits (at least 112 from any catalyst deposit, so a refinery still fits), then up to two refineries on the site's catalysts. A hop that already has any of your buildings within 45 counts as built. The next link is ordered while the previous one is still under construction if that one is within 500 of a finished building (the build-radius look-ahead), so it runs one hop ahead. One order per pass; none while an earlier build of yours is still waiting out the command delay |
+| Territory | Armed with the Strategy panel's Territory button or O. Click the map or minimap. The same chain logic from your finished building nearest the point, every link your faction's territory link (hops at most 488), the last on the legal spot nearest the point (searched within 200). No outpost, no refineries. Refused with a notice when the faction has no link building, no finished building exists, or no legal spot is near the point |
 | Saturate workers (auto-labour) | Toggled with the Strategy panel's Saturate workers button or L. Each pass, every finished hub with an empty queue and no train order pending trains one labour unit while your labour (including queued) is below the number of non-empty material patches within 320 of your finished hubs (their mineral lines; a natural counts once it has its own hub) plus 2 (plus 0 for Network: a drifter holds its patch for good), you can afford it (Organic: the hub has stock) and you are under the unit cap. Paused while an expansion waits for material. Newly trained labour goes to work on its own |
 | Pending spend | Not an operation: the money readouts show (−N) for build, train and research orders that are sent but not yet run, and buttons use the balance after them |
 
@@ -264,7 +266,8 @@ Client-side helpers that send ordinary orders for you, once a second. They exist
 | T / C | Teleport / faction ability (Recall, Bloom) |
 | Q W E R D Z X | Train: labour, then your six army units in card order. With the Research tab open: Weapons, Armor, Logistics, Tier 1, Tier 2, Tier 3 |
 | B, then Q W E R T Y U I | Build menu: barracks, outpost, turret, factory, laboratory, then your faction structure, refinery, faction defense |
-| V | Expand toward a spot (operation, see above) |
+| V | Expand (operation, see above) |
+| O | Territory (operation, see above) |
 | J / K / N, then click | Place a Harass / Guard / Raid mission at the clicked point (selected army joins it; see Missions) |
 | L | Toggle Saturate workers (auto-labour) |
 | Space (tap) | Jump to the latest attack on you |

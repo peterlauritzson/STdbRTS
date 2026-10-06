@@ -61,8 +61,11 @@ also change what happens when a unit **dies** inside them.
 
 Pairs with free, tiny, weak harvesters.
 
-- **Only hubs make creep** (author's decision, 2026-09-24): an Organic HQ to a
-  radius of 360, an outpost to 300. No other building spreads any.
+- **Hubs and the creep tumor make creep.** An Organic HQ spreads to a radius of
+  360, an outpost to 300, and the tumor (75 material, Organic only) to 250. No
+  other building spreads any. (The 2026-09-24 "only hubs make creep" rule was
+  reversed on 2026-10-06 so every faction has a cheap territory link; see
+  DECISIONS.md.)
 - Grows from its source; recedes when the source dies. A patch sprouts at 60
   the tick its hub is first seen finished (the starting HQs are full at tick
   0) and grows 10 per second, stepped once every 20 ticks. When the source is

@@ -90,15 +90,15 @@ for (const kind of TRAINABLE) {
 }
 /**
  * Every building has a button. A faction building — the Industrial sensor, the
- * Network relay — is hidden from the other factions outright, as another
+ * Network relay, the Organic tumor — is hidden from the other factions outright, as another
  * faction's labour is: the server refuses it by name, so a disabled button
  * would only be noise.
  */
 // The order is the build card's hotkey order (Q W E R T Y U I over the visible
 // buttons): faction buildings that are hidden leave no gap, and the refinery
 // lands on U for every faction because each has exactly one building before it
-// (sensor, relay or spine) and the bunker or bastion after it.
-const BUILDABLE = ["barracks", "outpost", "turret", "factory", "lab", "sensor", "relay", "spine", "refinery", "bunker", "bastion"];
+// (sensor, relay or tumor) and the bunker, bastion or spine after it.
+const BUILDABLE = ["barracks", "outpost", "turret", "factory", "lab", "sensor", "relay", "tumor", "refinery", "bunker", "bastion", "spine"];
 for (const kind of BUILDABLE) {
   const definition = CATALOG[kind];
   const button = catalogButton(`build-${kind}`, definition.label, definition.cost, definition.seconds, definition.icon, describe(kind));
@@ -141,7 +141,7 @@ function badge(button: HTMLElement, key: string | undefined): void {
   const label = keyLabel(key);
   if (node.textContent !== label) node.textContent = label;
 }
-for (const [id, key] of [["stop", UNIT_KEYS.stop], ["attack-move", UNIT_KEYS.attackMove], ["hold", UNIT_KEYS.hold], ["mission-harass", UNIT_KEYS.harass], ["mission-guard", UNIT_KEYS.guard], ["mission-raid", UNIT_KEYS.raid], ["repair", UNIT_KEYS.repair], ["return", UNIT_KEYS.returnCargo], ["teleport", UNIT_KEYS.teleport], ["recall", UNIT_KEYS.ability], ["bloom", UNIT_KEYS.ability], ["set-rally", UNIT_KEYS.rally], ["expand", OPERATION_KEYS.expand], ["auto-labour", OPERATION_KEYS.autoLabour], ["idle-worker", "F1"], ["select-army", "F2"]] as const) {
+for (const [id, key] of [["stop", UNIT_KEYS.stop], ["attack-move", UNIT_KEYS.attackMove], ["hold", UNIT_KEYS.hold], ["mission-harass", UNIT_KEYS.harass], ["mission-guard", UNIT_KEYS.guard], ["mission-raid", UNIT_KEYS.raid], ["repair", UNIT_KEYS.repair], ["return", UNIT_KEYS.returnCargo], ["teleport", UNIT_KEYS.teleport], ["recall", UNIT_KEYS.ability], ["bloom", UNIT_KEYS.ability], ["set-rally", UNIT_KEYS.rally], ["expand", OPERATION_KEYS.expand], ["territory", OPERATION_KEYS.territory], ["auto-labour", OPERATION_KEYS.autoLabour], ["idle-worker", "F1"], ["select-army", "F2"]] as const) {
   const button = element(id);
   badge(button, key);
   button.title = `${button.title} (${keyLabel(key)})`;
@@ -164,8 +164,10 @@ battlefield.missions = () => missions.list.map(mission => ({ id: mission.id, kin
 battlefield.missionAt = point => missions.at(point)?.id;
 battlefield.onAssign = (id, selected) => missions.assign(id, selected);
 battlefield.onExpand = point => operations.begin(point);
+battlefield.onTerritory = point => operations.beginTerritory(point);
 battlefield.overlays = () => operations.paths();
 battlefield.expandPreview = point => operations.preview(point);
+battlefield.territoryPreview = point => operations.previewTerritory(point);
 const host = element<HTMLInputElement>("host");
 const database = element<HTMLInputElement>("database");
 const callsign = element<HTMLInputElement>("callsign");
@@ -362,6 +364,7 @@ element("teleport").addEventListener("click", () => battlefield.arm("teleport"))
 for (const kind of ["recall", "bloom"] as const) element(kind).addEventListener("click", () => battlefield.arm(kind));
 element("set-rally").addEventListener("click", () => battlefield.arm("rally"));
 element("expand").addEventListener("click", () => { battlefield.arm("expand"); });
+element("territory").addEventListener("click", () => { battlefield.arm("territory"); });
 element("auto-labour").addEventListener("click", () => { operations.toggleAutoLabour(); });
 for (const [id, kind] of [["clear-rally", "clear_rally"], ["cancel-production", "cancel_production"]]) element(id).addEventListener("click", () => {
   const hq = productionBuilding();
@@ -402,6 +405,7 @@ battlefield.onKey = event => {
   const tab = visibleTab();
   // Operations live in the Strategy panel: V arms Expand and L toggles Saturate workers, from anywhere.
   if (key === OPERATION_KEYS.expand) { element<HTMLButtonElement>("expand").click(); return true; }
+  if (key === OPERATION_KEYS.territory) { element<HTMLButtonElement>("territory").click(); return true; }
   if (key === OPERATION_KEYS.autoLabour) { element<HTMLButtonElement>("auto-labour").click(); return true; }
   if (event.key === "Escape" && tab !== "production" && !battlefield.targeting) { showTab("production"); return true; }
   const keys: readonly string[] = tab === "build" ? BUILD_KEYS : TRAIN_KEYS;
@@ -674,6 +678,10 @@ function renderMatch(): void {
   element<HTMLButtonElement>("set-rally").disabled = !canOrder;
   element<HTMLButtonElement>("expand").disabled = !canOrder || !battlefield.issuer();
   element("expand").setAttribute("aria-pressed", String(battlefield.targeting === "expand"));
+  element<HTMLButtonElement>("territory").disabled = !canOrder || !battlefield.issuer();
+  element("territory").setAttribute("aria-pressed", String(battlefield.targeting === "territory"));
+  const linkWord = { industrial: "sensor towers", network: "relays", organic: "creep tumors" }[factionOf(me.faction)];
+  element("territory").title = `Extend your territory toward a point with ${linkWord}: click the map or minimap (${keyLabel(OPERATION_KEYS.territory)})`;
   element("auto-labour").setAttribute("aria-pressed", String(operations.autoLabour));
   element<HTMLButtonElement>("auto-labour").disabled = !canOrder;
   element<HTMLButtonElement>("clear-rally").disabled = !canOrder || !producer?.order.kind.startsWith("rally_");
@@ -702,7 +710,7 @@ function renderMatch(): void {
   const rallyLandmark = producer?.order.kind === "rally_move" ? units.find(unit => isBuilding(unit.kind) && Math.hypot(unit.x - producer.order.x, unit.y - producer.order.y) <= CATALOG[unit.kind].radius + 15) : undefined;
   element("rally-status").textContent = producer ? rallyText(producer, rallyNode, rallyLandmark && { label: CATALOG[rallyLandmark.kind].label }) : "Rally unset";
   element("selection-order").textContent = selection.length === 1 ? selection[0].constructionRemaining > 0n ? `Constructing / ${(Number(selection[0].constructionRemaining) / 20).toFixed(1)}s left` : selection[0].order.kind.split("_").join(" ") : "";
-  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : battlefield.targeting === "recall" ? "Recall area / your units near it return home" : battlefield.targeting === "bloom" ? "Bloom site / on your own creep" : battlefield.targeting === "rally" ? "Rally target" : battlefield.targeting === "expand" ? "Expand toward / click the map or minimap" : battlefield.targeting?.startsWith("mission_") ? `${BEHAVIORS[battlefield.targeting.slice(8) as BehaviorKind].label} mission / click the map or minimap (selected army joins it)` : "";
+  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : battlefield.targeting === "recall" ? "Recall area / your units near it return home" : battlefield.targeting === "bloom" ? "Bloom site / on your own creep" : battlefield.targeting === "rally" ? "Rally target" : battlefield.targeting === "expand" ? "Expand toward / click the map or minimap" : battlefield.targeting === "territory" ? "Extend territory toward / click the map or minimap" : battlefield.targeting?.startsWith("mission_") ? `${BEHAVIORS[battlefield.targeting.slice(8) as BehaviorKind].label} mission / click the map or minimap (selected army joins it)` : "";
   element("targeting-state").hidden = !battlefield.targeting;
   element("targeting-state").textContent = targetLabel;
   for (const [id, kind] of [["attack-move", "attack_move"], ["repair", "repair"], ["set-rally", "rally"], ["teleport", "teleport"], ["recall", "recall"], ["bloom", "bloom"]]) element(id).setAttribute("aria-pressed", String(battlefield.targeting === kind));

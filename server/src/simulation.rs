@@ -3916,6 +3916,48 @@ mod tests {
         assert_eq!(patch_of(&world, site), None);
     }
 
+    #[test]
+    fn a_creep_tumor_is_organic_only_costs_75_and_grows_a_250_patch() {
+        assert!(is_building("tumor") && !crate::is_static_defense("tumor"));
+        assert_eq!(crate::building_faction("tumor"), Some(Faction::Organic));
+        assert_eq!(stats("tumor").unwrap().cost, Cost::material(75));
+        for faction in [Faction::Industrial, Faction::Network, Faction::Organic] {
+            let mut world = World::new_on_with_factions(
+                crate::maps::default_map(),
+                &[(0, faction), (1, Faction::Industrial)],
+            );
+            world.balances.insert(0, Balance::new(3000, 1000));
+            let labour = world
+                .units
+                .iter()
+                .find(|unit| is_labour(&unit.kind) && unit.owner == 0)
+                .unwrap()
+                .id;
+            let mut build = command(world.tick, 0, labour, "build_tumor", 0);
+            build.order.x = 600.0;
+            build.order.y = 300.0;
+            let result = world.validate(&build);
+            assert_eq!(result.is_ok(), faction == Faction::Organic, "{faction}: {result:?}");
+            if faction == Faction::Organic {
+                world.execute(&build).unwrap();
+                assert_eq!(world.balances[&0].material, 3000 - 75);
+            }
+        }
+        let mut world = organic_versus_industrial();
+        for _ in 0..19 {
+            world.step();
+        }
+        world.spawn(0, "tumor", 600.0, 300.0);
+        let tumor = world.units.last().unwrap().id;
+        world.step();
+        let sprouted = patch_of(&world, tumor).expect("sprouts when finished");
+        assert_eq!((sprouted.radius, sprouted.max_radius), (60, 250));
+        while world.tick < 600 {
+            world.step();
+        }
+        assert_eq!(patch_of(&world, tumor).unwrap().radius, 250);
+    }
+
     /// `travel`, for creep: slot 0 is Organic when `creep` is set and
     /// Industrial otherwise, with the same units either way — an outpost at
     /// `TOWER` and a soldier owned by `owner` walking 300 east from `IN_FIELD`.
@@ -4445,14 +4487,14 @@ mod tests {
         }
         assert_eq!(world.outcome, Some(0));
         assert!(world.units.iter().all(|unit| unit.owner == 0));
-        // Spent 700 material on four buildings, 450 on three technologies, 900
+        // Spent 900 material on four buildings (outpost 300), 450 on three technologies, 900
         // catalyst on three siege and three soldiers and 100 terrazine on the
         // turret, from 3000, 1000 and 200. Material also gains the base income
         // accumulated up to the tick the match ended; the catalyst total shows
         // the whole army survived, so no death refund was paid.
         assert_eq!(
             world.balances[&0],
-            Balance::new((3000 - 1150 + crate::stipend_total(world.tick)) as u32, 100)
+            Balance::new((3000 - 1350 + crate::stipend_total(world.tick)) as u32, 100)
                 .with_terrazine(100)
         );
     }

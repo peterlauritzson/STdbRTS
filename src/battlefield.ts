@@ -18,7 +18,7 @@ import { arriving, canTeleport, channelFraction, fieldsOf, powered, POWER_FIELD_
 interface Point { x: number; y: number }
 interface Motion { from: Point; to: Point; at: number }
 type InputMode = "select" | "order" | "pan";
-type TargetMode = "attack_move" | "repair" | "rally" | "teleport" | "expand" | `mission_${BehaviorKind}` | AbilityKind | `build_${string}`;
+type TargetMode = "attack_move" | "repair" | "rally" | "teleport" | "expand" | "territory" | `mission_${BehaviorKind}` | AbilityKind | `build_${string}`;
 /** What the battlefield needs to draw and click a mission; the rules live in missions.ts. */
 export interface MissionView { id: number; kind: BehaviorKind; x: number; y: number; label: string }
 
@@ -90,6 +90,7 @@ export class Battlefield {
   private placementNote: { text: string; at: number } | undefined;
   /** An expansion was aimed at a point; returns why it could not be planned, or nothing. See operations.ts. */
   onExpand: (point: Point) => string | undefined = () => undefined;
+  onTerritory: (point: Point) => string | undefined = () => undefined;
   /** The chains of running expansions, drawn dashed and numbered on the map and the minimap. */
   overlays: () => OverlayPath[] = () => [];
   /** A mission was placed at a point (with these army units selected); see missions.ts. */
@@ -101,6 +102,7 @@ export class Battlefield {
   onAssign: (id: number, selected: number[]) => void = () => {};
   /** The chain an expansion aimed at this point would build, previewed under the cursor. */
   expandPreview: (point: Point) => OverlayPath | undefined = () => undefined;
+  territoryPreview: (point: Point) => OverlayPath | undefined = () => undefined;
   /** Called when one of your units or buildings is hit and the area is not already alerting. */
   onAlert: (kind: AlertKind) => void = () => {};
   /**
@@ -482,7 +484,7 @@ export class Battlefield {
     const allowed = kind.startsWith("mission_") ? this.session.matchReady
       : kind === "rally"
       ? this.session.snapshot.units.some(unit => RALLIES.includes(unit.kind) && unit.owner === this.session.snapshot.me?.slot)
-      : kind.startsWith("build_") || kind === "expand" ? !!this.issuer()
+      : kind.startsWith("build_") || kind === "expand" || kind === "territory" ? !!this.issuer()
       : kind === "teleport" ? this.teleporters().length > 0
       : kind in ABILITIES ? !!this.caster(kind as AbilityKind)
       : this.ownedSelection().some(unit => kind === "repair" ? isLabour(unit.kind) : fights(unit.kind));
@@ -712,6 +714,13 @@ export class Battlefield {
     if (this.targeting === "expand") {
       // Orders are planned and sent by the expansion operation, pass by pass.
       const error = this.onExpand(point);
+      if (error) { this.session.onNotice(error); return; }
+      this.acknowledge("build_outpost", point);
+      this.spend(queued);
+      return;
+    }
+    if (this.targeting === "territory") {
+      const error = this.onTerritory(point);
       if (error) { this.session.onNotice(error); return; }
       this.acknowledge("build_outpost", point);
       this.spend(queued);
@@ -1011,6 +1020,15 @@ export class Battlefield {
         this.pill(this.pointer.x + 22 / this.camera.zoom, this.pointer.y - 22 / this.camera.zoom, `Expand: ${preview.points.length} outpost${preview.points.length === 1 ? "" : "s"}, then refineries`, "#8fd8ff");
         if (last) { context.strokeStyle = "#8fd8ff"; context.lineWidth = 2 / this.camera.zoom; context.beginPath(); context.arc(last.x, last.y, 40, 0, Math.PI * 2); context.stroke(); }
       } else this.pill(this.pointer.x + 22 / this.camera.zoom, this.pointer.y - 22 / this.camera.zoom, "No free resource site to expand to", "#ed7c8b");
+    }
+    if (this.targeting === "territory" && this.pointer) {
+      const preview = this.territoryPreview(this.pointer);
+      if (preview) {
+        this.drawChain(preview, true);
+        const last = preview.points[preview.points.length - 1];
+        this.pill(this.pointer.x + 22 / this.camera.zoom, this.pointer.y - 22 / this.camera.zoom, `Territory: ${preview.points.length} link${preview.points.length === 1 ? "" : "s"}`, "#8fd8ff");
+        if (last) { context.strokeStyle = "#8fd8ff"; context.lineWidth = 2 / this.camera.zoom; context.beginPath(); context.arc(last.x, last.y, 40, 0, Math.PI * 2); context.stroke(); }
+      } else this.pill(this.pointer.x + 22 / this.camera.zoom, this.pointer.y - 22 / this.camera.zoom, "Cannot extend territory there", "#ed7c8b");
     }
     this.boxPreview = this.drag && !this.drag.pan && Math.hypot(this.drag.start.x - this.drag.end.x, this.drag.start.y - this.drag.end.y) >= 6
       ? new Set((boxed => boxed.some(unit => !isBuilding(unit.kind)) ? boxed.filter(unit => !isBuilding(unit.kind)) : boxed)(this.boxed(this.world(this.drag.start), this.world(this.drag.end))).map(unit => unit.id))
@@ -1538,6 +1556,14 @@ export class Battlefield {
         context.fillStyle = "#bfe9ff"; context.strokeStyle = "#243832"; context.lineWidth = 2;
         context.beginPath(); context.moveTo(0, -30); context.lineTo(10, -2); context.lineTo(0, 14); context.lineTo(-10, -2); context.closePath(); context.fill(); context.stroke();
         context.fillStyle = color; context.fillRect(-3, -12, 6, 12);
+      } else if (unit.kind === "tumor") {
+        // Organic: a small purple bulb on a root mat, pulsing slowly.
+        const pulse = 1 + 0.08 * Math.sin(now / 420 + unit.id);
+        context.fillStyle = "#2a1f33"; context.beginPath(); context.ellipse(0, 10, 20, 8, 0, 0, Math.PI * 2); context.fill();
+        context.strokeStyle = color; context.lineWidth = 2; context.stroke();
+        context.fillStyle = "#8a5cc0"; context.strokeStyle = "#2a1f33"; context.lineWidth = 2;
+        context.beginPath(); context.arc(0, -2, 13 * pulse, 0, Math.PI * 2); context.fill(); context.stroke();
+        context.fillStyle = "#d3a6ff"; context.beginPath(); context.arc(-4, -6, 4 * pulse, 0, Math.PI * 2); context.fill();
       } else if (unit.kind === "sensor") {
         // Industrial: a dish on a lattice mast.
         context.strokeStyle = "#d7e2d4"; context.lineWidth = 3;
