@@ -54,6 +54,7 @@
 - **Army roster** (top left, under the player list): your army grouped by what it is doing and where. Click a row to select those units and jump to them; Shift+click adds them. Idle units in the field are highlighted red. The F1 button shows how many labour units are idle.
 - **Space** (a tap) jumps to the latest attack on you; hold **Space** and drag to pan. An alert banner and a pulsing red ring on the minimap show where.
 - **Strategy panel** (right end of the bottom bar, always visible): the mission buttons, **Expand** (**V**), **Territory** (**O**) and **Saturate workers** (**L**), then one list of your missions and operations with size controls, a go-to click on the name, and a cancel button. See "Missions" and "Operations" below.
+- **Enter** opens the room chat (or the speech-bubble button, top right); Enter sends, Esc closes. The waiting room has the same chat, and it carries on through the match and the score screen.
 - **?** (or the keyboard button) shows the full control list. Scroll to zoom; middle-drag or arrow keys pan.
 
 ## Missions: say where, not who

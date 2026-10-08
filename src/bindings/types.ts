@@ -29,6 +29,17 @@ export const Cast = __t.object("Cast", {
 });
 export type Cast = __Infer<typeof Cast>;
 
+export const ChatMessage = __t.object("ChatMessage", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  sender: __t.identity(),
+  name: __t.string(),
+  slot: __t.u8(),
+  text: __t.string(),
+  sentMicros: __t.i64(),
+});
+export type ChatMessage = __Infer<typeof ChatMessage>;
+
 export const Command = __t.object("Command", {
   id: __t.u64(),
   matchId: __t.u64(),

@@ -220,6 +220,11 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     await peer.getByLabel("Callsign").fill("South / Commander");
     await peer.locator(".room-row").filter({ hasText: roomName }).getByRole("button", { name: "Join", exact: true }).click();
     await expect(host.locator("#roster .roster-row")).toHaveCount(2);
+    // Room chat in the waiting room reaches the other player, under the sender's name.
+    await host.locator("#lobby-chat input").fill("glhf");
+    await host.locator("#lobby-chat input").press("Enter");
+    await expect(peer.locator("#lobby-chat .chat-log")).toContainText("North / Commander: glhf");
+    await expect(host.locator("#lobby-chat input")).toHaveValue("");
     // Faction follows the slot until somebody chooses: the host is Industrial
     // and the peer Network, and both are legible before anyone deploys.
     await expect(host.locator("#roster")).toContainText("Industrial");
@@ -241,6 +246,23 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     await expect(peer.locator("#match")).toBeVisible();
     await expect.poll(() => canvasColors(host)).toBeGreaterThan(20);
     await expect.poll(() => canvasColors(peer)).toBeGreaterThan(20);
+    // The lobby's chat carries into the match, kept behind the closed overlay;
+    // Enter opens it, sends, and the line appears on the other battlefield.
+    await expect(host.locator("#match-chat .chat-form")).toBeHidden();
+    await host.locator("#battlefield").focus();
+    await host.keyboard.press("Enter");
+    await expect(host.locator("#match-chat input")).toBeFocused();
+    await expect(host.locator("#match-chat .chat-log")).toContainText("glhf");
+    await host.keyboard.type("attack at dawn");
+    await host.keyboard.press("Enter");
+    await expect(host.locator("#match-chat .chat-form")).toBeHidden();
+    await expect(peer.locator("#match-chat .chat-line.fresh").last()).toContainText("North / Commander: attack at dawn");
+    // Typing a hotkey letter in chat must not reach the battlefield.
+    await peer.getByRole("button", { name: "Chat", exact: true }).tap();
+    await expect(peer.locator("#match-chat input")).toBeFocused();
+    await peer.locator("#match-chat input").fill("bsaq");
+    await peer.locator("#match-chat input").press("Enter");
+    await expect(host.locator("#match-chat .chat-log")).toContainText("South / Commander: bsaq");
     await noOverflow(host);
     await noOverflow(peer);
     // Each side knows its own faction and its opponent's once the match starts,

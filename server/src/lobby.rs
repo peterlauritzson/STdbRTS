@@ -324,3 +324,60 @@ pub fn leave_room(ctx: &ReducerContext) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Longest chat line, in characters.
+const CHAT_MAX_CHARS: usize = 200;
+/// Lines a room keeps; the oldest goes when a new one would exceed it.
+const CHAT_HISTORY: usize = 100;
+/// At most `CHAT_BURST` lines from one sender within `CHAT_WINDOW_MICROS`.
+const CHAT_BURST: usize = 5;
+const CHAT_WINDOW_MICROS: i64 = 5_000_000;
+
+/// Say something to everyone in your room: in the lobby, during the match and
+/// on the score screen. Only ever your own words, stamped with your own name
+/// and slot, and only into the room you are in.
+#[spacetimedb::reducer]
+pub fn send_chat(ctx: &ReducerContext, text: String) -> Result<(), String> {
+    let player = current_player(ctx)?;
+    if player.match_id == 0 || ctx.db.room().id().find(player.match_id).is_none() {
+        return Err("Join a room to chat".into());
+    }
+    // Tabs and newlines become spaces; any other control character is dropped.
+    let text: String = text
+        .chars()
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .filter(|c| !c.is_control())
+        .collect();
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("Say something".into());
+    }
+    if text.chars().count() > CHAT_MAX_CHARS {
+        return Err(format!("Chat lines are at most {CHAT_MAX_CHARS} characters"));
+    }
+    let now = ctx.timestamp.to_micros_since_unix_epoch();
+    let mut history: Vec<ChatMessage> = ctx.db.chat_message().match_id().filter(player.match_id).collect();
+    let recent = history
+        .iter()
+        .filter(|line| line.sender == ctx.sender() && now - line.sent_micros < CHAT_WINDOW_MICROS)
+        .count();
+    if recent >= CHAT_BURST {
+        return Err("Slow down: chat is limited to 5 lines in 5 seconds".into());
+    }
+    if history.len() >= CHAT_HISTORY {
+        history.sort_by_key(|line| line.id);
+        for line in &history[..=history.len() - CHAT_HISTORY] {
+            ctx.db.chat_message().id().delete(line.id);
+        }
+    }
+    ctx.db.chat_message().insert(ChatMessage {
+        id: 0,
+        match_id: player.match_id,
+        sender: ctx.sender(),
+        name: player.name,
+        slot: player.slot,
+        text: text.into(),
+        sent_micros: now,
+    });
+    Ok(())
+}

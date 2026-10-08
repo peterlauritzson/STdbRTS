@@ -50,6 +50,7 @@
           <p id="faction-brief" class="mono faction-brief"></p>
           <div class="room-actions"><label class="ready-control"><input type="checkbox" id="ready" />Ready</label><button id="start-match" class="primary"><i data-lucide="play"></i>Deploy</button><button id="leave-lobby"><i data-lucide="log-out"></i>Leave Room</button></div>
           <p id="waiting-status" class="muted" role="status"></p>
+          <div id="lobby-chat" class="lobby-chat"></div>
         </div>
         <div class="map-diagram" aria-hidden="true"><div class="contour contour-one"></div><div class="contour contour-two"></div><div class="contour contour-three"></div><span id="map-coordinate" class="coordinate north">N / 9600</span><span class="coordinate south">EXPANSE / 07</span><i class="map-base base-one"></i><i class="map-base base-two"></i><i class="map-base base-three"></i><i class="map-base base-four"></i></div>
       </section>
@@ -76,7 +77,8 @@
         </div>
       </div>
       <div class="hud-left"><div id="battle-players" class="battle-players"></div><div id="army-roster" class="army-roster" aria-label="Army" hidden></div></div>
-      <div class="camera-tools"><button id="sound" class="icon-button" title="Sound on" aria-label="Sound" aria-pressed="true"><i data-lucide="volume-2"></i></button><button id="camera-home" class="icon-button" title="Center on HQ" aria-label="Center on HQ"><i data-lucide="house"></i></button><button id="camera-fit" class="icon-button" title="Show whole map" aria-label="Show whole map"><i data-lucide="maximize-2"></i></button><button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button><button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button><button id="guide-open" class="icon-button" title="Game guide (opens in a new tab)" aria-label="Game guide (opens in a new tab)"><i data-lucide="book-open"></i></button><button id="help-toggle" class="icon-button" title="Controls (?)" aria-label="Controls" aria-expanded="false" aria-controls="help"><i data-lucide="keyboard"></i></button></div>
+      <div class="camera-tools"><button id="chat-toggle" class="icon-button" title="Chat (Enter)" aria-label="Chat" aria-expanded="false" aria-controls="match-chat"><i data-lucide="message-square"></i></button><button id="sound" class="icon-button" title="Sound on" aria-label="Sound" aria-pressed="true"><i data-lucide="volume-2"></i></button><button id="camera-home" class="icon-button" title="Center on HQ" aria-label="Center on HQ"><i data-lucide="house"></i></button><button id="camera-fit" class="icon-button" title="Show whole map" aria-label="Show whole map"><i data-lucide="maximize-2"></i></button><button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button><button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button><button id="guide-open" class="icon-button" title="Game guide (opens in a new tab)" aria-label="Game guide (opens in a new tab)"><i data-lucide="book-open"></i></button><button id="help-toggle" class="icon-button" title="Controls (?)" aria-label="Controls" aria-expanded="false" aria-controls="help"><i data-lucide="keyboard"></i></button></div>
+      <div id="match-chat" class="match-chat"></div>
       <div id="group-bar" class="group-bar" aria-label="Control groups"></div>
       <aside id="help" class="help mono" hidden>
         <h2>Controls</h2>
@@ -109,6 +111,7 @@
           <div><dt>F1 or . / F2</dt><dd>Idle labour / whole army</dd></div>
           <div><dt>Backspace</dt><dd>Centre on your base</dd></div>
           <div><dt>Esc</dt><dd>Cancel targeting, then clear selection</dd></div>
+          <div><dt>Enter</dt><dd>Chat to everyone in the room; Enter sends, Esc closes</dd></div>
         </dl>
       </aside>
       <div class="input-modes" role="group" aria-label="Pointer mode"><label title="Select units"><input type="radio" name="mode" value="select" checked /><i data-lucide="mouse-pointer-2"></i><span>Select</span></label><label title="Issue order"><input type="radio" name="mode" value="order" /><i data-lucide="crosshair"></i><span>Order</span></label><label title="Pan camera"><input type="radio" name="mode" value="pan" /><i data-lucide="move"></i><span>Pan</span></label></div>

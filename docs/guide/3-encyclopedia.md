@@ -196,6 +196,7 @@ Bought in order, instantly, with material. The finished building is needed only 
 - Only Industrial can build sensor towers and bunkers; only Network relays and bastions; only Organic spines and creep tumors. Each faction trains only its own labour and army.
 - Every faction chooses in the lobby; with no choice, slots are dealt Industrial, Network, Organic in order.
 - You are out when your last finished hub falls. If the last hubs of two players fall on the same tick, it is a draw.
+- Chat goes to everyone in your room, never further: lines up to 200 characters, at most 5 lines in 5 seconds per player, and the room keeps its latest 100 lines. New lines show on the battlefield for 10 seconds; open the chat to see the rest.
 - The map is 9600 by 9600 with four start positions. 240 deposits, grouped into about 24 base sites.
 
 ## Behaviors
@@ -278,6 +279,7 @@ Client-side helpers that send ordinary orders for you, once a second. They exist
 | F2 | Select whole army |
 | Backspace | Centre on your base |
 | Esc | Cancel targeting, then clear selection |
+| Enter | Open room chat; Enter sends, Esc closes |
 | ? | Show or hide the in-game control list |
 | Wheel, middle-drag, Space+drag, arrow keys, screen edge | Zoom and camera |
 

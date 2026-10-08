@@ -1,6 +1,6 @@
 import { BinaryWriter, ProductType, reducerSchema } from "spacetimedb";
 import { DbConnection, tables, type SubscriptionHandle } from "./bindings";
-import { Faction, type Command, type CreepPatch, type MatchSample, type Node, type Order, type Player, type Room } from "./bindings/types";
+import { Faction, type ChatMessage, type Command, type CreepPatch, type MatchSample, type Node, type Order, type Player, type Room } from "./bindings/types";
 import { UnitMerger, type Entity } from "./units";
 import { factionValue, type FactionName } from "./catalog";
 
@@ -46,6 +46,8 @@ export interface Snapshot {
    * units: a patch outlives the hub that grew it and recedes on its own.
    */
   creep: CreepPatch[];
+  /** This room's chat, oldest first: the lobby, the match and its score screen share it. */
+  chat: ChatMessage[];
 }
 
 export interface PendingOrder {
@@ -71,11 +73,13 @@ export class Session {
   pending = new Map<string, PendingOrder>();
   /** Ticks your newest order ran after its stamp: 0 means it was on time. */
   lateTicks = 0n;
-  snapshot: Snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [] };
+  snapshot: Snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [], chat: [] };
   onChange: () => void = () => {};
   onNotice: (message: string) => void = () => {};
   /** Called with the server's reason when one of your own commands is refused. */
   onReject: (reason: string) => void = () => {};
+  /** Called once for each chat line that arrives after the room's history has loaded. */
+  onChat: (message: ChatMessage) => void = () => {};
   private epoch = 0;
   private matchId = 0n;
   private matchSubscription: SubscriptionHandle | undefined;
@@ -95,7 +99,7 @@ export class Session {
     this.matchId = 0n;
     this.matchSubscription = undefined;
     this.pending.clear();
-    this.snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [] };
+    this.snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [], chat: [] };
     this.status = "Connecting";
     this.onChange();
     const key = `stdbrts:v2:${this.identityScope}:${host}:${database}`;
@@ -177,6 +181,11 @@ export class Session {
       connection.db.creep_patch.onInsert(refresh);
       connection.db.creep_patch.onUpdate(refresh);
       connection.db.creep_patch.onDelete(refresh);
+      connection.db.chat_message.onInsert((_context, message) => {
+        if (this.matchReady && message.matchId === this.matchId) this.onChat(message);
+        refresh();
+      });
+      connection.db.chat_message.onDelete(refresh);
     } catch (error) { lost(error instanceof Error ? error.message : String(error)); }
   }
 
@@ -212,6 +221,7 @@ export class Session {
             tables.command.where(row => row.matchId.eq(nextMatch)),
             tables.match_sample.where(row => row.matchId.eq(nextMatch)),
             tables.creep_patch.where(row => row.matchId.eq(nextMatch)),
+            tables.chat_message.where(row => row.matchId.eq(nextMatch)),
           ]);
       }
     }
@@ -222,6 +232,7 @@ export class Session {
       commands: [...connection.db.command.iter()].filter(row => row.matchId === nextMatch),
       samples: [...connection.db.match_sample.iter()].filter(row => row.matchId === nextMatch),
       creep: [...connection.db.creep_patch.iter()].filter(row => row.matchId === nextMatch).map(row => row.data),
+      chat: [...connection.db.chat_message.iter()].filter(row => row.matchId === nextMatch).sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
     };
     this.onChange();
   }

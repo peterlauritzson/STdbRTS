@@ -251,3 +251,24 @@ pub struct TickSchedule {
     pub scheduled_id: u64,
     pub scheduled_at: ScheduleAt,
 }
+
+/// One line of room chat. Scoped to a room like `command`: subscribed per
+/// match, so a message reaches exactly the players in that room, in the lobby
+/// and through the match and its score screen alike. Written only by
+/// `lobby::send_chat`, trimmed to the newest `CHAT_HISTORY` per room there,
+/// and dropped with the match in `game::delete_room`.
+#[spacetimedb::table(public, accessor = chat_message)]
+pub struct ChatMessage {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    #[index(btree)]
+    pub match_id: u64,
+    pub sender: Identity,
+    /// The sender's name and slot when they spoke, so a line still reads
+    /// correctly after they rename or leave the room.
+    pub name: String,
+    pub slot: u8,
+    pub text: String,
+    pub sent_micros: i64,
+}

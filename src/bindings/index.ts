@@ -38,6 +38,7 @@ import CreateRoomReducer from "./create_room_reducer";
 import IssueOrderReducer from "./issue_order_reducer";
 import JoinRoomReducer from "./join_room_reducer";
 import LeaveRoomReducer from "./leave_room_reducer";
+import SendChatReducer from "./send_chat_reducer";
 import SetFactionReducer from "./set_faction_reducer";
 import SetNameReducer from "./set_name_reducer";
 import SetReadyReducer from "./set_ready_reducer";
@@ -46,6 +47,7 @@ import StartMatchReducer from "./start_match_reducer";
 // Import all procedure arg schemas
 
 // Import all table schema definitions
+import ChatMessageRow from "./chat_message_table";
 import CommandRow from "./command_table";
 import CreepPatchRow from "./creep_patch_table";
 import MatchSampleRow from "./match_sample_table";
@@ -60,6 +62,20 @@ import UnitVitalsRow from "./unit_vitals_table";
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
+  chat_message: __table({
+    name: 'chat_message',
+    indexes: [
+      { accessor: 'id', name: 'chat_message_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'match_id', name: 'chat_message_match_id_idx_btree', algorithm: 'btree', columns: [
+        'matchId',
+      ] },
+    ],
+    constraints: [
+      { name: 'chat_message_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ChatMessageRow),
   command: __table({
     name: 'command',
     indexes: [
@@ -191,6 +207,7 @@ const reducersSchema = __reducers(
   __reducerSchema("issue_order", IssueOrderReducer),
   __reducerSchema("join_room", JoinRoomReducer),
   __reducerSchema("leave_room", LeaveRoomReducer),
+  __reducerSchema("send_chat", SendChatReducer),
   __reducerSchema("set_faction", SetFactionReducer),
   __reducerSchema("set_name", SetNameReducer),
   __reducerSchema("set_ready", SetReadyReducer),

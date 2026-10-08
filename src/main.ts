@@ -1,5 +1,5 @@
 import "../styles.css";
-import { createElement, createIcons, BookOpen, Keyboard, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, type IconNode } from "lucide";
+import { createElement, createIcons, BookOpen, Keyboard, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare, type IconNode } from "lucide";
 import { ABILITIES, castRefusal, scheduledCasts, type AbilityKind } from "./abilities";
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
@@ -18,6 +18,7 @@ import { Missions, missionLabel, type Mission } from "./missions";
 import type { Entity } from "./units";
 import { armyRoster, visibleRows, type RosterRow } from "./roster";
 import { BEHAVIORS, behaviorLine, type BehaviorKind } from "./behaviors";
+import { ChatPanel } from "./chat";
 
 function element<Type extends HTMLElement = HTMLElement>(id: string): Type {
   const value = document.getElementById(id);
@@ -116,7 +117,7 @@ const RESEARCH_BUTTONS: readonly { id: string; order: string; label: string; ico
   ...([1, 2, 3] as const).map(tier => ({ id: `tier_${tier}`, order: tierOrder(tier), label: TIERS[tier].label, icon: ["tent", "factory", "flask-conical"][tier - 1], cost: TIERS[tier].cost, description: `Unlocks ${TIERS[tier].unlocks}`, tier })),
 ];
 for (const research of RESEARCH_BUTTONS) element("research-buttons").append(catalogButton(`research-${research.id}`, research.label, research.cost, "instant", research.icon, research.description));
-createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, BookOpen, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck } });
+createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, BookOpen, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare } });
 /** Catalogue icon names to icon nodes, for portraits built after `createIcons` has run. */
 const ICON_NODES: Record<string, IconNode> = {
   house: House, hammer: Hammer, radio: Radio, sprout: Sprout, swords: Swords, radar: Radar, crosshair: Crosshair,
@@ -292,6 +293,31 @@ function productionBuilding() {
 }
 
 /** How long a notice stays before it clears itself: long enough to read, short enough not to go stale. */
+const sendChat = (text: string) => session.act(connection => connection.reducers.sendChat({ text }));
+const lobbyChat = new ChatPanel(element("lobby-chat"), false, sendChat);
+const matchChat = new ChatPanel(element("match-chat"), true, sendChat);
+let chatRoom: bigint | undefined;
+function syncChatToggle(): void { element("chat-toggle").setAttribute("aria-expanded", String(matchChat.isOpen)); }
+matchChat.onClose = () => { syncChatToggle(); element("battlefield").focus({ preventScroll: true }); };
+element("chat-toggle").addEventListener("click", () => { matchChat.toggle(); syncChatToggle(); });
+// Enter opens the match chat from anywhere on the battlefield, as in SC2. Typing
+// is safe: the battlefield ignores keys aimed at an input.
+window.addEventListener("keydown", event => {
+  if (event.key !== "Enter" || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
+  const target = event.target;
+  if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement || target instanceof HTMLButtonElement || document.querySelector("dialog[open]")) return;
+  if (element("match").hidden) return;
+  event.preventDefault();
+  matchChat.open();
+  syncChatToggle();
+});
+function renderChat(): void {
+  const { room, me, chat } = session.snapshot;
+  if (room?.id !== chatRoom) { chatRoom = room?.id; lobbyChat.reset(); matchChat.reset(); matchChat.close(); }
+  const ready = session.ready && session.matchReady;
+  lobbyChat.render(chat, me?.slot, ready);
+  matchChat.render(chat, me?.slot, ready);
+}
 const NOTICE_MS = 4000;
 let warnedMapRoom: bigint | undefined;
 session.onNotice = message => {
@@ -1015,6 +1041,7 @@ function render(): void {
   element("status").textContent = session.status;
   element("connection-dot").classList.toggle("online", session.ready);
   battlefield.sync();
+  renderChat();
   if (playing) { renderMatch(); renderTimers(); } else renderLobby();
 }
 

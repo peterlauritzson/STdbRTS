@@ -519,6 +519,7 @@ pub fn delete_room(ctx: &ReducerContext, match_id: u64) {
     ctx.db.creep_patch().match_id().delete(match_id);
     ctx.db.resource_node().match_id().delete(match_id);
     ctx.db.command().match_id().delete(match_id);
+    ctx.db.chat_message().match_id().delete(match_id);
     for mut player in ctx
         .db
         .player()
