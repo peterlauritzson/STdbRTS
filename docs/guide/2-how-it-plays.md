@@ -126,7 +126,7 @@ Because every order is delayed, a unit that must wait for you to tell it to run 
 
 ### Stances: how a kind fights
 
-A **stance** is set per army kind in the Strategy panel (Stances), and applies to every unit of that kind while it is on an attack-move, which includes missions. It never changes a plain move, a hold or an explicit attack, so you can still override it with a click.
+A **stance** is set per army kind in the Strategy window (**F3**, Stances tab), and applies to every unit of that kind while it is on an attack-move, which includes missions. It never changes a plain move, a hold or an explicit attack, so you can still override it with a click.
 
 - **Standard** closes to 90% of weapon range and fires.
 - **Charge** closes to 40% of range: it pushes into the enemy, soaks fire and body-blocks. Good for tough short-range units.
@@ -137,7 +137,7 @@ Ranged kinds (marksman, lancer, spitter) default to Kite and the heavies (bulwar
 
 ### Production doctrine: what to build while you are busy
 
-The Strategy panel's **Production** section tells the server what to train and buy for you. Everything starts **off**, so nothing changes until you opt in.
+The Strategy window's **Production** tab (**F3**) tells the server what to train and buy for you. Everything starts **off**, so nothing changes until you opt in.
 
 - **Auto-train** looks once a second at each finished barracks and factory whose queue is empty and queues one unit there: the kind that is furthest below its target share of your army. The target share is the kind's weight divided by the weights of every kind you can currently train; the current share counts living units plus queued ones. Weight 0 means never. Kinds still locked behind a tier are skipped (the panel greys them with the tier they need).
 - The **catalyst reserve** is spent on nothing: a unit is queued only if catalyst minus its price stays at or above the reserve.
@@ -155,7 +155,7 @@ Setting up a strategy by hand is a chore: select the army, give it a raid, and e
 - Army units you had selected when you placed the mission join it immediately. You can also right-click a mission's marker with army selected.
 - Your own orders always win. A unit you move, stop-and-reorder, or give another behavior leaves its mission and is not recruited again until it is idle. A shrunk or cancelled mission stops the units it lets go, so they become idle and the other missions can take them.
 - Missions are drawn on the map and minimap in their preset's colour, labelled with how full they are (HARASS 3/4, RAID 7), and listed in the Strategy panel beside your operations.
-- Missions are server rows, checked once a second, so they keep staffing when the tab is closed. You can change a mission's tactic later from the Strategy panel.
+- Missions are server rows, checked once a second, so they keep staffing when the tab is closed. You can change a mission's tactic later from the Strategy window (**F3**).
 - **Gather then strike** walks a group through gather, strike, fall back, gather. Units gather at a rally point (by default most of the way from your nearest hub to the target) and guard it. When enough are there (80% of the size by default) they attack-move to the target. If the strike loses more than most of its strength (below 40% of the units that started it left), the survivors pull back to the rally point and the cycle repeats. Units trained during a strike do not walk into the fight one at a time: they wait at the rally point and go in together once a few are there (4 for an "all rest" mission). Move the rally point with the **rally** button in the Strategy panel. All numbers are experimental.
 - Labels show the state: "GATHER 5/8", "STRIKE 7", "FALL BACK", with a dashed line from the rally point to the target.
 

@@ -140,7 +140,7 @@ kbd.tab-key { position: static; margin-left: 6px; }
 .group-chip svg { width: 14px; height: 14px; }
 .group-chip b { color: var(--accent); }
 .group-chip.active { border-color: var(--accent); background: #34482fec; }
-.help { position: absolute; right: 16px; top: 62px; width: min(380px, calc(100% - 32px)); max-height: calc(100% - 78px); overflow: auto; padding: 14px 16px; background: #14231ef4; border: 1px solid #657862; border-radius: 4px; font-size: 11px; z-index: 6; }
+.help { position: absolute; right: 16px; top: 62px; width: min(460px, calc(100% - 32px)); max-height: calc(100% - 78px); overflow: auto; padding: 14px 16px; background: #14231ef4; border: 1px solid #657862; border-radius: 4px; font-size: 13px; z-index: 6; }
 .help-guide { margin: 0 0 8px; font-size: 12px; }
 .help-guide a { color: var(--accent); }
 .help h2 { font: 500 13px "Space Grotesk", sans-serif; margin-bottom: 8px; }
@@ -348,7 +348,6 @@ button[aria-pressed="true"] { border-color: var(--accent); background: #4a603d; 
 .production-queue:empty::before { content: "Queue empty"; color: #8fa089; }
 .orders-section .section-heading { margin-bottom: 4px; }
 .orders-section .eyebrow { margin: 0; }
-.command-list { height: 150px; max-height: 80px; overflow: auto; font-size: 10px; color: #b8caaa; }
 .command-row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid #344337; }
 .command-row.rejected { color: #f29ca2; flex-wrap: wrap; align-items: start; row-gap: 3px; }
 .command-row.rejected .command-label { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
@@ -359,49 +358,101 @@ button[aria-pressed="true"] { border-color: var(--accent); background: #4a603d; 
 .telemetry { font-size: 9px; color: #a1afa2; padding-top: 4px; }
 /* Strategy panel: mission and economy buttons, then the live list of missions and operations. */
 .strategy-section { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
-/* Everything but the heading and the foot scrolls inside the panel, so opening Stances or Production never grows the page (the foot's order log pops over the panel and must not be clipped). */
+/* Everything but the heading and the foot scrolls inside the deck section; the full controls are in the Strategy window. */
 .strategy-scroll { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .strategy-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
-.strategy-button { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 5px; min-height: 28px; padding: 3px 6px; font-size: 11px; text-align: left; }
+.strategy-button { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 5px; min-height: 28px; padding: 3px 5px; font-size: 12px; text-align: left; }
 .strategy-button .swatch { width: 8px; height: 14px; border-radius: 2px; }
 .strategy-button svg { width: 13px; height: 13px; flex: none; }
 .strategy-button .strategy-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.strategy-button kbd.key { top: 1px; right: 2px; bottom: auto; }
-#auto-labour { grid-column: span 2; }
-.strategy-list { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; min-height: 66px; max-height: 110px; overflow: auto; font-size: 10px; }
-.strategy-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; border-bottom: 1px solid #344337; color: #e4eddf; min-width: 0; }
-.strategy-row .swatch { width: 7px; height: 12px; border-radius: 2px; }
-.strategy-name-btn { min-height: 20px; padding: 0 4px; border: 0; background: none; color: inherit; font-weight: 700; font-size: 11px; text-decoration: underline dotted; text-underline-offset: 3px; }
-.strategy-count { flex: 1; min-width: 0; color: #b5c4a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.strategy-tool { min-height: 20px; min-width: 22px; padding: 0 5px; font-size: 11px; line-height: 1; }
+/* Key badges only where the deck is wide enough for them beside the label (the window's cards always show the keys); there the eight buttons fit two rows of four. */
+.strategy-button kbd.key { display: none; top: 1px; right: 2px; bottom: auto; }
+@media (min-width: 1500px) { .strategy-buttons { grid-template-columns: repeat(4, minmax(0, 1fr)); } .strategy-button { padding-right: 18px; } .strategy-button kbd.key { display: block; } }
+/* The deck keeps launch buttons, a one-line summary per mission and links into the Strategy window. */
+.strategy-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.strategy-open { min-height: 24px; padding: 2px 8px; font-size: 12px; gap: 5px; }
+.strategy-open svg { width: 14px; height: 14px; }
+.strategy-open[aria-expanded="true"] { border-color: var(--accent); background: #4a603d; }
+.strategy-summary { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto; font-size: 12px; }
+.summary-row { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 1px 0; border-bottom: 1px solid #344337; color: #e4eddf; }
+.summary-row .swatch { width: 7px; height: 12px; border-radius: 2px; flex: none; }
+.summary-label { white-space: nowrap; }
+.summary-note { flex: 1; min-width: 0; color: #b5c4a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.strategy-link { min-height: 22px; padding: 1px 7px; font-size: 11px; gap: 4px; }
+.link-state { color: var(--accent); font-family: "IBM Plex Mono", monospace; font-size: 10px; }
+/* The Strategy window: a side sheet over the right of the battlefield, not
+   modal, so the map stays live beside it. Text at a readable 13px. */
+.strategy-window { position: absolute; right: 16px; top: 62px; bottom: 16px; width: min(560px, calc(100% - 32px)); display: flex; flex-direction: column; background: #14231ef7; border: 1px solid #657862; border-radius: 6px; box-shadow: 0 10px 32px rgba(0, 0, 0, .55); z-index: 7; font-size: 13px; color: #e4eddf; }
+.strategy-window[hidden] { display: none; }
+.sw-head { display: flex; align-items: center; gap: 12px; padding: 10px 12px 0 16px; border-bottom: 1px solid var(--line); }
+.sw-head h2 { font: 600 16px "Space Grotesk", sans-serif; margin: 0 0 8px; }
+.sw-tabs { display: flex; gap: 2px; flex: 1; align-self: end; }
+.sw-tabs button { min-height: 34px; padding: 6px 12px; border: 0; border-bottom: 2px solid transparent; border-radius: 4px 4px 0 0; background: none; color: var(--muted); font-size: 13px; }
+.sw-tabs button[aria-selected="true"] { color: #f2f7ec; border-bottom-color: var(--accent); background: #22352c; }
+.sw-head .icon-button { margin-bottom: 8px; width: 32px; height: 32px; min-height: 32px; padding: 6px; }
+.sw-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px 16px; }
+.sw-pane { display: flex; flex-direction: column; gap: 10px; }
+.sw-pane[hidden] { display: none; }
+.sw-intro { margin: 0; color: var(--muted); line-height: 1.45; }
+.sw-subhead { margin: 6px 0 2px; font: 600 11px "IBM Plex Mono", monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+.sw-launch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.sw-launch button { justify-content: flex-start; gap: 10px; min-height: 52px; padding: 6px 10px; text-align: left; position: relative; }
+.sw-launch button > span:not(.swatch) { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sw-launch b { font-size: 14px; }
+.sw-launch small { font-size: 11px; color: var(--muted); line-height: 1.3; }
+.sw-launch .swatch { width: 10px; height: 26px; border-radius: 2px; flex: none; }
+.sw-launch svg { width: 18px; height: 18px; flex: none; }
+.sw-launch kbd { position: absolute; top: 4px; right: 6px; font: 10px/14px "IBM Plex Mono", monospace; color: var(--accent); padding: 0 4px; border: 1px solid #56684f; border-radius: 2px; background: #101b17; }
+/* Active missions in the window: a card each, controls on one line, what the tactic does below. */
+.strategy-list { display: flex; flex-direction: column; gap: 6px; }
+.strategy-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border: 1px solid #344337; border-radius: 4px; background: #1a2b24; color: #e4eddf; min-width: 0; }
+.strategy-row .swatch { width: 8px; height: 18px; border-radius: 2px; flex: none; }
+.strategy-name-btn { min-height: 26px; padding: 0 4px; border: 0; background: none; color: inherit; font-weight: 700; font-size: 13px; text-decoration: underline dotted; text-underline-offset: 3px; }
+.summary-row .strategy-name-btn { min-height: 20px; font-size: 12px; }
+.strategy-tool { min-height: 28px; min-width: 30px; padding: 0 8px; font-size: 13px; line-height: 1; }
 .strategy-tool[aria-pressed="true"] { background: #31503c; border-color: #7cf0b0; }
-.mission-row { flex-wrap: wrap; }
-.mission-tactic { min-width: 0; max-width: 92px; font-size: 10px; padding: 0 2px; }
-.mission-knobs { padding-left: 11px; font-size: 10px; flex-wrap: wrap; }
-.strategy-row .strategy-label { font-size: 11px; }
-.strategy-row .operation-note { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stances > summary { cursor: pointer; font-size: 10px; color: #b5c4a8; }
-.doctrine > summary { cursor: pointer; font-size: 10px; color: #b5c4a8; }
-.doctrine-row { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #e4eddf; flex-wrap: wrap; }
-.doctrine-row .stance-kind { width: 62px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.doctrine-row .weight-value { min-width: 16px; text-align: center; }
-.doctrine-row.locked { opacity: 0.5; }
-.doctrine-row .tier-lock { color: #d9b86a; }
-.stance-list { display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
-.stance-row { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #e4eddf; }
-.stance-row .stance-kind { width: 62px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stance-row .stance-tool { flex: 1; min-width: 0; padding: 0 2px; }
-.strategy-empty { margin: 0; color: #8fa089; line-height: 1.3; }
-.last-reject { margin: 0; padding: 2px 5px; border-left: 2px solid #f29ca2; color: #f6c3c6; font-size: 10px; line-height: 1.3; max-height: 2.7em; overflow: hidden; }
+.mission-tactic { min-height: 28px; font-size: 13px; padding: 0 4px; background: #101b17; color: #e4eddf; border: 1px solid #56684f; border-radius: 4px; }
+.mission-hint { flex: 0 0 100%; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.mission-knobs { margin-top: -6px; border-top: 0; border-radius: 0 0 4px 4px; padding-left: 24px; }
+.strategy-row .strategy-label { font-size: 13px; }
+.strategy-row .operation-note { min-width: 0; flex: 1; color: var(--muted); }
+.strategy-empty { margin: 0; color: #8fa089; line-height: 1.4; }
+/* Stances: a grid, one row per army kind, one column per stance, the meanings below. */
+.stance-grid { display: flex; flex-direction: column; gap: 4px; }
+.stance-head, .stance-row { display: grid; grid-template-columns: 110px repeat(4, minmax(0, 1fr)); gap: 6px; align-items: center; }
+.stance-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.stance-head span:not(.stance-kind) { text-align: center; }
+.stance-kind { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stance-row .stance-tool { min-height: 32px; }
+.sw-legend { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 6px 0 0; font-size: 12px; }
+.sw-legend dt { color: var(--accent); font-weight: 600; }
+.sw-legend dd { margin: 0; color: var(--muted); }
+/* Production doctrine: switches with what they do, the army mix with each kind's share, the reserve. */
+.doctrine-body { display: flex; flex-direction: column; gap: 10px; }
+.doctrine-group { display: flex; flex-direction: column; gap: 6px; }
+.doctrine-switch-row { display: grid; grid-template-columns: 148px 1fr; gap: 10px; align-items: center; }
+.doctrine-switch { min-height: 34px; justify-content: flex-start; gap: 8px; font-weight: 600; white-space: nowrap; }
+.doctrine-switch::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #7d8f78; flex: none; }
+.doctrine-switch[aria-pressed="true"] { border-color: #7cf0b0; background: #31503c; }
+.doctrine-switch[aria-pressed="true"]::before { background: #7cf0b0; border-color: #7cf0b0; box-shadow: 0 0 6px #7cf0b0; }
+.doctrine-hint { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.doctrine-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.doctrine-row .stance-kind { width: 110px; flex: none; }
+.weight-row { flex-wrap: nowrap; }
+.weight-value { min-width: 22px; text-align: center; }
+.share-bar { flex: 1; height: 8px; min-width: 40px; background: #101b17; border: 1px solid #3b4a3f; border-radius: 2px; position: relative; }
+.share-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--share, 0%); background: #a4c578; border-radius: 1px; }
+.share-text { min-width: 48px; text-align: right; color: #cde18d; }
+.doctrine-row.locked { opacity: 0.55; }
+.tier-lock { color: #d9b86a !important; }
+/* The order log, full height in its tab. */
+.command-list { font-size: 12px; color: #b8caaa; }
+.last-reject { margin: 0; padding: 2px 5px; border-left: 2px solid #f29ca2; color: #f6c3c6; font-size: 11px; line-height: 1.3; max-height: 2.7em; overflow: hidden; }
 .last-reject[hidden] { display: none; }
 .last-reject.material { color: #ecd79c; border-left-color: #ecd79c; }
 .last-reject.catalyst { color: #d8bcff; border-left-color: #d8bcff; }
-.order-log summary { cursor: pointer; font-size: 10px; color: #8fa089; }
-.strategy-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: auto; }
-.strategy-foot .telemetry { padding-top: 0; white-space: nowrap; }
-.order-log { position: relative; }
-/* Opened, the log rises over the panel instead of pushing it taller. */
-.order-log[open] .command-list { position: absolute; left: 0; bottom: calc(100% + 4px); z-index: 20; width: 240px; height: auto; max-height: 80px; padding: 2px 6px; background: #14231e; border: 1px solid #56684f; border-radius: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, .55); }
+.strategy-foot { display: flex; align-items: center; gap: 4px; margin-top: auto; flex-wrap: wrap; }
+.strategy-foot .telemetry { padding-top: 0; margin-left: auto; white-space: nowrap; }
 .notice { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(560px, calc(100% - 32px)); background: #33292b; color: #ffd3cd; border: 1px solid #b6807f; border-radius: 4px; padding: 13px 20px; z-index: 50; font-size: 13px; overflow-wrap: anywhere; }
 dialog { background: #202e29; color: #e2eae4; border: 1px solid #a4b48d; border-radius: 6px; padding: 28px; max-width: calc(100% - 32px); }
 dialog::backdrop { background: #0b141ac2; }
@@ -471,7 +522,6 @@ dialog p { margin-top: 14px; color: var(--muted); font-size: 14px; }
   .production-controls { margin-top: 5px; }
   .production-queue { margin-top: 6px; max-height: 26px; }
   #building-count, #research-status { margin-top: 5px; }
-  .command-list { height: 64px; max-height: 64px; }
   .telemetry { padding-top: 5px; }
 }
 @media (max-width: 760px) {
@@ -499,7 +549,9 @@ dialog p { margin-top: 14px; color: var(--muted); font-size: 14px; }
   #faction-readout { display: none; }
   .command-deck { grid-template-columns: 120px minmax(0, 1fr); padding: 14px; gap: 20px 0; }
   .production-section { grid-column: 1 / -1; border-left: 0 !important; border-top: 1px solid var(--line); padding: 16px 0 0 !important; }
-  .orders-section { grid-column: 1 / -1; border-left: 0 !important; padding: 0 !important; }.command-list { height: 75px; }
+  .orders-section { grid-column: 1 / -1; border-left: 0 !important; padding: 0 !important; }
+  .strategy-window { top: 10px; right: 10px; bottom: 10px; width: calc(100% - 20px); }.sw-launch { grid-template-columns: 1fr; }
+  .stance-head, .stance-row { grid-template-columns: 80px repeat(4, minmax(0, 1fr)); }.doctrine-switch-row { grid-template-columns: 1fr; gap: 2px; }
   .production-buttons button { font-size: 13px; }.production-buttons small { font-size: 10px; }
   .camera-tools { top: auto; bottom: 66px; right: 10px; flex-direction: column; }.camera-tools .icon-button { width: 34px; height: 34px; min-height: 34px; }
   .hud-left { top: 10px; left: 10px; }.battle-player { font-size: 10px; }.result { top: 80px; padding: 12px 22px; }#result-title { font-size: 24px; }

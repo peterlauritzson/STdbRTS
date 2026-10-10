@@ -32,7 +32,7 @@ export const TRAIN_KEYS = ["q", "w", "e", "r", "d", "z", "x"] as const;
 export const BUILD_KEYS = ["q", "w", "e", "r", "t", "y", "u", "i", "p"] as const;
 export const BUILD_MENU_KEY = "b";
 /**
- * Operations (src/operations.ts), both buttons of the Strategy panel and live from anywhere:
+ * Operations (src/operations.ts), buttons of the Strategy panel (and cards in the Strategy window) and live from anywhere:
  * V arms Expand and O arms Territory (clear of every train and unit key; U/I are build keys, so O avoids them); L toggles Saturate workers.
  */
 export const OPERATION_KEYS = { expand: "v", territory: "o", autoLabour: "l" } as const;

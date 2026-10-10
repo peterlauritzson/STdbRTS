@@ -406,6 +406,10 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     // Strategy list as GATHER, and its tactic picker retargets it to Rush.
     await host.getByRole("button", { name: "Gather then strike mission", exact: true }).click();
     await worldClick(host, 3000, 3000);
+    // The full controls live in the Strategy window, opened from the deck.
+    await host.locator("#strategy-open").click();
+    await expect(host.locator("#strategy-window")).toBeVisible();
+    await host.locator("#sw-tab-missions").click();
     const missionRow = host.locator("#strategy-list .mission-row");
     await expect(missionRow).toHaveCount(1, { timeout: 10000 });
     await expect(missionRow.locator(".strategy-name-btn")).toHaveText(/^GATHER/);
@@ -414,11 +418,13 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     await missionRow.getByRole("button", { name: /^Cancel .* mission$/ }).click();
     await expect(host.locator("#strategy-list .mission-row")).toHaveCount(0, { timeout: 10000 });
     // Stances: one row per army kind; Kite reads as pressed once the command lands.
-    await host.locator("#stances summary").click();
+    await host.locator("#sw-tab-stances").click();
     const soldierStances = host.locator("#stance-list .stance-row").filter({ hasText: "Soldier" });
     await expect(soldierStances).toHaveCount(1);
     await soldierStances.getByRole("button", { name: "Kite", exact: true }).click();
     await expect(soldierStances.getByRole("button", { name: "Kite", exact: true })).toHaveAttribute("aria-pressed", "true", { timeout: 10000 });
+    await host.locator("#strategy-close").click();
+    await expect(host.locator("#strategy-window")).toBeHidden();
     const canvas = host.locator("#battlefield");
     await host.getByRole("button", { name: "Attack-move", exact: true }).click();
     await expect(host.locator("#targeting-state")).toHaveText("Attack-move target");
@@ -453,7 +459,8 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     await expect(host.locator("#catalyst")).toHaveText("100");
     await expect(host.locator("#unit-count")).toHaveText("4 / 400");
     // Production doctrine (after the catalyst checks, since a pass could spend): open the section, switch Auto-train on and see it pressed once the command lands.
-    await host.locator("#doctrine summary").click();
+    await host.locator(".strategy-foot [data-strategy-tab='production']").click();
+    await expect(host.locator("#sw-production")).toBeVisible();
     const autoTrain = host.locator("#doctrine-body").getByRole("button", { name: "Auto-train", exact: true });
     await expect(autoTrain).toHaveAttribute("aria-pressed", "false");
     await autoTrain.click();

@@ -62,4 +62,4 @@ Per player: saturate workers, expand when bases are ~90% saturated or their patc
 
 ## UI
 
-All of it lives in the Strategy panel: mission list with a tactic picker and knobs; a Stances section listing your unit kinds with a stance picker; later Production and Economy sections. Labels say what a unit is doing and why ("Gather 5/8", "kiting").
+All of it lives in the Strategy window (F3, tabs Missions / Stances / Production / Orders; added 2026-10-10 because the bottom-bar panel was too small to read), with launch buttons and a one-line mission summary kept in the bottom-bar Strategy panel: mission list with a tactic picker and knobs; a Stances section listing your unit kinds with a stance picker; later Production and Economy sections. Labels say what a unit is doing and why ("Gather 5/8", "kiting").

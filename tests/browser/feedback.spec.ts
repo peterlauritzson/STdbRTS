@@ -32,7 +32,8 @@ test("a rejected command explains itself inline at a short desktop height", asyn
   await expect(page.getByRole("button", { name: "Set rally destination", exact: true })).toBeVisible();
   await expect(page.locator("#minimap")).toBeVisible();
   // The order log is folded under the Strategy panel; open it to read the rows.
-  await page.locator("#order-log summary").click();
+  await page.locator("#strategy-open").click();
+  await page.locator("#sw-tab-orders").click();
   await expect(page.locator("#command-list")).toBeVisible();
 
   // Finding 1: provoke a genuine rejection the way the playtest did. Both
@@ -87,10 +88,8 @@ test("a rejected command explains itself inline at a short desktop height", asyn
   expect(row.reasonTop).toBeGreaterThanOrEqual(row.labelBottom - 1);
   expect(row.reasonWidth).toBeGreaterThan(row.rowWidth * 0.9);
 
-  // The history stays bounded: a wrapped reason scrolls inside the list instead
-  // of growing the deck and stealing battlefield height back.
-  const listBox = (await page.locator("#command-list").boundingBox())!;
-  expect(listBox.height).toBeLessThanOrEqual(80);
+  // The history lives in the Strategy window now, which scrolls on its own; it
+  // must not grow the deck and steal battlefield height back.
   const after = (await page.locator("#battlefield").boundingBox())!;
   expect(after.height).toBe(battlefield.height);
 

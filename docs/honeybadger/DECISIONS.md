@@ -930,3 +930,26 @@ than a goal.
 **Why.** Third layer of [STRATEGY-LAYERS.md](STRATEGY-LAYERS.md): lets a player state a composition once instead of re-queueing units. Reusing the command path keeps cost, tier, unit-cap, rally and power-field rules from drifting apart from manual play.
 
 **Would overturn it.** Players never opening the panel, the deficit rule oscillating between kinds in a way that wastes build time, or the reserve being too blunt (then make it per building or time-based).
+
+---
+
+## 2026-10-10 - Strategy window
+
+**Decision.** Missions, stances, production doctrine and the order log move
+from the bottom-bar Strategy panel into a **Strategy window**: a non-modal side
+sheet over the right of the battlefield (F3 or the panel's Open button; Esc or
+F3 closes; the last tab is remembered per browser). Tabs: Missions (launch
+cards with what each does, then a card per mission with tactic, size, cancel
+and the tactic's description), Stances (army kind x stance grid plus a legend),
+Production (switches beside what they do, the army mix with each kind's live
+share, the reserve), Orders (the last 40 orders). Text is 12-13px instead of
+10-11px. The bottom-bar panel keeps the eight launch buttons, a one-line
+summary per mission and operation, and links that open each tab.
+
+**Why.** Playtest: the four strategy layers had outgrown a 214px-tall bar
+column and were hard to read and hit. A side sheet keeps the map live beside
+it, so missions can still be placed while it is open.
+
+**Would overturn it.** The sheet covering fights on the right of the screen
+too often (make it dockable or collapsible), or players never opening it
+(surface the most-used controls in the bar again).

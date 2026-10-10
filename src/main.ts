@@ -400,6 +400,55 @@ for (const kind of TACTIC_IDS) {
   button.querySelector<HTMLElement>(".swatch")!.style.background = TACTICS[kind].color;
   button.addEventListener("click", () => battlefield.arm(`mission_${kind}`));
 }
+/**
+ * The Strategy window: missions, stances, production doctrine and the order
+ * log at a readable size, over the right of the battlefield. Not modal, so the
+ * map stays live beside it and a mission can be placed straight from it. F3
+ * toggles it; Esc closes it once nothing is being aimed. The deck's Strategy
+ * section keeps the launch buttons and a one-line-per-mission summary.
+ */
+type StrategyTab = "missions" | "stances" | "production" | "orders";
+const STRATEGY_TABS: readonly StrategyTab[] = ["missions", "stances", "production", "orders"];
+const STRATEGY_TAB_KEY = "strategy-tab";
+let strategyTab: StrategyTab = "missions";
+try { const saved = localStorage.getItem(STRATEGY_TAB_KEY); if (STRATEGY_TABS.includes(saved as StrategyTab)) strategyTab = saved as StrategyTab; } catch { /* storage blocked: start on Missions */ }
+function showStrategyTab(tab: StrategyTab): void {
+  strategyTab = tab;
+  try { localStorage.setItem(STRATEGY_TAB_KEY, tab); } catch { /* storage blocked: the tab is just not remembered */ }
+  for (const id of STRATEGY_TABS) {
+    element(`sw-tab-${id}`).setAttribute("aria-selected", String(id === tab));
+    element(`sw-${id}`).hidden = id !== tab;
+  }
+}
+const strategyOpen = (): boolean => !element("strategy-window").hidden;
+function openStrategy(tab?: StrategyTab): void {
+  if (tab) showStrategyTab(tab);
+  element("strategy-window").hidden = false;
+  element("strategy-open").setAttribute("aria-expanded", "true");
+  // Help sits in the same corner: one panel at a time.
+  element("help").hidden = true;
+  element("help-toggle").setAttribute("aria-expanded", "false");
+}
+function closeStrategy(): void {
+  element("strategy-window").hidden = true;
+  element("strategy-open").setAttribute("aria-expanded", "false");
+}
+function toggleStrategy(): void { if (strategyOpen()) closeStrategy(); else openStrategy(); }
+showStrategyTab(strategyTab);
+element("strategy-open").addEventListener("click", toggleStrategy);
+element("strategy-close").addEventListener("click", () => { closeStrategy(); element("battlefield").focus({ preventScroll: true }); });
+// Tabs switch in place; the deck's links open the window on their tab, or close it if it already shows that tab.
+for (const button of document.querySelectorAll<HTMLElement>("[data-strategy-tab]")) button.addEventListener("click", () => {
+  const tab = button.dataset.strategyTab as StrategyTab;
+  if (button.getAttribute("role") === "tab") showStrategyTab(tab);
+  else if (strategyOpen() && strategyTab === tab) closeStrategy();
+  else openStrategy(tab);
+});
+// The window's launch cards press the deck button of the same name, so both share one handler and one state.
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-launch]")) {
+  button.querySelector<HTMLElement>(".swatch")?.style.setProperty("background", TACTICS[button.dataset.launch!.replace("mission-", "") as Tactic]?.color ?? "");
+  button.addEventListener("click", () => element<HTMLButtonElement>(button.dataset.launch!).click());
+}
 element("repair").addEventListener("click", () => battlefield.arm("repair"));
 element("teleport").addEventListener("click", () => battlefield.arm("teleport"));
 for (const kind of ["recall", "bloom"] as const) element(kind).addEventListener("click", () => battlefield.arm(kind));
@@ -442,6 +491,8 @@ for (const name of CARD_TABS) element(`tab-${name}`).addEventListener("click", (
 battlefield.onKey = event => {
   const key = event.key.toLowerCase();
   if (event.key === "?") { toggleHelp(); return true; }
+  if (event.key === "F3") { toggleStrategy(); return true; }
+  if (event.key === "Escape" && !battlefield.targeting && strategyOpen()) { closeStrategy(); return true; }
   if (key === BUILD_MENU_KEY) { showTab(visibleTab() === "build" ? "production" : "build"); return true; }
   const tab = visibleTab();
   // Operations live in the Strategy panel: V arms Expand and L toggles Saturate workers, from anywhere.
@@ -462,6 +513,7 @@ battlefield.onKey = event => {
 function toggleHelp(): void {
   const help = element("help");
   help.hidden = !help.hidden;
+  if (!help.hidden) closeStrategy();
   element("help-toggle").setAttribute("aria-expanded", String(!help.hidden));
 }
 element("help-toggle").addEventListener("click", toggleHelp);
@@ -740,6 +792,11 @@ function renderMatch(): void {
   element("territory").title = `Extend your territory toward a point with ${linkWord}: click the map or minimap (${keyLabel(OPERATION_KEYS.territory)})`;
   element("auto-labour").setAttribute("aria-pressed", String(operations.autoLabour));
   element<HTMLButtonElement>("auto-labour").disabled = !canOrder;
+  for (const launch of document.querySelectorAll<HTMLButtonElement>("[data-launch]")) {
+    const source = element<HTMLButtonElement>(launch.dataset.launch!);
+    launch.disabled = source.disabled;
+    launch.setAttribute("aria-pressed", source.getAttribute("aria-pressed") ?? "false");
+  }
   element<HTMLButtonElement>("clear-rally").disabled = !canOrder || !producer?.order.kind.startsWith("rally_");
   // An Organic outpost queues harvesters but is not a production *control*:
   // the server takes rally and cancellation only at an HQ, barracks, factory or
@@ -923,6 +980,7 @@ function renderStrategy(): void {
       bigger,
       tool("All", rest ? "Take a fixed number of units" : "Take every army unit not needed elsewhere", () => missions.setSize(mission.id, rest ? Math.max(1, mission.members.size) : "rest"), rest),
       tool("\u00d7", `Cancel ${info.label} mission`, () => missions.remove(mission.id)));
+    row.append(text("span", rest ? `${info.hint}. Takes every army unit not needed elsewhere.` : `${info.hint}. Up to ${mission.size} units.`, "mission-hint"));
     rows.push(row);
     if (mission.tactic === "gather") {
       const knobs = text("div", "", "strategy-row mission-knobs");
@@ -956,6 +1014,29 @@ function renderStrategy(): void {
   }
   if (!rows.length) rows.push(text("p", "No missions. Pick a tactic, then click the map: idle army units fill it.", "strategy-empty"));
   element("strategy-list").replaceChildren(...rows);
+  // The deck's summary: one line each, a click on the name goes there; everything else is in the window.
+  const summary: HTMLElement[] = mine.map(mission => {
+    const row = text("div", "", "summary-row");
+    const swatch = text("span", "", "swatch"); swatch.style.background = TACTICS[mission.tactic].color;
+    const name = text("button", missionLabel(mission, gatheredCount(mission)), "strategy-name-btn") as HTMLButtonElement;
+    name.title = "Select its units and centre the camera on them"; name.addEventListener("click", () => goTo(mission));
+    row.append(swatch, name, text("span", TACTICS[mission.tactic].label, "summary-note"));
+    return row;
+  });
+  for (const operation of operations.list) {
+    const row = text("div", "", "summary-row");
+    const swatch = text("span", "", "swatch"); swatch.style.background = "#8fd8ff";
+    row.append(swatch, text("strong", `${operation.label} ${operation.done}/${operation.total}`, "summary-label"), text("span", operation.note, "summary-note"));
+    summary.push(row);
+  }
+  if (operations.autoLabour) {
+    const row = text("div", "", "summary-row");
+    const swatch = text("span", "", "swatch"); swatch.style.background = "#8fd8ff";
+    row.append(swatch, text("strong", "Saturate workers", "summary-label"), text("span", "on", "summary-note"));
+    summary.push(row);
+  }
+  if (!summary.length) summary.push(text("p", "No missions yet. Pick one above, then click the map.", "strategy-empty"));
+  element("strategy-summary").replaceChildren(...summary);
 }
 /**
  * The Strategy panel's Stances section: one row per army kind of the player's
@@ -972,7 +1053,11 @@ function renderStances(): void {
   const signature = `${faction}|${ROSTER[faction].map(current).join(",")}`;
   if (signature === stanceSignature) return;
   stanceSignature = signature;
-  element("stance-list").replaceChildren(...ROSTER[faction].map(kind => {
+  const head = text("div", "", "stance-head");
+  head.append(text("span", "Unit", "stance-kind"), ...STANCES.map(stance => text("span", stance.label)));
+  const legend = element("stance-legend");
+  if (!legend.childElementCount) legend.append(...STANCES.flatMap(stance => [text("dt", stance.label), text("dd", stance.hint)]));
+  element("stance-list").replaceChildren(head, ...ROSTER[faction].map(kind => {
     const row = text("div", "", "stance-row");
     row.append(text("span", CATALOG[kind].label, "stance-kind"));
     for (const stance of STANCES) {
@@ -1012,12 +1097,14 @@ function renderDoctrine(): void {
     const issuer = battlefield.issuer();
     if (issuer) void session.order([issuer.id], { kind, x, y: 0, target: 0 });
   };
-  const toggle = (label: string, title: string, on: boolean, kind: string): HTMLElement => {
-    const button = text("button", label, "strategy-tool") as HTMLButtonElement;
-    button.title = title;
+  const toggle = (label: string, hint: string, on: boolean, kind: string): HTMLElement => {
+    const row = text("div", "", "doctrine-switch-row");
+    const button = text("button", label, "doctrine-switch") as HTMLButtonElement;
+    button.title = hint;
     button.setAttribute("aria-pressed", String(on));
     button.addEventListener("click", () => send(kind, on ? 0 : 1));
-    return button;
+    row.append(button, text("span", hint, "doctrine-hint"));
+    return row;
   };
   const stepper = (name: string, value: number, min: number, max: number, step: number, kind: string): HTMLElement[] => {
     const minus = text("button", "−", "strategy-tool") as HTMLButtonElement;
@@ -1030,10 +1117,18 @@ function renderDoctrine(): void {
     plus.addEventListener("click", () => send(kind, Math.min(max, value + step)));
     return [minus, text("span", String(value), "weight-value mono"), plus];
   };
-  const rows: HTMLElement[] = [];
-  const head = text("div", "", "doctrine-row");
-  head.append(toggle("Auto-train", "Idle barracks and factories train toward the weights below while catalyst allows", state.train, DOCTRINE_SWITCH.train));
-  rows.push(head);
+  const group = (title: string, ...children: HTMLElement[]): HTMLElement => {
+    const box = text("div", "", "doctrine-group");
+    box.append(text("h3", title, "sw-subhead"), ...children);
+    return box;
+  };
+  const switches = [state.train, state.tier, state.research, state.build].filter(Boolean).length;
+  element("doctrine-state").textContent = switches ? `${switches} on` : "off";
+  const automation = group("Automation",
+    toggle("Auto-train", "Idle barracks and factories train toward the army mix below while catalyst allows", state.train, DOCTRINE_SWITCH.train),
+    toggle("Auto-tier", "Buy the next tier as soon as it is allowed and affordable", state.tier, DOCTRINE_SWITCH.tier),
+    toggle("Auto-research", "Buy weapons, armour and logistics when affordable", state.research, DOCTRINE_SWITCH.research),
+    toggle("Auto-build", "Refineries on free catalyst, the next tier's building, barracks/factories when catalyst piles up (above reserve + 400), synthesizers at tier 2 when material does (above 1500)", state.build, DOCTRINE_SWITCH.build));
   const presets = text("div", "", "doctrine-row");
   presets.append(text("span", "Presets", "stance-kind"));
   for (const preset of DOCTRINE_PRESETS) {
@@ -1044,28 +1139,23 @@ function renderDoctrine(): void {
     });
     presets.append(button);
   }
-  rows.push(presets);
-  for (const kind of ROSTER[faction]) {
+  // Each kind's share of what Auto-train buys now: locked kinds do not count until their tier.
+  const total = ROSTER[faction].filter(kind => tier >= requiredTier(kind)).reduce((sum, kind) => sum + weightOf(kind), 0);
+  const weightRows = ROSTER[faction].map(kind => {
     const needed = requiredTier(kind);
     const locked = tier < needed;
-    const row = text("div", "", locked ? "doctrine-row locked" : "doctrine-row");
-    row.append(text("span", CATALOG[kind].label, "stance-kind"));
-    if (locked) row.append(text("span", `Tier ${needed}`, "tier-lock mono"));
-    row.append(...stepper(`${CATALOG[kind].label} weight`, weightOf(kind), 0, DOCTRINE_MAX_WEIGHT, 1, doctrineWeightOrder(kind)));
-    rows.push(row);
-  }
+    const share = locked || !total ? 0 : Math.round(100 * weightOf(kind) / total);
+    const row = text("div", "", locked ? "doctrine-row weight-row locked" : "doctrine-row weight-row");
+    const bar = text("span", "", "share-bar"); bar.style.setProperty("--share", `${share}%`);
+    row.append(text("span", CATALOG[kind].label, "stance-kind"),
+      ...stepper(`${CATALOG[kind].label} weight`, weightOf(kind), 0, DOCTRINE_MAX_WEIGHT, 1, doctrineWeightOrder(kind)),
+      bar, text("span", locked ? `Tier ${needed}` : `${share}%`, locked ? "tier-lock mono share-text" : "mono share-text"));
+    return row;
+  });
+  const mix = group("Army mix", presets, ...weightRows);
   const reserve = text("div", "", "doctrine-row");
-  reserve.title = "Auto-train keeps this much catalyst unspent";
-  reserve.append(text("span", "Reserve", "stance-kind"), ...stepper("catalyst reserve", state.reserve, 0, DOCTRINE_MAX_RESERVE, DOCTRINE_RESERVE_STEP, DOCTRINE_RESERVE_ORDER));
-  rows.push(reserve);
-  const buying = text("div", "", "doctrine-row");
-  buying.append(
-    toggle("Auto-tier", "Buy the next tier as soon as it is allowed and affordable", state.tier, DOCTRINE_SWITCH.tier),
-    toggle("Auto-research", "Buy weapons, armour and logistics when affordable", state.research, DOCTRINE_SWITCH.research),
-    toggle("Auto-build", "Add barracks/factories when catalyst piles up (above reserve + 400), and synthesizers at tier 2 when material does (above 1500)", state.build, DOCTRINE_SWITCH.build),
-  );
-  rows.push(buying);
-  element("doctrine-body").replaceChildren(...rows);
+  reserve.append(text("span", "Catalyst", "stance-kind"), ...stepper("catalyst reserve", state.reserve, 0, DOCTRINE_MAX_RESERVE, DOCTRINE_RESERVE_STEP, DOCTRINE_RESERVE_ORDER), text("span", "Auto-train and Auto-build keep this much unspent", "doctrine-hint"));
+  element("doctrine-body").replaceChildren(automation, mix, group("Reserve", reserve));
 }
 operations.onChange = () => { renderStrategy(); if (session.snapshot.room) renderMatch(); };
 
@@ -1174,7 +1264,7 @@ function renderTimers(): void {
   const rows = [...session.pending.values()].map(pending => {
     const row = text("div", "", "command-row"); row.append(text("span", pending.order.kind.split("_").join(" "), "command-label"), text("span", `${countdown(pending.executeTick, room.tick, performance.now() - session.tickReceivedAt).toFixed(1)}s`, "command-status")); return row;
   });
-  for (const command of ours.slice(0, 8)) {
+  for (const command of ours.slice(0, strategyOpen() && strategyTab === "orders" ? 40 : 8)) {
     const row = text("div", "", `command-row ${command.status}`);
     const label = command.order.kind.split("_").join(" ");
     row.append(text("span", `${label} / ${command.units.length}`, "command-label"), text("span", command.status === "scheduled" ? `${countdown(command.executeTick, room.tick, performance.now() - session.tickReceivedAt).toFixed(1)}s` : command.status, "command-status"));
