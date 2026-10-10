@@ -302,7 +302,7 @@ mod tests {
     fn built_in_map_preserves_the_existing_layout() {
         let map = default_map();
         assert_eq!(map.id, "skirmish");
-        assert_eq!(map.version, 2);
+        assert_eq!(map.version, 3);
         assert_eq!(
             map.starts,
             [
@@ -317,7 +317,7 @@ mod tests {
             .deposits
             .iter()
             .filter(|deposit| deposit.kind == ResourceKind::Material)
-            .all(|deposit| deposit.amount == 4000));
+            .all(|deposit| deposit.amount == 3000));
         assert_eq!(
             map.terrain,
             [
@@ -389,7 +389,7 @@ mod tests {
     /// here instead of silently changing what running matches were created
     /// against. If this fires because the change was intended, bump
     /// `MapDefinition.version` in shared/maps/skirmish.json and re-pin.
-    const SKIRMISH_CONTENT_HASH: u64 = 0x4756_989d_5a0d_f082;
+    const SKIRMISH_CONTENT_HASH: u64 = 0x8167_f10a_6c2a_c563;
 
     /// The map new matches are created on. `default_map()` stays on skirmish so
     /// the simulation tests keep their small, coordinate-stable world; this is
@@ -465,7 +465,10 @@ mod tests {
             let [nx, ny] = map.starts[(i + 1) % 4];
             assert!((nx - (map.size - y)).abs() < 0.2 && (ny - x).abs() < 0.2);
         }
-        assert_eq!(by_id("expanse").unwrap().content_hash(), expanse_map().content_hash());
+        assert_eq!(
+            by_id("expanse").unwrap().content_hash(),
+            expanse_map().content_hash()
+        );
         // The match map's hash is compared with the client's bundled copy
         // (tests/presentation.test.ts pins the same value), so it is pinned.
         assert_eq!(map.content_hash(), EXPANSE_CONTENT_HASH);
@@ -473,7 +476,7 @@ mod tests {
 
     /// Expanse's content hash, as the client computes it from its bundled
     /// copy. Re-pin both together if the map is ever deliberately edited.
-    const EXPANSE_CONTENT_HASH: u64 = 0x18f4_2e08_5fe0_19b4;
+    const EXPANSE_CONTENT_HASH: u64 = 0x63af_5731_899b_7733;
 
     #[test]
     fn a_match_map_id_always_resolves_to_the_same_definition() {
@@ -500,7 +503,7 @@ mod tests {
             map.identity(),
             MapIdentity {
                 id: "skirmish".into(),
-                version: 2,
+                version: 3,
                 hash: SKIRMISH_CONTENT_HASH,
             }
         );
@@ -644,7 +647,9 @@ mod tests {
         assert!(sized(crate::MAX_WORLD_SIZE).is_ok());
 
         assert!(sized(1560.0).unwrap_err().contains("between"));
-        assert!(sized(crate::MAX_WORLD_SIZE + 40.0).unwrap_err().contains("between"));
+        assert!(sized(crate::MAX_WORLD_SIZE + 40.0)
+            .unwrap_err()
+            .contains("between"));
         assert!(sized(3210.0).unwrap_err().contains("navigation cell"));
         assert!(sized(0.0).unwrap_err().contains("positive finite"));
         assert!(sized(f32::NAN).unwrap_err().contains("positive finite"));
@@ -750,8 +755,8 @@ mod tests {
         map.deposits[0].x = f32::INFINITY;
         assert!(map.validate().is_err());
         let source = include_str!("../../shared/maps/skirmish.json").replacen(
-            "\"version\": 2",
-            "\"version\": 2, \"typo\": true",
+            "\"version\": 3",
+            "\"version\": 3, \"typo\": true",
             1,
         );
         assert!(MapDefinition::parse(&source).is_err());

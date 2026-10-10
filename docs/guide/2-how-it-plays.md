@@ -47,7 +47,11 @@ The three currencies are kept strictly apart on purpose.
 
 Money from losses is partly returned too: when one of your army units dies you get **half of its price back in catalyst**. Losing a fight stings but does not stop you rebuilding. Workers and buildings return nothing.
 
-Refineries are the one place you spend material to make catalyst, and each can only sit on a catalyst deposit. That makes the catalyst deposits the strategic points of the map: you always know where the other player must build.
+Refineries are the main place you spend material to make catalyst, and each can only sit on a catalyst deposit. That makes the catalyst deposits the strategic points of the map: you always know where the other player must build.
+
+### The synthesizer: the late-game outlet for surplus material
+
+Late in a game you can sit on tens of thousands of material with nothing to buy while catalyst and terrazine run dry. The **synthesizer** (300 material, needs tier 2) fixes that. Each finished synthesizer turns 4 material a second into 1 catalyst or terrazine a second, whichever of the two you currently hold **less** of (catalyst on a tie), so it tops up the weaker side without any setting to manage. It only runs while your material is above 300, so it never starves your building. It is slow on purpose: ten of them make 10 a second, about a refinery. It is not a hub, a drop-off or a production building, and it does not count towards victory.
 
 ## Tiers: tech is a purchase, not a building
 
@@ -64,6 +68,7 @@ Before tiers, every unit was available the moment its building stood, so there w
 | 3 | **Reinforced Plating**: every building +2 armour | **Resonance**: Phase Shift every 5 s instead of 8 s; warden aura 4 shields a second instead of 2 | **Adrenal Glands**: swarmer and devourer attack 20% faster; crusher +2 armour |
 
 - The laboratory is the tier 3 gate. It no longer researches anything, but it is a target for your opponent that delays your late game.
+- **Weapons and Armour have three levels.** Level 1 costs 150 material and needs no tier, level 2 costs 400 and needs tier 2, level 3 costs 800 and needs tier 3. Each level adds the same again (+4 damage, 3 less damage per hit), so level 3 is +12 damage or 9 less per hit. The same Research button buys the next level; a locked level shows the tier it needs, and a finished one reads "max". Logistics is still a single purchase.
 
 ## Territory: creep, power fields and sensors
 
@@ -105,27 +110,54 @@ The map is huge and travel takes time. A basic unit needs well over a minute to 
 - Build an **outpost** (300 material, an investment) next to new patches. It works as a drop-off point, a second hub that trains labour, and, for Organic, a creep source and a stock tank.
 - You may only build within 500 units of a finished building of your own, or within 500 of an unfinished building of yours that is itself within 500 of a finished one (one hop of look-ahead, not a chain: your reach is at most about 1000 from finished structures, so you can queue the next building before the last one completes). Your own units standing on the site step aside when it is placed; only enemy units block it. You do not have to place every step by hand: **Expand** (Strategy panel, or **V**) plans the chain for you. It picks the base site nearest your click, walks from your nearest finished building toward it in hops of at most 488 units (each hop an outpost, 300 material, 6 seconds), puts the last outpost 150 to 250 units from the deposits on the side facing your base, and then builds two refineries on the site's catalyst. The chain is drawn as a dashed line with numbered ghost outposts on the map and minimap, and it is carried out one step at a time: the next outpost is ordered when the previous one is finished and the material is there.
 - **Saturate workers** (the old auto-labour; Strategy panel or **L**) keeps your hubs busy: any finished hub with an empty queue trains one labour unit, until you have one per live material patch on your hubs' mineral lines (within 320 of a finished hub) plus two, or exactly one per patch for Network, since a drifter never leaves its patch and a patch takes one miner at a time. It is a convenience, not a strategy; it will happily build workers you do not need if you stop spending.
-- Catalyst deposits are the prize. A refinery on a deposit produces 8 catalyst a second with no workers; a deposit holds 2000 or 2500 before it is empty. Material patches hold 1200 or 1500.
+- Catalyst deposits are the prize. A refinery on a deposit produces 8 catalyst a second with no workers; a deposit holds 2000 or 2500 before it is empty. Material patches hold 900 or 1150 (the Expanse map).
 - Patches empty. By the middle of the game your first base will thin out, and the new one has to be ready.
 
 ## Behaviors: orders that think
 
-Because every order is delayed, a unit that must wait for you to tell it to run away will usually die first. A **behavior** is one order that carries its own rules, which the server re-checks four times a second without further delay. You do not give a behavior to units, you give it to a **place**: press **J** (Harass), **K** (Guard) or **N** (Raid), or use the buttons in the Strategy panel, then click the map or minimap. That is a **mission**, described below; the encyclopedia has the exact numbers.
+Because every order is delayed, a unit that must wait for you to tell it to run away will usually die first. A **behavior** is one order that carries its own rules, which the server re-checks four times a second without further delay. You do not give a behavior to units, you give it to a **place**: press **J** (Harass), **K** (Guard), **N** (Hit & retreat), **M** (Rush) or **,** (comma, Gather then strike), or use the buttons in the Strategy panel, then click the map or minimap. That is a **mission**, described below; the encyclopedia has the exact numbers.
 
 - **Harass** goes after enemy labour near the goal and pulls back when hurt or outnumbered. Use it to bleed an economy with a small, fast group.
 - **Guard** holds a spot and fights around it, walking back if chased far away. Use it for the approach to an outpost.
-- **Raid** is a plain push: units retreat below 35% health and come back at 90%.
+- **Hit & retreat** (the raid preset) is a push: units retreat below 35% health and come back at 90%.
+- **Rush** attack-moves to the point and never retreats. Use it when the fight is decided or retreating would just feed the enemy.
+- **Gather then strike** is a group tactic, not a single preset: see Missions below.
 - On screen, selected units draw a faint line to their goal and a marker labelled with the preset; each unit wears a coloured dot for its state, and a unit that is retreating or recovering is ringed and labelled, so you can see why it left the fight. Any ordinary order you give a unit ends its behavior and takes it out of its mission. Behaviors go to army units only and cannot be Shift-queued.
+
+### Stances: how a kind fights
+
+A **stance** is set per army kind in the Strategy panel (Stances), and applies to every unit of that kind while it is on an attack-move, which includes missions. It never changes a plain move, a hold or an explicit attack, so you can still override it with a click.
+
+- **Standard** closes to 90% of weapon range and fires.
+- **Charge** closes to 40% of range: it pushes into the enemy, soaks fire and body-blocks. Good for tough short-range units.
+- **Kite** steps directly away while the weapon reloads, when an armed enemy is closer than 80% of range. It pays off against shorter-ranged enemies and does nothing against unarmed targets.
+- **Hold** never walks toward a target: it fires at what is in range and still walks the attack-move path when nothing is. Pairs with Entrenchment.
+
+Ranged kinds (marksman, lancer, spitter) default to Kite and the heavies (bulwark, behemoth, crusher) to Charge. Setting a stance is free and goes through the usual command delay. Kiting is automatic micro available to both sides; it is **experimental**.
+
+### Production doctrine: what to build while you are busy
+
+The Strategy panel's **Production** section tells the server what to train and buy for you. Everything starts **off**, so nothing changes until you opt in.
+
+- **Auto-train** looks once a second at each finished barracks and factory whose queue is empty and queues one unit there: the kind that is furthest below its target share of your army. The target share is the kind's weight divided by the weights of every kind you can currently train; the current share counts living units plus queued ones. Weight 0 means never. Kinds still locked behind a tier are skipped (the panel greys them with the tier they need).
+- The **catalyst reserve** is spent on nothing: a unit is queued only if catalyst minus its price stays at or above the reserve.
+- **Auto-tier** buys the next tier when it is allowed (the building exists) and you have the material. **Auto-research** then buys Weapons or Armour (the cheaper next level first, Weapons on a tie) and Logistics when affordable. At most one purchase happens per second.
+- Presets only set weights: **Even** (5 for every kind), **Basics** (first barracks unit 10, second 4, the rest 0), **Heavy** (factory units 8, barracks units 3).
+- Your own queues always win: a building with anything queued is skipped, and you can still train and buy by hand at any time. **Auto-build** (also off by default) climbs the tech ladder for you: it raises the building the next tier needs, adds production when catalyst piles up, and at tier 2 turns floating material into synthesizers, which turn it into catalyst.
+
+The numbers are **experimental**.
 
 ### Missions: strategy is about places
 
 Setting up a strategy by hand is a chore: select the army, give it a raid, and every soldier trained afterwards just stands at home. Strategy is really a list of places ("harass over there", "push here", "guard this ramp") and a question of how many units each place gets. So you say the places, and the game staffs them.
 
-- A mission is a behavior, a point and a size. Idle and newly trained army units are dealt to missions automatically: older missions first, nearest units first, up to each mission's size. A Raid defaults to "all rest": it takes every army unit nothing else needs, so new soldiers walk out to the front without you.
+- A mission is a behavior, a point and a size. Idle and newly trained army units are dealt to missions automatically: older missions first, nearest units first, up to each mission's size. Hit & retreat, Rush and Gather then strike default to "all rest": they take every army unit nothing else needs, so new soldiers walk out to the front without you.
 - Army units you had selected when you placed the mission join it immediately. You can also right-click a mission's marker with army selected.
 - Your own orders always win. A unit you move, stop-and-reorder, or give another behavior leaves its mission and is not recruited again until it is idle. A shrunk or cancelled mission stops the units it lets go, so they become idle and the other missions can take them.
 - Missions are drawn on the map and minimap in their preset's colour, labelled with how full they are (HARASS 3/4, RAID 7), and listed in the Strategy panel beside your operations.
-- Like operations, missions are managed by your browser tab, using ordinary orders after the usual delay. If you close the tab, units keep what they were doing but nothing fills the missions; reload and they pick up again.
+- Missions are server rows, checked once a second, so they keep staffing when the tab is closed. You can change a mission's tactic later from the Strategy panel.
+- **Gather then strike** walks a group through gather, strike, fall back, gather. Units gather at a rally point (by default most of the way from your nearest hub to the target) and guard it. When enough are there (80% of the size by default) they attack-move to the target. If the strike loses more than most of its strength (below 40% of the units that started it left), the survivors pull back to the rally point and the cycle repeats. Units trained during a strike do not walk into the fight one at a time: they wait at the rally point and go in together once a few are there (4 for an "all rest" mission). Move the rally point with the **rally** button in the Strategy panel. All numbers are experimental.
+- Labels show the state: "GATHER 5/8", "STRIKE 7", "FALL BACK", with a dashed line from the rally point to the target.
 
 ## Macro without the clicking
 
@@ -137,7 +169,7 @@ Three small rules remove the busywork of running several bases, none of them cha
 
 ## Knowing what your army is doing
 
-Selecting units to read one line of text does not scale past a handful of squads, and the usual failure is a squad that finished its order and has stood idle in a corner since. The army roster lists every cluster of army units with its activity, size and makeup, so a forgotten squad is a red row rather than something you notice ten minutes later. Behaviors (Harass, Guard, Raid) show under their own name, since the preset, not the raw order underneath it, is what the units are doing. The F1 button carries a count of idle labour for the same reason.
+Selecting units to read one line of text does not scale past a handful of squads, and the usual failure is a squad that finished its order and has stood idle in a corner since. The army roster lists every cluster of army units with its activity, size and makeup, so a forgotten squad is a red row rather than something you notice ten minutes later. Behaviors (Harass, Guard, Hit & retreat, Rush) show under their own name, since the preset, not the raw order underneath it, is what the units are doing. The F1 button carries a count of idle labour for the same reason.
 
 ## Knowing you are under attack
 

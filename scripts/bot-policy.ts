@@ -1,4 +1,4 @@
-import type { CreepPatch, Node, Order } from "../src/bindings/types";
+import type { CreepPatch, MissionRow, Node, Order } from "../src/bindings/types";
 import type { Entity } from "../src/units";
 import { abilityOf, castingHub, onCreep, recallable } from "../src/abilities";
 import { affords, ARMY, ROSTER, canProduce, CATALOG, carriesCargo, currencyOf, isArmy, isBuilding, isCompletedHub, isHub, isLabour, LABOUR, MAX_UNITS, placementError, requiredTier, researchReason, RESEARCH_COST, shortfall, spend, takesSupply, TECHNOLOGIES, tierOf, tierOrder, costOf, type Cost, type FactionName } from "../src/catalog";
@@ -122,7 +122,13 @@ function refinerySite(hq: Entity, owner: number, units: Entity[], nodes: Node[])
  * is paid for in hub stock, which is checked here so the bot never spends a
  * pass on orders the server would refuse.
  */
-export function chooseOrders(owner: number, faction: FactionName, balance: Cost & { research?: readonly string[] }, units: Entity[], nodes: Node[], busy: Set<number>, holdArmy = false, abilities?: AbilityView): Decision[] {
+/** A strike mission this far from every enemy hub has lost its target and is re-placed. */
+const STRIKE_RETARGET = 400;
+
+/** The bot's view of its own missions, when its client has them. */
+export type MissionView = Pick<MissionRow, "id" | "owner" | "tactic" | "x" | "y">;
+
+export function chooseOrders(owner: number, faction: FactionName, balance: Cost & { research?: readonly string[] }, units: Entity[], nodes: Node[], busy: Set<number>, holdArmy = false, abilities?: AbilityView, missions?: readonly MissionView[]): Decision[] {
   const owned = units.filter(unit => unit.owner === owner);
   // Primary-hub victory: after the HQ falls the bot plays on from any
   // completed outpost, which then anchors building, repair and the attack.
@@ -289,10 +295,29 @@ export function chooseOrders(owner: number, faction: FactionName, balance: Cost 
   // `holdArmy` keeps the army at home: it still trains and still fights what
   // walks into range, but it is not sent across the map. Practice sets it for
   // the opening minutes so a new player sees an opponent before its first push.
-  if (!holdArmy && soldiers.length >= 4 && targets.length && idle.length) {
-    const target = targets[0];
-    const gap = Math.hypot(hq.x - target.x, hq.y - target.y);
-    decisions.push({ units: idle.map(unit => unit.id), order: { kind: "attack_move", x: target.x + (hq.x - target.x) / gap * 90, y: target.y + (hq.y - target.y) / gap * 90, target: 0 } });
+  const strikePoint = (target: Entity) => {
+    const gap = Math.hypot(hq.x - target.x, hq.y - target.y) || 1;
+    return { x: target.x + (hq.x - target.x) / gap * 90, y: target.y + (hq.y - target.y) / gap * 90 };
+  };
+  if (missions) {
+    // With its missions in view the bot attacks the way a player can: one
+    // server-side Gather then strike at the nearest enemy hub. The server
+    // recruits idle and new units, gathers them short of the target, strikes
+    // in strength, falls back when the strike fails and sends reinforcements
+    // in waves, so the army no longer walks over one unit at a time.
+    // The HQ is named on every mission command (the server only checks it is
+    // the bot's own), so a command still in its delay keeps the HQ busy and
+    // the next pass does not place or cancel the same mission twice.
+    const strike = missions.find(mission => mission.owner === owner && mission.tactic === "gather");
+    const stale = strike && !targets.some(target => Math.hypot(target.x - strike.x, target.y - strike.y) <= STRIKE_RETARGET);
+    if (!busy.has(hq.id)) {
+      if (strike && stale) decisions.push({ units: [hq.id], order: { kind: "mission_cancel", x: 0, y: 0, target: strike.id } });
+      if (!holdArmy && soldiers.length >= 4 && targets.length && (!strike || stale)) {
+        decisions.push({ units: [hq.id, ...idle.map(unit => unit.id)], order: { kind: "mission_new_gather", ...strikePoint(targets[0]), target: 0 } });
+      }
+    }
+  } else if (!holdArmy && soldiers.length >= 4 && targets.length && idle.length) {
+    decisions.push({ units: idle.map(unit => unit.id), order: { kind: "attack_move", ...strikePoint(targets[0]), target: 0 } });
   }
   return decisions.slice(0, 6);
 }

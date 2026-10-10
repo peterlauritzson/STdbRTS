@@ -272,3 +272,87 @@ pub struct ChatMessage {
     pub text: String,
     pub sent_micros: i64,
 }
+
+/// One player's non-default combat stance for one army kind. Additive: a kind
+/// with no row fights in its default stance (`rts_core::default_stance`).
+/// Round-trips `World::stances` through `game::load_world` / `game::save_world`
+/// and is dropped with the match in `game::delete_room`.
+#[spacetimedb::table(public, accessor = stance)]
+pub struct StanceRow {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    #[index(btree)]
+    pub match_id: u64,
+    pub slot: u8,
+    pub kind: String,
+    /// `standard`, `charge`, `kite` or `hold_ground`.
+    pub stance: String,
+}
+
+/// One standing mission (`rts_core::mission::Mission`): a tactic at a point
+/// with a size and its member units. Additive and public so a client draws its
+/// own missions from the subscription. Round-trips `World::missions` through
+/// `game::load_world` / `game::save_world`; dropped with the match in
+/// `game::delete_room`. `id` is the room-local creation order; `key` is the
+/// table key.
+#[spacetimedb::table(public, accessor = mission)]
+#[derive(Clone, PartialEq)]
+pub struct MissionRow {
+    #[primary_key]
+    #[auto_inc]
+    pub key: u64,
+    #[index(btree)]
+    pub match_id: u64,
+    pub id: u32,
+    pub owner: u8,
+    /// `harass`, `guard`, `raid`, `rush` or `gather`.
+    pub tactic: String,
+    pub x: f32,
+    pub y: f32,
+    /// Units wanted, or -1 for "rest".
+    pub size: i32,
+    /// For `gather`: `gather`, `strike` or `fallback`; empty otherwise.
+    pub state: String,
+    pub state_tick: u64,
+    pub rally_x: f32,
+    pub rally_y: f32,
+    pub gather_percent: u8,
+    pub fallback_percent: u8,
+    pub strike_strength: u32,
+    pub members: Vec<u32>,
+}
+
+/// One player's production doctrine (`rts_core::doctrine::Doctrine`): the
+/// switches and the catalyst reserve. Additive: a player with no row has
+/// everything off. Round-trips `World::doctrines` through `game::load_world` /
+/// `game::save_world` and is dropped with the match in `game::delete_room`.
+#[spacetimedb::table(public, accessor = doctrine)]
+pub struct DoctrineRow {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    #[index(btree)]
+    pub match_id: u64,
+    pub slot: u8,
+    /// Auto-train at idle production buildings.
+    pub enabled: bool,
+    pub auto_tier: bool,
+    pub auto_research: bool,
+    /// Auto-build production buildings and synthesizers.
+    pub auto_build: bool,
+    pub catalyst_reserve: u32,
+}
+
+/// One non-default composition weight (0-10, default 5) of a player's doctrine.
+#[spacetimedb::table(public, accessor = doctrine_weight)]
+pub struct DoctrineWeightRow {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    #[index(btree)]
+    pub match_id: u64,
+    pub slot: u8,
+    pub kind: String,
+    pub weight: u8,
+}

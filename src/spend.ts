@@ -1,4 +1,4 @@
-import { CATALOG, costOf, CURRENCIES, NO_COST, addCost, spend, type Cost, type Currency } from "./catalog";
+import { CATALOG, costOf, nextResearchKey, CURRENCIES, NO_COST, addCost, spend, type Cost, type Currency } from "./catalog";
 
 /**
  * Money that is already promised. An order is stamped one command delay ahead
@@ -12,10 +12,10 @@ import { CATALOG, costOf, CURRENCIES, NO_COST, addCost, spend, type Cost, type C
 interface Spending { owner?: number; status?: string; order: { kind: string } }
 
 /** What one order costs when it executes: a train, a build or a research. Anything else is free. */
-export function orderCost(kind: string): Cost {
+export function orderCost(kind: string, research: readonly string[] = []): Cost {
   if (kind.startsWith("train_")) return CATALOG[kind.slice(6)]?.cost ?? NO_COST;
   if (kind.startsWith("build_")) return CATALOG[kind.slice(6)]?.cost ?? NO_COST;
-  if (kind.startsWith("research_") || kind.startsWith("tier_")) return costOf(kind);
+  if (kind.startsWith("research_") || kind.startsWith("tier_")) return costOf(kind, research);
   return NO_COST;
 }
 
@@ -25,10 +25,16 @@ export function orderCost(kind: string): Cost {
  * server (`inflight`). An executed or rejected command has already charged, or
  * never will, and is not counted.
  */
-export function pendingSpend(commands: readonly (Spending & { owner: number })[], inflight: Iterable<{ order: { kind: string } }>, owner: number): Cost {
+export function pendingSpend(commands: readonly (Spending & { owner: number })[], inflight: Iterable<{ order: { kind: string } }>, owner: number, research: readonly string[] = []): Cost {
   let total = NO_COST;
-  for (const command of commands) if (command.owner === owner && command.status === "scheduled") total = addCost(total, orderCost(command.order.kind));
-  for (const order of inflight) total = addCost(total, orderCost(order.order.kind));
+  // Weapons and armour cost the next level, so each promised purchase of one raises the price of the next.
+  const promised: string[] = [...research];
+  const add = (kind: string) => {
+    total = addCost(total, orderCost(kind, promised));
+    if (kind.startsWith("research_")) promised.push(nextResearchKey(kind, promised));
+  };
+  for (const command of commands) if (command.owner === owner && command.status === "scheduled") add(command.order.kind);
+  for (const order of inflight) add(order.order.kind);
   return total;
 }
 

@@ -176,21 +176,33 @@ const HARASS: Policy = Policy {
             name: "advance",
             action: Action::AttackMove(Anchor::Goal),
             transitions: &[
-                Transition { when: &[Condition::HealthBelow(50)], to: 1 },
-                Transition { when: &[Condition::Outnumbered { radius: 350.0 }], to: 1 },
+                Transition {
+                    when: &[Condition::HealthBelow(50)],
+                    to: 1,
+                },
+                Transition {
+                    when: &[Condition::Outnumbered { radius: 350.0 }],
+                    to: 1,
+                },
             ],
         },
         State {
             name: "retreat",
             action: Action::Move(Anchor::Home),
-            transitions: &[Transition { when: &[Condition::Near(Anchor::Home, 250.0)], to: 2 }],
+            transitions: &[Transition {
+                when: &[Condition::Near(Anchor::Home, 250.0)],
+                to: 2,
+            }],
         },
         // A unit that cannot heal stays here as a home defender. Intended: it
         // is too hurt to harass and still useful at home.
         State {
             name: "recover",
             action: Action::Hold,
-            transitions: &[Transition { when: &[Condition::HealthAtLeast(80)], to: 0 }],
+            transitions: &[Transition {
+                when: &[Condition::HealthAtLeast(80)],
+                to: 0,
+            }],
         },
     ],
 };
@@ -202,7 +214,10 @@ const GUARD: Policy = Policy {
         State {
             name: "return",
             action: Action::Move(Anchor::Goal),
-            transitions: &[Transition { when: &[Condition::Near(Anchor::Goal, 150.0)], to: 1 }],
+            transitions: &[Transition {
+                when: &[Condition::Near(Anchor::Goal, 150.0)],
+                to: 1,
+            }],
         },
         // The leash: dragged too far by a chase, it walks back without
         // fighting rather than following a kite across the map.
@@ -224,23 +239,44 @@ const RAID: Policy = Policy {
         State {
             name: "advance",
             action: Action::AttackMove(Anchor::Goal),
-            transitions: &[Transition { when: &[Condition::HealthBelow(35)], to: 1 }],
+            transitions: &[Transition {
+                when: &[Condition::HealthBelow(35)],
+                to: 1,
+            }],
         },
         State {
             name: "retreat",
             action: Action::Move(Anchor::Home),
-            transitions: &[Transition { when: &[Condition::Near(Anchor::Home, 250.0)], to: 2 }],
+            transitions: &[Transition {
+                when: &[Condition::Near(Anchor::Home, 250.0)],
+                to: 2,
+            }],
         },
         State {
             name: "recover",
             action: Action::Hold,
-            transitions: &[Transition { when: &[Condition::HealthAtLeast(90)], to: 0 }],
+            transitions: &[Transition {
+                when: &[Condition::HealthAtLeast(90)],
+                to: 0,
+            }],
         },
     ],
 };
 
+/// Rush: attack-move to the goal and never retreat. One state, no transitions;
+/// the mission layer uses it for Rush and for the strike of Gather then strike.
+const ASSAULT: Policy = Policy {
+    name: "assault",
+    prefers_labour: false,
+    states: &[State {
+        name: "assault",
+        action: Action::AttackMove(Anchor::Goal),
+        transitions: &[],
+    }],
+};
+
 /// Every preset, in the order a client lists them.
-pub const PRESETS: [&Policy; 3] = [&HARASS, &GUARD, &RAID];
+pub const PRESETS: [&Policy; 4] = [&HARASS, &GUARD, &RAID, &ASSAULT];
 
 /// The preset an order kind activates, or `None` for an ordinary order.
 pub fn policy(name: &str) -> Option<&'static Policy> {
@@ -273,7 +309,9 @@ pub fn validate_policy(policy: &Policy) -> Result<(), String> {
         }
         for transition in state.transitions {
             if transition.when.len() > MAX_CONDITIONS {
-                return Err(format!("A transition tests at most {MAX_CONDITIONS} conditions"));
+                return Err(format!(
+                    "A transition tests at most {MAX_CONDITIONS} conditions"
+                ));
             }
             if transition.to as usize >= policy.states.len() {
                 return Err("A transition leads to a state that does not exist".into());
@@ -296,7 +334,9 @@ pub fn validate_policy(policy: &Policy) -> Result<(), String> {
                     Condition::DwellAtLeast(_) => continue,
                 };
                 if !radius.is_finite() || radius <= 0.0 || radius > MAX_QUERY_RADIUS {
-                    return Err(format!("A query radius is above 0 and at most {MAX_QUERY_RADIUS}"));
+                    return Err(format!(
+                        "A query radius is above 0 and at most {MAX_QUERY_RADIUS}"
+                    ));
                 }
             }
         }
@@ -332,7 +372,12 @@ fn holds(condition: Condition, behavior: &Behavior, tick: u64, senses: &impl Sen
 /// transition per evaluation, the first that holds in declaration order, and
 /// none at all before [`MIN_DWELL_TICKS`] in the current state. Pure: the same
 /// behavior, tick and senses always give the same answer.
-pub fn next_state(policy: &Policy, behavior: &Behavior, tick: u64, senses: &impl Senses) -> Option<u8> {
+pub fn next_state(
+    policy: &Policy,
+    behavior: &Behavior,
+    tick: u64,
+    senses: &impl Senses,
+) -> Option<u8> {
     if tick.saturating_sub(behavior.entered_tick) < MIN_DWELL_TICKS {
         return None;
     }
@@ -396,14 +441,54 @@ mod tests {
     }
 
     #[test]
+    fn assault_attack_moves_to_the_goal_and_never_leaves_it() {
+        let assault = policy("assault").expect("assault preset");
+        assert_eq!(assault.states.len(), 1);
+        assert_eq!(assault.states[0].action, Action::AttackMove(Anchor::Goal));
+        assert!(assault.states[0].transitions.is_empty());
+        let hurt = Fixed {
+            health: (1, 100),
+            at: (500.0, 0.0),
+            outnumbered: true,
+        };
+        assert_eq!(
+            next_state(assault, &running("assault", 0, 0), 10_000, &hurt),
+            None
+        );
+    }
+
+    #[test]
     fn the_first_matching_transition_wins_and_only_after_the_dwell() {
-        let hurt = Fixed { health: (40, 100), at: (500.0, 0.0), outnumbered: true };
+        let hurt = Fixed {
+            health: (40, 100),
+            at: (500.0, 0.0),
+            outnumbered: true,
+        };
         let harass = policy("harass").unwrap();
-        assert_eq!(next_state(harass, &running("harass", 0, 100), 119, &hurt), None);
-        assert_eq!(next_state(harass, &running("harass", 0, 100), 120, &hurt), Some(1));
-        let healthy = Fixed { health: (79, 100), at: (100.0, 0.0), outnumbered: false };
-        assert_eq!(next_state(harass, &running("harass", 2, 0), 50, &healthy), None);
-        let healed = Fixed { health: (80, 100), ..healthy };
-        assert_eq!(next_state(harass, &running("harass", 2, 0), 50, &healed), Some(0));
+        assert_eq!(
+            next_state(harass, &running("harass", 0, 100), 119, &hurt),
+            None
+        );
+        assert_eq!(
+            next_state(harass, &running("harass", 0, 100), 120, &hurt),
+            Some(1)
+        );
+        let healthy = Fixed {
+            health: (79, 100),
+            at: (100.0, 0.0),
+            outnumbered: false,
+        };
+        assert_eq!(
+            next_state(harass, &running("harass", 2, 0), 50, &healthy),
+            None
+        );
+        let healed = Fixed {
+            health: (80, 100),
+            ..healthy
+        };
+        assert_eq!(
+            next_state(harass, &running("harass", 2, 0), 50, &healed),
+            Some(0)
+        );
     }
 }

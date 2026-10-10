@@ -3,13 +3,13 @@ import test from "node:test";
 import { clamp, COLORS, countdown, formation } from "../src/presentation";
 import { buildScoreboard, formatClock, formatValue, niceMax, SAMPLE_INTERVAL_TICKS, TICKS_PER_SECOND, type Sample, type Scoreboard } from "../src/scoreboard";
 import { DASHES, MARKERS } from "../src/scorescreen";
-import { chooseOrders } from "../scripts/bot-policy";
+import { chooseOrders, type MissionView } from "../scripts/bot-policy";
 import { pickOpponent, PRACTICE_FIRST_PUSH_TICK } from "../src/practice";
 import { mapContentHash } from "../src/maphash";
 import { BUILD_KEYS, edgeDirection, groupAction, TRAIN_KEYS, UNIT_KEYS } from "../src/hotkeys";
 import skirmishMap from "../shared/maps/skirmish.json";
 import { clampToMap, WORLD_SIZE } from "../src/presentation";
-import { buildSite, requiredTier, researchReason, researchName, tierOf, TIERS, TIER_UPGRADES, isCompletedHub, affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, MAP_HASH, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
+import { buildSite, requiredTier, researchReason, researchName, researchSummary, buildTierError, tierOf, TIERS, TIER_UPGRADES, isCompletedHub, affords, cargoCapacity, carriesCargo, CATALOG, costOf, currencyOf, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, factionValue, FACTIONS, formatCost, gathersInPlace, HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, isHub, isLabour, labourFaction, LABOUR, parseFaction, placementError, canProduce, mapIdentity, MAP_HASH, PRACTICE_SLOT, RESEARCH_COST, shortfall, shortfallReason, spend, STOCK_REASON, terrain, type Cost, type Currency, type FactionName } from "../src/catalog";
 import { Faction, ResourceKind, type CreepPatch, type Node } from "../src/bindings/types";
 import type { Entity } from "../src/units";
 import { creepGoneTick, creepSecondsLeft, lifetimeFraction, offCreep } from "../src/creep";
@@ -23,7 +23,7 @@ import { renderMarkdown, rewriteHref } from "../src/markdown";
 test("client renders the same map matches are actually played on", () => {
   // The server freezes this id into every new room, so a mismatch here means
   // the client would draw terrain the simulation does not have.
-  assert.deepEqual(mapIdentity, { id: "expanse", version: 1 });
+  assert.deepEqual(mapIdentity, { id: "expanse", version: 2 });
   assert.equal(WORLD_SIZE, 9600);
   assert.equal(terrain.length, 72);
   // Four-fold rotational symmetry: every rectangle has its 90-degree image.
@@ -78,7 +78,7 @@ test("the command card prices everything exactly as the ruleset does", () => {
     ["sentinel", 0, 150, 0], ["skimmer", 0, 90, 0], ["lancer", 0, 250, 0],
     ["swarmer", 0, 50, 0], ["spitter", 0, 90, 0], ["crusher", 0, 250, 0],
     ["barracks", 150, 0, 0], ["turret", 0, 0, 100], ["outpost", 300, 0, 0], ["factory", 250, 0, 0], ["lab", 200, 0, 0],
-    ["sensor", 100, 0, 0], ["relay", 75, 0, 0], ["tumor", 75, 0, 0], ["refinery", 75, 0, 0],
+    ["sensor", 100, 0, 0], ["relay", 75, 0, 0], ["tumor", 75, 0, 0], ["refinery", 75, 0, 0], ["synthesizer", 300, 0, 0],
   ];
   for (const [kind, material, catalyst, terrazine] of expected) assert.deepEqual(CATALOG[kind].cost, { material, catalyst, terrazine }, kind);
   for (const kind of ["research_weapons", "research_armor", "research_logistics"]) assert.deepEqual(costOf(kind), { material: 150, catalyst: 0, terrazine: 0 }, kind);
@@ -162,6 +162,23 @@ test("bot reserves repair funds, assigns one worker and uses attack-move", () =>
   assert.equal(decisions[1].order.x, 1290);
   units[1].order.kind = "repair";
   assert.ok(!chooseOrders(0, "industrial", purse(50), units, [], new Set()).some(decision => decision.order.kind === "repair"));
+});
+
+test("with its missions in view the bot strikes through one Gather then strike mission and re-places it when the target falls", () => {
+  const units = [unit(1, 0, "hq"), ...[4, 5, 6, 7].map(id => unit(id, 0, "soldier")), { ...unit(8, 1, "hq"), x: 1380 }];
+  const strikes = (missions: MissionView[], busy = new Set<number>()) => chooseOrders(0, "industrial", purse(0), units, [], busy, false, undefined, missions).filter(decision => decision.order.kind.startsWith("mission_") || decision.order.kind === "attack_move");
+  const placed = strikes([]);
+  assert.equal(placed.length, 1);
+  assert.equal(placed[0].order.kind, "mission_new_gather");
+  assert.equal(placed[0].order.x, 1290);
+  assert.deepEqual(placed[0].units, [1, 4, 5, 6, 7]);
+  // Placed and on target: nothing more. Still in its delay: nothing either.
+  assert.deepEqual(strikes([{ id: 3, owner: 0, tactic: "gather", x: 1290, y: 0 }]), []);
+  assert.deepEqual(strikes([], new Set([1])), []);
+  // The hub it was aimed at is gone: cancel and place it at the next one.
+  const moved = strikes([{ id: 3, owner: 0, tactic: "gather", x: 5000, y: 5000 }]);
+  assert.deepEqual(moved.map(decision => decision.order.kind), ["mission_cancel", "mission_new_gather"]);
+  assert.equal(moved[0].order.target, 3);
 });
 
 test("placement previews reject occupied, remote, terrain and prerequisite sites", () => {
@@ -327,7 +344,16 @@ test("tiers, their unlocks and their refusals mirror the server", () => {
   const barracks = { ...unit(2, 0, "barracks") };
   const units = [barracks, { ...unit(3, 0, "factory"), constructionRemaining: 4n }];
   assert.equal(researchReason("research_armor", [], [], 0), undefined, "technologies need no building");
-  assert.equal(researchReason("research_armor", ["research_armor"], units, 0), "Already researched");
+  assert.equal(researchReason("research_armor", ["research_armor"], units, 0), "Requires Tier 2", "level 2 waits for tier 2");
+  assert.equal(researchReason("research_armor", ["research_armor", "tier_2"], units, 0), undefined);
+  assert.equal(researchReason("research_armor", ["research_armor", "research_armor_2", "tier_2"], units, 0), "Requires Tier 3");
+  assert.equal(researchReason("research_armor", ["research_armor", "research_armor_2", "research_armor_3", "tier_3"], units, 0), "Already researched");
+  assert.equal(researchReason("research_logistics", ["research_logistics"], units, 0), "Already researched");
+  assert.deepEqual([0, 1, 2, 3].map(level => costOf("research_weapons", ["research_weapons", "research_weapons_2", "research_weapons_3"].slice(0, level)).material), [150, 400, 800, 800]);
+  assert.deepEqual(researchSummary(["research_weapons", "research_weapons_2", "tier_2", "research_armor"]), ["weapons 2", "Tier 2", "armor"]);
+  assert.equal(buildTierError("synthesizer", ["tier_1"]), "Requires Tier 2");
+  assert.equal(buildTierError("synthesizer", ["tier_1", "tier_2"]), undefined);
+  assert.equal(buildTierError("refinery", []), undefined);
   assert.equal(researchReason("tier_1", [], [], 0), "Requires a finished barracks");
   assert.equal(researchReason("tier_1", [], units, 0), undefined);
   assert.equal(researchReason("tier_1", [], [barracks], 1), "Requires a finished barracks", "another player's barracks");
@@ -966,10 +992,10 @@ test("each faction's army is priced and bodied as the server lists it", () => {
 
 test("the client's map hash is the server's, byte for byte", () => {
   // Pinned in server/src/maps.rs as SKIRMISH_CONTENT_HASH.
-  assert.equal(mapContentHash(skirmishMap), 0x4756989d5a0df082n);
+  assert.equal(mapContentHash(skirmishMap), 0x8167f10a6c2ac563n);
   // Expanse's: pinned in server/src/maps.rs as EXPANSE_CONTENT_HASH, the value
   // the server writes into a new room's map_hash.
-  assert.equal(MAP_HASH, 0x18f42e085fe019b4n);
+  assert.equal(MAP_HASH, 0x63af5731899b7733n);
 });
 
 test("the bot adds a second barracks once its factory is under way", () => {
@@ -1126,7 +1152,7 @@ test("static defenses are terrazine-priced, faction-gated, and each faction sees
     assert.deepEqual(CATALOG[kind].cost, { material: 0, catalyst: 0, terrazine: 125 });
     assert.equal(BUILDING_FACTION[kind], faction);
   }
-  const shared = ["barracks", "outpost", "turret", "factory", "lab", "refinery"];
+  const shared = ["barracks", "outpost", "turret", "factory", "lab", "refinery", "synthesizer"];
   for (const faction of FACTIONS) {
     const visible = [...shared, ...Object.keys(BUILDING_FACTION).filter(kind => BUILDING_FACTION[kind] === faction)];
     assert.ok(visible.length <= BUILD_KEYS.length, `${faction} has ${visible.length} build buttons for ${BUILD_KEYS.length} keys`);
@@ -1314,6 +1340,10 @@ test("pending spend counts only your scheduled and in-flight purchases", () => {
   assert.equal(pendingLabel(pending, "catalyst"), "");
   assert.equal(refusedCurrency("Insufficient catalyst: 90 needed, 20 available"), "catalyst");
   assert.equal(refusedCurrency("Map boundary"), undefined);
+  // Leveled research costs the next level, and each promised purchase raises the next price.
+  assert.equal(orderCost("research_weapons", ["research_weapons"]).material, 400);
+  const leveled = pendingSpend([], [{ order: { kind: "research_weapons" } }, { order: { kind: "research_weapons" } }, { order: { kind: "research_armor" } }], 1, ["research_weapons"]);
+  assert.equal(leveled.material, 400 + 800 + 150);
 });
 
 test("the production queue shows selected buildings, else all, with progress and unsent orders", () => {
@@ -1561,9 +1591,9 @@ test("behaviors go to army units only and read back as counts per state", () => 
   const group = [..."aaaaaa"].map(() => ({ behavior: "harass", behaviorState: "advance" })).concat([{ behavior: "harass", behaviorState: "retreat" }, { behavior: "harass", behaviorState: "retreat" }]);
   assert.equal(behaviorLine(group), "Harass: 6 advance, 2 retreat");
   assert.equal(behaviorLine([...group, { behavior: "guard", behaviorState: "watch" }, { behavior: undefined }]), "Harass: 6 advance, 2 retreat / Guard: 1 watch");
-  assert.equal(new Set(Object.values(BEHAVIORS).map(entry => entry.color)).size, 3);
+  assert.equal(new Set(Object.values(BEHAVIORS).map(entry => entry.color)).size, 4);
   assert.notEqual(stateColor("retreat"), stateColor("advance"));
-  const keys = [UNIT_KEYS.harass, UNIT_KEYS.guard, UNIT_KEYS.raid];
+  const keys = [UNIT_KEYS.harass, UNIT_KEYS.guard, UNIT_KEYS.raid, UNIT_KEYS.rush, UNIT_KEYS.gather];
   assert.equal(new Set([...keys, ...Object.values(UNIT_KEYS)]).size, Object.values(UNIT_KEYS).length, "each behavior key is its own");
   for (const key of keys) assert.ok(!(TRAIN_KEYS as readonly string[]).includes(key) && !(BUILD_KEYS as readonly string[]).includes(key));
 });

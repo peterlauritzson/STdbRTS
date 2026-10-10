@@ -144,8 +144,8 @@ test("one-click practice, construction, scouts and persistent base management", 
   await worldClick(page, 8961, 889);
   await expect(page.locator("#rally-status")).toContainText("Material rally");
   await page.getByRole("tab", { name: "Build", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Outpost 100 material / 6s", exact: true })).toBeEnabled({ timeout: 30000 });
-  await page.getByRole("button", { name: "Outpost 100 material / 6s", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Outpost 300 material / 6s", exact: true })).toBeEnabled({ timeout: 30000 });
+  await page.getByRole("button", { name: "Outpost 300 material / 6s", exact: true }).click();
   await worldClick(page, 8950, 1250);
   await expect(page.locator("#building-count")).toHaveText("3 / 150 structures");
   await worldClick(page, 8950, 1250);
@@ -172,11 +172,12 @@ test("one-click practice, construction, scouts and persistent base management", 
   await page.getByRole("tab", { name: "Research", exact: true }).click();
   // Research is instant and needs no lab or selection: the cost line says so,
   // the button is live once the material is there, and buying it is final.
-  const weapons = page.getByRole("button", { name: "Weapons 150 material / instant", exact: true });
+  const weapons = page.getByRole("button", { name: "Weapons 1 150 material / instant", exact: true });
   await expect(weapons).toBeEnabled();
   await weapons.click();
   await expect(page.locator("#research-status")).toContainText("weapons");
-  await expect(page.getByRole("button", { name: /^Weapons/ })).toBeDisabled();
+  // Weapons is leveled: the button now offers the next level, at a higher price.
+  await expect(page.getByRole("button", { name: /^Weapons 2 / })).toBeVisible();
   // Tiers are listed with their price and say what stops them.
   const tierThree = page.getByRole("button", { name: "Tier 3 Dominion 800 material / instant", exact: true });
   await expect(tierThree).toBeDisabled();
@@ -399,7 +400,25 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     await expect(host.getByRole("button", { name: "Clear rally", exact: true })).toBeEnabled();
     await host.getByRole("button", { name: "Clear rally", exact: true }).click();
     await expect(host.locator("#rally-status")).toHaveText("Rally unset");
-    await expect(host.getByRole("button", { name: "Repair", exact: true })).toBeDisabled();
+    // Repair is a labour order: it is hidden, not merely greyed, for an army selection.
+    await expect(host.locator("#repair")).toBeHidden();
+    // Mission smoke: "Gather then strike" placed on the map shows up in the
+    // Strategy list as GATHER, and its tactic picker retargets it to Rush.
+    await host.getByRole("button", { name: "Gather then strike mission", exact: true }).click();
+    await worldClick(host, 3000, 3000);
+    const missionRow = host.locator("#strategy-list .mission-row");
+    await expect(missionRow).toHaveCount(1, { timeout: 10000 });
+    await expect(missionRow.locator(".strategy-name-btn")).toHaveText(/^GATHER/);
+    await missionRow.locator("select.mission-tactic").selectOption("rush");
+    await expect(missionRow.locator(".strategy-name-btn")).toHaveText(/^RUSH/, { timeout: 10000 });
+    await missionRow.getByRole("button", { name: /^Cancel .* mission$/ }).click();
+    await expect(host.locator("#strategy-list .mission-row")).toHaveCount(0, { timeout: 10000 });
+    // Stances: one row per army kind; Kite reads as pressed once the command lands.
+    await host.locator("#stances summary").click();
+    const soldierStances = host.locator("#stance-list .stance-row").filter({ hasText: "Soldier" });
+    await expect(soldierStances).toHaveCount(1);
+    await soldierStances.getByRole("button", { name: "Kite", exact: true }).click();
+    await expect(soldierStances.getByRole("button", { name: "Kite", exact: true })).toHaveAttribute("aria-pressed", "true", { timeout: 10000 });
     const canvas = host.locator("#battlefield");
     await host.getByRole("button", { name: "Attack-move", exact: true }).click();
     await expect(host.locator("#targeting-state")).toHaveText("Attack-move target");
@@ -433,6 +452,14 @@ test("desktop and touch multiplayer flow", async ({ browser }, testInfo) => {
     expect(afterReload).toBeLessThan(beforeReload + 60);
     await expect(host.locator("#catalyst")).toHaveText("100");
     await expect(host.locator("#unit-count")).toHaveText("4 / 400");
+    // Production doctrine (after the catalyst checks, since a pass could spend): open the section, switch Auto-train on and see it pressed once the command lands.
+    await host.locator("#doctrine summary").click();
+    const autoTrain = host.locator("#doctrine-body").getByRole("button", { name: "Auto-train", exact: true });
+    await expect(autoTrain).toHaveAttribute("aria-pressed", "false");
+    await autoTrain.click();
+    await expect(autoTrain).toHaveAttribute("aria-pressed", "true", { timeout: 10000 });
+    await autoTrain.click();
+    await expect(autoTrain).toHaveAttribute("aria-pressed", "false", { timeout: 10000 });
     await peer.getByRole("button", { name: "Select army", exact: true }).click();
     await peer.getByRole("button", { name: "Attack-move", exact: true }).tap();
     await peer.locator("#battlefield").scrollIntoViewIfNeeded();

@@ -358,7 +358,9 @@ button[aria-pressed="true"] { border-color: var(--accent); background: #4a603d; 
 .command-reason.catalyst { color: #d8bcff; }
 .telemetry { font-size: 9px; color: #a1afa2; padding-top: 4px; }
 /* Strategy panel: mission and economy buttons, then the live list of missions and operations. */
-.strategy-section { display: flex; flex-direction: column; gap: 4px; }
+.strategy-section { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+/* Everything but the heading and the foot scrolls inside the panel, so opening Stances or Production never grows the page (the foot's order log pops over the panel and must not be clipped). */
+.strategy-scroll { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .strategy-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 .strategy-button { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 5px; min-height: 28px; padding: 3px 6px; font-size: 11px; text-align: left; }
 .strategy-button .swatch { width: 8px; height: 14px; border-radius: 2px; }
@@ -366,15 +368,29 @@ button[aria-pressed="true"] { border-color: var(--accent); background: #4a603d; 
 .strategy-button .strategy-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .strategy-button kbd.key { top: 1px; right: 2px; bottom: auto; }
 #auto-labour { grid-column: span 2; }
-.strategy-list { display: flex; flex-direction: column; gap: 2px; min-height: 0; flex: 1 1 auto; max-height: 110px; overflow: auto; font-size: 10px; }
+.strategy-list { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; min-height: 66px; max-height: 110px; overflow: auto; font-size: 10px; }
 .strategy-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; border-bottom: 1px solid #344337; color: #e4eddf; min-width: 0; }
 .strategy-row .swatch { width: 7px; height: 12px; border-radius: 2px; }
 .strategy-name-btn { min-height: 20px; padding: 0 4px; border: 0; background: none; color: inherit; font-weight: 700; font-size: 11px; text-decoration: underline dotted; text-underline-offset: 3px; }
 .strategy-count { flex: 1; min-width: 0; color: #b5c4a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .strategy-tool { min-height: 20px; min-width: 22px; padding: 0 5px; font-size: 11px; line-height: 1; }
 .strategy-tool[aria-pressed="true"] { background: #31503c; border-color: #7cf0b0; }
+.mission-row { flex-wrap: wrap; }
+.mission-tactic { min-width: 0; max-width: 92px; font-size: 10px; padding: 0 2px; }
+.mission-knobs { padding-left: 11px; font-size: 10px; flex-wrap: wrap; }
 .strategy-row .strategy-label { font-size: 11px; }
 .strategy-row .operation-note { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stances > summary { cursor: pointer; font-size: 10px; color: #b5c4a8; }
+.doctrine > summary { cursor: pointer; font-size: 10px; color: #b5c4a8; }
+.doctrine-row { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #e4eddf; flex-wrap: wrap; }
+.doctrine-row .stance-kind { width: 62px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doctrine-row .weight-value { min-width: 16px; text-align: center; }
+.doctrine-row.locked { opacity: 0.5; }
+.doctrine-row .tier-lock { color: #d9b86a; }
+.stance-list { display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
+.stance-row { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #e4eddf; }
+.stance-row .stance-kind { width: 62px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stance-row .stance-tool { flex: 1; min-width: 0; padding: 0 2px; }
 .strategy-empty { margin: 0; color: #8fa089; line-height: 1.3; }
 .last-reject { margin: 0; padding: 2px 5px; border-left: 2px solid #f29ca2; color: #f6c3c6; font-size: 10px; line-height: 1.3; max-height: 2.7em; overflow: hidden; }
 .last-reject[hidden] { display: none; }

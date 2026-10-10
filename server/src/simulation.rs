@@ -1,31 +1,33 @@
+use crate::behavior::{self, Behavior, Senses};
 use crate::maps::MapDefinition;
 use crate::navigation::Navigation;
-use crate::behavior::{self, Behavior, Senses};
 use crate::spatial::SpatialIndex;
 use crate::{
-    ability, advance_patch, is_static_defense, passive, veteran_cooldown, veteran_percent, Passive,
-    aura_per_interval, blink_cooldown, entrench_hold_ticks, is_research, phase_cooldown,
-    required_tier, tier_armour, tier_bonus_hp, tier_building, tier_cooldown, tier_number, tier_of,
-    tier_range_bonus, tier_speed_percent,
-    BLINK_DISTANCE, BLINK_THRESHOLD_PERCENT, BUILD_RADIUS, DEATH_BURST_DAMAGE,
-    DEATH_BURST_RADIUS, ENTRENCH_ARMOUR, ENTRENCH_LINGER_TICKS,
-    ENTRENCH_RADIUS, ENTRENCH_RANGE, FORCED_MARCH_IDLE_TICKS, FORCED_MARCH_SPEED_PERCENT,
-    GUARDIAN_PERCENT, GUARDIAN_RADIUS, MEDIC_HEAL, MEDIC_INTERVAL_TICKS, MEDIC_RANGE,
-    OVERWATCH_IDLE_TICKS, OVERWATCH_PERCENT, OVERWATCH_WINDOW_TICKS,
-    PREDATOR_PERCENT, REGROWTH_DELAY_TICKS, REGROWTH_PERCENT_PER_SECOND, RICOCHET_PERCENTS,
-    RICOCHET_RADIUS, SHIELD_AURA_RADIUS, SPLASH_PERCENT,
-    fortified_armour, ricochet_bounces, splash_radius, TICKS_PER_SECOND, attack_damage, building_faction, can_teleport, cargo_capacity,
-    carries_cargo, creep_max_radius, creep_zone, death_refund, death_spawn, distance,
-    drifter_pulse, fights, gathers_in_place, is_army, is_building, is_hub, is_labour, is_temporary,
-    labour_faction, max_energy, mining_yield, power_field, producer, projects_power, shield_regen,
-    stats, stipend_payment, temporary_lifetime, terrazine_owed, trains_in_field, validate_position,
-    vitals, zone_template, Ability, Balance, Cost, CreepPatch, Faction, ResourceKind, Zone,
-    ZoneField, BLOOM, BLOOM_LIFETIME_TICKS, ENERGY_REGEN_INTERVAL_TICKS, HUB_START_ENERGY,
-    HUB_STOCK_CAP, HUB_STOCK_INTERVAL_TICKS, MAX_BUILDINGS, MAX_QUEUE, MAX_UNITS,
-    MINER_RETARGET_RADIUS, MINING_PULSE_TICKS, POWER_RESTORE_RADIUS, RECALL, RECALL_RADIUS,
-    REFINERY_INTERVAL_TICKS, REFINERY_SNAP_DISTANCE, REFINERY_YIELD, REPAIR_COST,
-    SHIELD_REGEN_DELAY_TICKS, SHIELD_REGEN_INTERVAL_TICKS, STARTING_BALANCE,
-    TELEPORT_ARRIVAL_TICKS, TELEPORT_CHANNEL_TICKS, TELEPORT_COOLDOWN_TICKS,
+    ability, advance_patch, attack_damage, aura_per_interval, blink_cooldown, building_faction,
+    can_teleport, cargo_capacity, carries_cargo, creep_max_radius, creep_zone, death_refund,
+    death_spawn, default_stance, distance, drifter_pulse, entrench_hold_ticks, fights,
+    fortified_armour, gathers_in_place, is_army, is_building, is_hub, is_labour, is_research,
+    is_static_defense, is_temporary, labour_faction, max_energy, max_research_level, mining_yield,
+    parse_stance_order, passive, phase_cooldown, power_field, producer, projects_power,
+    required_tier, research_cost_at, research_key, research_level_tier, ricochet_bounces,
+    shield_regen, splash_radius, stats, stipend_payment, temporary_lifetime, terrazine_owed,
+    tier_armour, tier_bonus_hp, tier_building, tier_cooldown, tier_number, tier_of,
+    tier_range_bonus, tier_speed_percent, trains_in_field, validate_position, veteran_cooldown,
+    veteran_percent, vitals, zone_template, Ability, Balance, Cost, CreepPatch, Faction, Passive,
+    ResourceKind, Stance, Zone, ZoneField, ARMOUR_PER_LEVEL, BLINK_DISTANCE,
+    BLINK_THRESHOLD_PERCENT, BLOOM, BLOOM_LIFETIME_TICKS, BUILD_RADIUS, CHARGE_RANGE_PERCENT,
+    DEATH_BURST_DAMAGE, DEATH_BURST_RADIUS, ENERGY_REGEN_INTERVAL_TICKS, ENTRENCH_ARMOUR,
+    ENTRENCH_LINGER_TICKS, ENTRENCH_RADIUS, ENTRENCH_RANGE, FORCED_MARCH_IDLE_TICKS,
+    FORCED_MARCH_SPEED_PERCENT, GUARDIAN_PERCENT, GUARDIAN_RADIUS, HUB_START_ENERGY, HUB_STOCK_CAP,
+    HUB_STOCK_INTERVAL_TICKS, KITE_TRIGGER_PERCENT, MAX_BUILDINGS, MAX_QUEUE, MAX_UNITS,
+    MEDIC_HEAL, MEDIC_INTERVAL_TICKS, MEDIC_RANGE, MINER_RETARGET_RADIUS, MINING_PULSE_TICKS,
+    OVERWATCH_IDLE_TICKS, OVERWATCH_PERCENT, OVERWATCH_WINDOW_TICKS, POWER_RESTORE_RADIUS,
+    PREDATOR_PERCENT, RECALL, RECALL_RADIUS, REFINERY_INTERVAL_TICKS, REFINERY_SNAP_DISTANCE,
+    REFINERY_YIELD, REGROWTH_DELAY_TICKS, REGROWTH_PERCENT_PER_SECOND, REPAIR_COST,
+    RICOCHET_PERCENTS, RICOCHET_RADIUS, SHIELD_AURA_RADIUS, SHIELD_REGEN_DELAY_TICKS,
+    SHIELD_REGEN_INTERVAL_TICKS, SPLASH_PERCENT, STARTING_BALANCE, SYNTHESIZER_TIER,
+    SYNTH_MATERIAL_PER_SECOND, SYNTH_OUTPUT_PER_SECOND, SYNTH_RESERVE, TELEPORT_ARRIVAL_TICKS,
+    TELEPORT_CHANNEL_TICKS, TELEPORT_COOLDOWN_TICKS, TICKS_PER_SECOND, WEAPONS_DAMAGE_PER_LEVEL,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -155,13 +157,14 @@ impl Hits {
         {
             return;
         }
-        let guardian = (!is_building(&target.kind) && passive(&target.kind) != Some(Passive::Guardian))
-            .then(|| {
-                guardians.nearest(target.x, target.y, GUARDIAN_RADIUS, |at| {
-                    snapshot[at].owner == target.owner
-                })
+        let guardian = (!is_building(&target.kind)
+            && passive(&target.kind) != Some(Passive::Guardian))
+        .then(|| {
+            guardians.nearest(target.x, target.y, GUARDIAN_RADIUS, |at| {
+                snapshot[at].owner == target.owner
             })
-            .flatten();
+        })
+        .flatten();
         let redirected = guardian.map_or(0, |_| amount * GUARDIAN_PERCENT / 100);
         self.add(target.id, from_owner, from_id, amount - redirected);
         if let Some(at) = guardian {
@@ -193,23 +196,27 @@ fn entrenched(unit: &Entity, tick: u64) -> bool {
 fn mitigated(
     hit: i32,
     target: &Entity,
-    researched_armour: bool,
+    armour_level: u8,
     tier: u8,
     faction: Faction,
     tick: u64,
 ) -> i32 {
-    let armour = if researched_armour { 3 } else { 0 }
+    let armour = armour_level as i32 * ARMOUR_PER_LEVEL
         + fortified_armour(&target.kind)
         + tier_armour(&target.kind, faction, tier)
-        + if entrenched(target, tick) { ENTRENCH_ARMOUR } else { 0 };
+        + if entrenched(target, tick) {
+            ENTRENCH_ARMOUR
+        } else {
+            0
+        };
     (hit - armour).max(1)
 }
 
 /// Sorted `(id, index)` pairs, for finding entities by id in an unsorted list.
-struct IdLookup(Vec<(u32, usize)>);
+pub(crate) struct IdLookup(Vec<(u32, usize)>);
 
 impl IdLookup {
-    fn get(&self, id: u32) -> Option<usize> {
+    pub(crate) fn get(&self, id: u32) -> Option<usize> {
         self.0
             .binary_search_by_key(&id, |(other, _)| *other)
             .ok()
@@ -263,6 +270,8 @@ pub fn movement_speed(unit: &Entity, zones: &ZoneField, tier: u8, tick: u64) -> 
 /// How far an attack-moving unit looks for a target when its weapon reaches
 /// less than this. Also what a behavior treats as "a fight to rejoin".
 const ACQUIRE_RADIUS: f32 = 180.0;
+/// How far ahead of a kiting unit its retreat point is placed.
+const KITE_STEP: f32 = 40.0;
 /// A unit stopped this close to a behavior's anchor has arrived: its order is
 /// not rewritten just because the walk there completed.
 const ARRIVED_RADIUS: f32 = 8.0;
@@ -327,7 +336,12 @@ impl Senses for LocalSenses<'_> {
 /// Is `unit` already doing what `action` asks? Exact order kind and anchor, or
 /// stopped on the anchor after a completed walk there — with nothing to fight
 /// nearby, for an attack-move, since a stopped unit would not go looking.
-fn obeys(unit: &Entity, running: &Behavior, action: behavior::Action, senses: &LocalSenses) -> bool {
+fn obeys(
+    unit: &Entity,
+    running: &Behavior,
+    action: behavior::Action,
+    senses: &LocalSenses,
+) -> bool {
     let wanted = running.order_for(action);
     if unit.order.kind == wanted.kind {
         return action == behavior::Action::Hold
@@ -596,7 +610,13 @@ impl Entity {
     /// a column a running database already holds.
     pub fn split(
         &self,
-    ) -> (EntityCold, EntityMotion, EntityVitals, EntityState, Option<Behavior>) {
+    ) -> (
+        EntityCold,
+        EntityMotion,
+        EntityVitals,
+        EntityState,
+        Option<Behavior>,
+    ) {
         let e = self.clone();
         (
             EntityCold {
@@ -832,6 +852,16 @@ pub struct World {
     /// building, so a player who loses the HQ and fights on from an outpost
     /// keeps every upgrade. Round-trips through the player row.
     pub research: BTreeMap<u8, Vec<String>>,
+    /// Combat stance choices per `(owner, army kind)`. Only non-default
+    /// choices are held; a missing entry means [`default_stance`].
+    pub stances: BTreeMap<(u8, String), Stance>,
+    /// Production doctrine per owner; a missing entry is all-off and neutral.
+    /// See `crate::doctrine`.
+    pub doctrines: BTreeMap<u8, crate::doctrine::Doctrine>,
+    /// Standing missions, in creation (id) order. See `crate::mission`.
+    pub missions: Vec<crate::mission::Mission>,
+    /// The id the next mission takes; one past the highest ever loaded.
+    pub next_mission_id: u32,
     pub outcome: Option<i16>,
 }
 
@@ -875,6 +905,10 @@ impl World {
             killed: BTreeMap::new(),
             creep: vec![],
             research: BTreeMap::new(),
+            stances: BTreeMap::new(),
+            doctrines: BTreeMap::new(),
+            missions: vec![],
+            next_mission_id: 1,
             outcome: None,
         };
         let mut ordered = roster.to_vec();
@@ -1077,7 +1111,7 @@ impl World {
 
     /// Entity id -> index into `self.units`, which is not id-sorted between
     /// ticks (the database hands rows back in no promised order).
-    fn id_lookup(&self) -> IdLookup {
+    pub(crate) fn id_lookup(&self) -> IdLookup {
         let mut slots: Vec<(u32, usize)> = self
             .units
             .iter()
@@ -1099,7 +1133,9 @@ impl World {
     fn validate_research(&self, command: &Command) -> Result<(), String> {
         let kind = command.order.kind.as_str();
         if command.units.len() != 1 || command.queued {
-            return Err("Research is ordered once, from the Research tab, and cannot be queued".into());
+            return Err(
+                "Research is ordered once, from the Research tab, and cannot be queued".into(),
+            );
         }
         if !self
             .units
@@ -1111,8 +1147,14 @@ impl World {
         let Some(definition) = stats(kind) else {
             return Err("Unknown research".into());
         };
-        if self.has_research(command.owner, kind) {
+        // Weapons and armour are leveled: the order always buys the next one.
+        let next = self.research_level(command.owner, kind) + 1;
+        if next > max_research_level(kind) {
             return Err("Already researched".into());
+        }
+        let needed_tier = research_level_tier(next);
+        if self.tier(command.owner) < needed_tier {
+            return Err(format!("Requires Tier {needed_tier}"));
         }
         if let Some(tier) = tier_number(kind) {
             if tier > 1 && self.tier(command.owner) < tier - 1 {
@@ -1127,7 +1169,59 @@ impl World {
                 return Err(format!("Requires a finished {needed}"));
             }
         }
-        self.afford(command.owner, definition.cost)
+        self.afford(
+            command.owner,
+            self.research_price(command.owner, kind, definition.cost),
+        )
+    }
+
+    /// Setting a combat stance: free, instant, per player and army kind. The
+    /// one unit named is only the issuer the command protocol requires.
+    fn validate_stance(&self, command: &Command) -> Result<(), String> {
+        if command.units.len() != 1 || command.queued {
+            return Err(
+                "Stances are set once, from the Strategy panel, and cannot be queued".into(),
+            );
+        }
+        if !self
+            .units
+            .iter()
+            .any(|unit| unit.id == command.units[0] && unit.owner == command.owner)
+        {
+            return Err("Unit is missing or belongs to another player".into());
+        }
+        let Some((kind, _)) = parse_stance_order(&command.order.kind) else {
+            return Err("Unknown stance".into());
+        };
+        if crate::army_faction(kind) != Some(self.faction(command.owner)) {
+            return Err("Stances are set for your own faction's army units".into());
+        }
+        Ok(())
+    }
+
+    /// The stance `owner` has chosen for `kind` (the kind's default if none).
+    pub fn stance_of(&self, owner: u8, kind: &str) -> Stance {
+        self.stances
+            .get(&(owner, kind.to_string()))
+            .copied()
+            .unwrap_or_else(|| default_stance(kind))
+    }
+
+    /// What buying `kind` costs `owner` now: the listed price for a tier or
+    /// logistics, the next level's price for weapons and armour.
+    fn research_price(&self, owner: u8, kind: &str, listed: Cost) -> Cost {
+        if max_research_level(kind) > 1 {
+            Cost::material(research_cost_at(kind, self.research_level(owner, kind) + 1))
+        } else {
+            listed
+        }
+    }
+
+    /// The level of a leveled technology `owner` holds (0 with none).
+    pub fn research_level(&self, owner: u8, kind: &str) -> u8 {
+        self.research
+            .get(&owner)
+            .map_or(0, |research| crate::research_level(research, kind))
     }
 
     /// Labour can only be sent to a material patch with something left in it.
@@ -1348,6 +1442,9 @@ impl World {
                     return Err(format!("Build a {needs} before a {wants}"));
                 }
             }
+            if kind == "synthesizer" && self.tier(command.owner) < SYNTHESIZER_TIER {
+                return Err(format!("Requires Tier {SYNTHESIZER_TIER}"));
+            }
             if self
                 .units
                 .iter()
@@ -1361,6 +1458,15 @@ impl World {
         }
         if is_research(&order.kind) {
             return self.validate_research(command);
+        }
+        if order.kind.starts_with("stance_") {
+            return self.validate_stance(command);
+        }
+        if order.kind.starts_with("mission_") {
+            return self.validate_mission(command, map);
+        }
+        if order.kind.starts_with("doctrine_") {
+            return self.validate_doctrine(command);
         }
         let training = order.kind.strip_prefix("train_");
         let production_control = matches!(
@@ -1384,7 +1490,8 @@ impl World {
         // obstructed is asked once. Lazily: most orders never ask.
         let destination_free = std::cell::OnceCell::new();
         let destination_free = || {
-            *destination_free.get_or_init(|| Navigation::new(map, &self.units).free(order.x, order.y))
+            *destination_free
+                .get_or_init(|| Navigation::new(map, &self.units).free(order.x, order.y))
         };
         for id in &command.units {
             let unit = find(*id)
@@ -1659,7 +1766,7 @@ impl World {
     /// may stand, and a `move` there never arrives. The anchor is
     /// `HOME_STANDOFF` out from the hub on the unit's side — the side it will
     /// retreat into — or the nearest free spot to that when it is blocked.
-    fn home_of(&self, at: usize, navigation: &Navigation) -> (f32, f32) {
+    pub(crate) fn home_of(&self, at: usize, navigation: &Navigation) -> (f32, f32) {
         const HOME_STANDOFF: f32 = 90.0;
         let unit = &self.units[at];
         let Some(hub) = self
@@ -1682,7 +1789,10 @@ impl World {
         } else {
             (1.0, 0.0)
         };
-        let beside = (hub.x + towards_x * HOME_STANDOFF, hub.y + towards_y * HOME_STANDOFF);
+        let beside = (
+            hub.x + towards_x * HOME_STANDOFF,
+            hub.y + towards_y * HOME_STANDOFF,
+        );
         if navigation.free(beside.0, beside.1) {
             beside
         } else {
@@ -1695,7 +1805,7 @@ impl World {
     /// Starts `policy` on `unit` with its goal and home anchor. Shared by the
     /// `issue_order` behavior kinds and by a trained unit inheriting a
     /// `rally_<preset>`, so both activate identically.
-    fn activate_behavior(
+    pub(crate) fn activate_behavior(
         unit: &mut Entity,
         policy: &'static behavior::Policy,
         goal: (f32, f32),
@@ -1719,7 +1829,11 @@ impl World {
         unit.queue.clear();
     }
 
-    fn execute_on(&mut self, command: &Command, map: &MapDefinition) -> Result<(), String> {
+    pub(crate) fn execute_on(
+        &mut self,
+        command: &Command,
+        map: &MapDefinition,
+    ) -> Result<(), String> {
         self.validate_on(command, map)?;
         if let Some(kind) = command.order.kind.strip_prefix("build_") {
             let definition = stats(kind).unwrap();
@@ -1764,19 +1878,42 @@ impl World {
             self.cast(command.units[0], &spell, &command.order);
             return Ok(());
         }
+        if command.order.kind.starts_with("mission_") {
+            self.execute_mission(command, map);
+            return Ok(());
+        }
+        if command.order.kind.starts_with("doctrine_") {
+            self.execute_doctrine(command);
+            return Ok(());
+        }
+        if let Some((kind, stance)) = parse_stance_order(&command.order.kind) {
+            let key = (command.owner, kind.to_string());
+            if stance == default_stance(kind) {
+                self.stances.remove(&key);
+            } else {
+                self.stances.insert(key, stance);
+            }
+            return Ok(());
+        }
         if is_research(&command.order.kind) {
             let kind = command.order.kind.as_str();
-            if !self.charge(command.owner, stats(kind).unwrap().cost) {
+            let level = self.research_level(command.owner, kind) + 1;
+            let price = self.research_price(command.owner, kind, stats(kind).unwrap().cost);
+            if !self.charge(command.owner, price) {
                 return Err("Insufficient resources".into());
             }
             self.research
                 .entry(command.owner)
                 .or_default()
-                .push(kind.to_string());
+                .push(research_key(kind, level));
             // Combat Shields: soldiers already standing are raised now, the
             // ones trained later are born with it (see `spawn`).
             if tier_number(kind) == Some(1) {
-                for unit in self.units.iter_mut().filter(|unit| unit.owner == command.owner) {
+                for unit in self
+                    .units
+                    .iter_mut()
+                    .filter(|unit| unit.owner == command.owner)
+                {
                     let bonus = tier_bonus_hp(&unit.kind, 1);
                     unit.max_hp += bonus;
                     unit.hp += bonus;
@@ -1791,6 +1928,9 @@ impl World {
         let navigation = preset.map(|_| Navigation::new(map, &self.units));
         for id in &command.units {
             let at = lookup.get(*id).expect("validated unit");
+            // A player's order takes the unit out of its mission, at this
+            // moment; the mission pass's own assignments never come this way.
+            self.release_from_missions(*id);
             // Resolved before the unit is borrowed mutably: it reads the rest
             // of the world.
             let home = navigation
@@ -1960,6 +2100,16 @@ impl World {
         }
 
         self.units.sort_by_key(|unit| unit.id);
+        // Missions staff and steer their members before the behaviors run, so
+        // a preset handed out this tick is evaluated on this tick.
+        if tick % crate::mission::MISSION_INTERVAL_TICKS == 0 {
+            self.run_missions(map);
+        }
+        // After this tick's commands, so a queue the player just filled or a
+        // switch just flipped is seen as it stands.
+        if tick % crate::doctrine::DOCTRINE_INTERVAL_TICKS == 0 {
+            self.run_doctrines(map);
+        }
         self.release_stale_claims();
         self.resolve_casts(map);
         // Before the snapshot, so the field this tick is built from the creep
@@ -2036,6 +2186,9 @@ impl World {
             let speed = movement_speed(unit, &zones, tier_of_owner(unit.owner), tick);
             navigation.advance(&mut unit.x, &mut unit.y, target_x, target_y, speed, range)
         };
+        // Stance choices, taken once so the unit loop (which borrows the units
+        // mutably) reads a plain map.
+        let stances = &self.stances;
         let mut hits = Hits::default();
         // Completed bulwarks, for the guardian redirect.
         let guardians = SpatialIndex::new(
@@ -2052,13 +2205,12 @@ impl World {
         );
         // Has this owner researched armour? Fixed at the start of the tick, so
         // a discovery completing on it applies from the next.
-        let armoured: BTreeSet<u8> = self
+        let armoured: BTreeMap<u8, u8> = self
             .research
             .iter()
-            .filter(|(_, research)| research.iter().any(|item| item == "research_armor"))
-            .map(|(owner, _)| *owner)
+            .map(|(owner, research)| (*owner, crate::research_level(research, "research_armor")))
             .collect();
-        let researched_armour = |owner: u8| armoured.contains(&owner);
+        let researched_armour = |owner: u8| armoured.get(&owner).copied().unwrap_or(0);
         let mut repairs = BTreeMap::<u32, i32>::new();
         let mut births = Vec::new();
         let mut construction = BTreeMap::<u32, u64>::new();
@@ -2157,6 +2309,24 @@ impl World {
                         );
                     }
                 }
+                // A finished synthesizer turns material into whichever of
+                // catalyst and terrazine its owner holds less of (catalyst on a
+                // tie), once a second, while the bank is above the reserve.
+                // Synthesized income is not mined, so `collected` is untouched.
+                if unit.kind == "synthesizer" && self.tick % TICKS_PER_SECOND == 0 {
+                    let balance = self.balances.entry(unit.owner).or_default();
+                    if balance.material > SYNTH_RESERVE
+                        && balance.material >= SYNTH_MATERIAL_PER_SECOND
+                    {
+                        balance.material -= SYNTH_MATERIAL_PER_SECOND;
+                        let kind = if balance.catalyst <= balance.terrazine {
+                            ResourceKind::Catalyst
+                        } else {
+                            ResourceKind::Terrazine
+                        };
+                        balance.credit_kind(kind, SYNTH_OUTPUT_PER_SECOND);
+                    }
+                }
                 if !is_static_defense(&unit.kind) {
                     continue;
                 }
@@ -2171,7 +2341,9 @@ impl World {
                         unit.anchor_x = unit.x;
                         unit.anchor_y = unit.y;
                         unit.anchor_tick = self.tick;
-                    } else if self.tick.saturating_sub(unit.anchor_tick) >= entrench_hold_ticks(tier) {
+                    } else if self.tick.saturating_sub(unit.anchor_tick)
+                        >= entrench_hold_ticks(tier)
+                    {
                         unit.passive_ready_tick = self.tick + ENTRENCH_LINGER_TICKS;
                     }
                 }
@@ -2183,7 +2355,9 @@ impl World {
                         .into_iter()
                         .map(|at| &snapshot[at])
                         .filter(|other| {
-                            other.owner == unit.owner && other.id != unit.id && other.hp < other.max_hp
+                            other.owner == unit.owner
+                                && other.id != unit.id
+                                && other.hp < other.max_hp
                         })
                         .max_by_key(|other| (other.max_hp - other.hp, std::cmp::Reverse(other.id)));
                     if let Some(patient) = patient {
@@ -2269,27 +2443,55 @@ impl World {
                         })
                         .flatten()
                         .map(|at| &snapshot[at]);
-                    let target = labour
-                        .or(current)
-                        .or_else(|| {
-                            // Nearest enemy in reach, ties on the lower id.
-                            if definition.damage == 0 {
-                                return None;
-                            }
-                            nearby
-                                .nearest(unit.x, unit.y, reach, |at| {
-                                    snapshot[at].owner != unit.owner
-                                })
-                                .map(|at| &snapshot[at])
-                        });
+                    let target = labour.or(current).or_else(|| {
+                        // Nearest enemy in reach, ties on the lower id.
+                        if definition.damage == 0 {
+                            return None;
+                        }
+                        nearby
+                            .nearest(unit.x, unit.y, reach, |at| snapshot[at].owner != unit.owner)
+                            .map(|at| &snapshot[at])
+                    });
                     if let Some(target) = target {
                         unit.order.target = target.id;
-                        let stop_range = if navigation.line_of_sight(unit.x, unit.y, target.x, target.y) {
-                            range * 0.9
-                        } else {
-                            55.0
-                        };
-                        advance(unit, target.x, target.y, stop_range);
+                        let stance = stances
+                            .get(&(unit.owner, unit.kind.clone()))
+                            .copied()
+                            .unwrap_or_else(|| default_stance(&unit.kind));
+                        let sighted = navigation.line_of_sight(unit.x, unit.y, target.x, target.y);
+                        let gap = distance(unit.x, unit.y, target.x, target.y);
+                        // Kite: reloading and too close to an armed target, so
+                        // step directly away if that ground is free; if it is
+                        // not, fall through to the standard approach.
+                        let backed_off = stance == Stance::Kite
+                            && unit.next_attack > self.tick
+                            && armed(target)
+                            && gap < range * KITE_TRIGGER_PERCENT
+                            && {
+                                let (away_x, away_y) = if gap > 0.0 {
+                                    ((unit.x - target.x) / gap, (unit.y - target.y) / gap)
+                                } else {
+                                    (1.0, 0.0)
+                                };
+                                let (point_x, point_y) =
+                                    (unit.x + away_x * KITE_STEP, unit.y + away_y * KITE_STEP);
+                                let open = navigation.free(point_x, point_y)
+                                    && navigation.line_of_sight(unit.x, unit.y, point_x, point_y);
+                                if open {
+                                    advance(unit, point_x, point_y, 0.0);
+                                }
+                                open
+                            };
+                        if !backed_off && stance != Stance::HoldGround {
+                            let stop_range = if !sighted {
+                                55.0
+                            } else if stance == Stance::Charge {
+                                range * CHARGE_RANGE_PERCENT
+                            } else {
+                                range * 0.9
+                            };
+                            advance(unit, target.x, target.y, stop_range);
+                        }
                     } else {
                         unit.order.target = 0;
                         let (destination_x, destination_y) = (unit.order.x, unit.order.y);
@@ -2327,11 +2529,12 @@ impl World {
                 }
                 "attack" => {
                     if let Some(target) = by_id(&snapshot, unit.order.target) {
-                        let stop_range = if navigation.line_of_sight(unit.x, unit.y, target.x, target.y) {
-                            range * 0.9
-                        } else {
-                            55.0
-                        };
+                        let stop_range =
+                            if navigation.line_of_sight(unit.x, unit.y, target.x, target.y) {
+                                range * 0.9
+                            } else {
+                                55.0
+                            };
                         advance(unit, target.x, target.y, stop_range);
                     } else {
                         completed = true;
@@ -2344,15 +2547,15 @@ impl World {
                 // in transit — and no moment when it is anywhere but in the
                 // open at a deposit.
                 "gather" if gathers_in_place(&unit.kind) => {
-                    if !node_at(unit.order.target).is_some_and(|at| minable(&self.nodes[at]))
-                    {
+                    if !node_at(unit.order.target).is_some_and(|at| minable(&self.nodes[at])) {
                         match replacement_patch(&self.nodes, unit) {
                             Some(id) => unit.order.target = id,
                             None => completed = true,
                         }
                     }
                     let (interval, pulse) = drifter_pulse(logistics);
-                    if let Some(index) = node_at(unit.order.target).filter(|at| minable(&self.nodes[*at]))
+                    if let Some(index) =
+                        node_at(unit.order.target).filter(|at| minable(&self.nodes[*at]))
                     {
                         let (node_x, node_y) = (self.nodes[index].x, self.nodes[index].y);
                         if advance(unit, node_x, node_y, 28.0) {
@@ -2432,8 +2635,7 @@ impl World {
                         // A depleted patch (or one that is not material) sends
                         // the carrier to the nearest *free* patch, else the
                         // nearest at all.
-                        if !node_at(unit.order.target).is_some_and(|at| minable(&self.nodes[at]))
-                        {
+                        if !node_at(unit.order.target).is_some_and(|at| minable(&self.nodes[at])) {
                             if let Some(id) = replacement_patch(&self.nodes, unit) {
                                 unit.order.target = id;
                             } else if unit.cargo > 0 {
@@ -2442,7 +2644,8 @@ impl World {
                                 completed = true;
                             }
                         }
-                        if let Some(index) = node_at(unit.order.target).filter(|at| minable(&self.nodes[*at]))
+                        if let Some(index) =
+                            node_at(unit.order.target).filter(|at| minable(&self.nodes[*at]))
                         {
                             let (node_x, node_y) = (self.nodes[index].x, self.nodes[index].y);
                             if unit.cargo > 0 && unit.cargo_kind != self.nodes[index].kind {
@@ -2513,15 +2716,18 @@ impl World {
                     distance(unit.x, unit.y, target.x, target.y) <= range
                         && navigation.line_of_sight(unit.x, unit.y, target.x, target.y)
                 }) {
-                    let base = definition.damage + if has_tech("research_weapons") { 4 } else { 0 };
+                    let base = definition.damage
+                        + WEAPONS_DAMAGE_PER_LEVEL
+                            * technology.map_or(0, |research| {
+                                crate::research_level(research, "research_weapons")
+                            }) as i32;
                     let mut hit = attack_damage(&unit.kind, &target.kind, base);
                     let attacker = passive(&unit.kind);
                     // Overwatch: the first attack after a long rest opens a
                     // window in which every attack hits harder.
                     if attacker == Some(Passive::Overwatch) {
                         let open = unit.passive_ready_tick > self.tick;
-                        if !open
-                            && self.tick.saturating_sub(unit.shot_tick) >= OVERWATCH_IDLE_TICKS
+                        if !open && self.tick.saturating_sub(unit.shot_tick) >= OVERWATCH_IDLE_TICKS
                         {
                             unit.passive_ready_tick = self.tick + OVERWATCH_WINDOW_TICKS;
                         }
@@ -2550,8 +2756,9 @@ impl World {
                                         && other.id != target.id
                                         && !is_building(&other.kind)
                                     {
-                                        let share =
-                                            attack_damage(&unit.kind, &other.kind, base) * SPLASH_PERCENT / 100;
+                                        let share = attack_damage(&unit.kind, &other.kind, base)
+                                            * SPLASH_PERCENT
+                                            / 100;
                                         let share = mitigated(
                                             share,
                                             other,
@@ -2560,7 +2767,9 @@ impl World {
                                             faction_of_owner(other.owner),
                                             self.tick,
                                         );
-                                        hits.deal(&snapshot, &guardians, self.tick, other, source, share);
+                                        hits.deal(
+                                            &snapshot, &guardians, self.tick, other, source, share,
+                                        );
                                     }
                                 }
                             }
@@ -2570,7 +2779,9 @@ impl World {
                         Some(Passive::Ricochet) => {
                             let mut struck = vec![target.id];
                             let mut from = (target.x, target.y);
-                            for percent in RICOCHET_PERCENTS.iter().take(ricochet_bounces(&unit.kind)) {
+                            for percent in
+                                RICOCHET_PERCENTS.iter().take(ricochet_bounces(&unit.kind))
+                            {
                                 let next = nearby.nearest(from.0, from.1, RICOCHET_RADIUS, |at| {
                                     let other = &snapshot[at];
                                     other.owner != unit.owner
@@ -2579,16 +2790,16 @@ impl World {
                                 });
                                 let Some(at) = next else { break };
                                 let other = &snapshot[at];
-                                let share = attack_damage(&unit.kind, &other.kind, base) * percent / 100;
                                 let share =
-                                    mitigated(
-                                        share,
-                                        other,
-                                        researched_armour(other.owner),
-                                        tier_of_owner(other.owner),
-                                        faction_of_owner(other.owner),
-                                        self.tick,
-                                    );
+                                    attack_damage(&unit.kind, &other.kind, base) * percent / 100;
+                                let share = mitigated(
+                                    share,
+                                    other,
+                                    researched_armour(other.owner),
+                                    tier_of_owner(other.owner),
+                                    faction_of_owner(other.owner),
+                                    self.tick,
+                                );
                                 hits.deal(&snapshot, &guardians, self.tick, other, source, share);
                                 struck.push(other.id);
                                 from = (other.x, other.y);
@@ -2597,7 +2808,8 @@ impl World {
                         // Predator: a share of the damage dealt heals the
                         // attacker when the damage step runs.
                         Some(Passive::Predator) => {
-                            *hits.feed.entry(unit.id).or_default() += landed * PREDATOR_PERCENT / 100;
+                            *hits.feed.entry(unit.id).or_default() +=
+                                landed * PREDATOR_PERCENT / 100;
                         }
                         _ => {}
                     }
@@ -2645,7 +2857,9 @@ impl World {
                             passive(&unit.kind) == Some(Passive::DeathBurst)
                                 && unit.construction_remaining == 0
                                 && **incoming
-                                    >= unit.hp + repairs.get(&unit.id).copied().unwrap_or(0) + unit.shields
+                                    >= unit.hp
+                                        + repairs.get(&unit.id).copied().unwrap_or(0)
+                                        + unit.shields
                         })
                 })
                 .map(|(id, _)| *id)
@@ -2667,7 +2881,14 @@ impl World {
                             faction_of_owner(other.owner),
                             self.tick,
                         );
-                        hits.deal(&snapshot, &guardians, self.tick, other, (dying.owner, dying.id), amount);
+                        hits.deal(
+                            &snapshot,
+                            &guardians,
+                            self.tick,
+                            other,
+                            (dying.owner, dying.id),
+                            amount,
+                        );
                     }
                 }
             }
@@ -2777,7 +2998,11 @@ impl World {
                 if let Some(attacker) = by_id(&snapshot, unit.last_attacker) {
                     let (dx, dy) = (unit.x - attacker.x, unit.y - attacker.y);
                     let length = (dx * dx + dy * dy).sqrt();
-                    let (nx, ny) = if length < 0.01 { (1.0, 0.0) } else { (dx / length, dy / length) };
+                    let (nx, ny) = if length < 0.01 {
+                        (1.0, 0.0)
+                    } else {
+                        (dx / length, dy / length)
+                    };
                     let destination = (
                         (unit.x + nx * BLINK_DISTANCE).clamp(16.0, map.size - 16.0),
                         (unit.y + ny * BLINK_DISTANCE).clamp(16.0, map.size - 16.0),
@@ -2790,7 +3015,8 @@ impl World {
                     if let Some((x, y)) = landing {
                         unit.x = x;
                         unit.y = y;
-                        unit.passive_ready_tick = self.tick + blink_cooldown(tier_of_owner(unit.owner));
+                        unit.passive_ready_tick =
+                            self.tick + blink_cooldown(tier_of_owner(unit.owner));
                     }
                 }
             }
@@ -2800,9 +3026,11 @@ impl World {
         // Buildings and temporary units are not counted. Damage from earlier
         // ticks is not remembered, the same last-hit convention as `killed`.
         let mut credits = BTreeMap::<u32, u16>::new();
-        for unit in self.units.iter().filter(|unit| {
-            unit.hp <= 0 && !is_building(&unit.kind) && !is_temporary(&unit.kind)
-        }) {
+        for unit in self
+            .units
+            .iter()
+            .filter(|unit| unit.hp <= 0 && !is_building(&unit.kind) && !is_temporary(&unit.kind))
+        {
             let killer = hits
                 .by_unit
                 .range((unit.id, u32::MIN)..=(unit.id, u32::MAX))
@@ -2950,7 +3178,10 @@ impl World {
                     }
                 }
                 let rally = match rally_preset(&rally.kind) {
-                    Some(_) => Order { kind: "rally_move".into(), ..rally },
+                    Some(_) => Order {
+                        kind: "rally_move".into(),
+                        ..rally
+                    },
                     None => rally,
                 };
                 let destination = if rally.kind == "rally_move" {
@@ -3266,7 +3497,9 @@ impl World {
 
     /// The highest tier `owner` has bought; 0 with none.
     pub fn tier(&self, owner: u8) -> u8 {
-        self.research.get(&owner).map_or(0, |research| tier_of(research))
+        self.research
+            .get(&owner)
+            .map_or(0, |research| tier_of(research))
     }
 
     pub fn has_research(&self, owner: u8, kind: &str) -> bool {
@@ -3323,22 +3556,23 @@ impl World {
             }
         }
         // Later mobiles in buckets near `(x, y)`, ascending by index.
-        let gather = |buckets: &Vec<Vec<u32>>, x: f32, y: f32, after: usize, out: &mut Vec<usize>| {
-            out.clear();
-            let reach = SEPARATION + DRIFT + 1.0;
-            let clamp = |value: f32| ((value / BUCKET) as i32).clamp(0, side - 1);
-            for row in clamp(y - reach)..=clamp(y + reach) {
-                for column in clamp(x - reach)..=clamp(x + reach) {
-                    out.extend(
-                        buckets[(row * side + column) as usize]
-                            .iter()
-                            .map(|at| *at as usize)
-                            .filter(|at| *at > after),
-                    );
+        let gather =
+            |buckets: &Vec<Vec<u32>>, x: f32, y: f32, after: usize, out: &mut Vec<usize>| {
+                out.clear();
+                let reach = SEPARATION + DRIFT + 1.0;
+                let clamp = |value: f32| ((value / BUCKET) as i32).clamp(0, side - 1);
+                for row in clamp(y - reach)..=clamp(y + reach) {
+                    for column in clamp(x - reach)..=clamp(x + reach) {
+                        out.extend(
+                            buckets[(row * side + column) as usize]
+                                .iter()
+                                .map(|at| *at as usize)
+                                .filter(|at| *at > after),
+                        );
+                    }
                 }
-            }
-            out.sort_unstable();
-        };
+                out.sort_unstable();
+            };
         let mut candidates = Vec::new();
         for left_index in 0..self.units.len() {
             if is_building(&self.units[left_index].kind) {
@@ -3411,21 +3645,67 @@ mod tests {
     #[test]
     fn entity_split_join_round_trips_every_field() {
         let e = Entity {
-            id: 7, owner: 2, kind: "soldier".into(), x: 1.5, y: 2.5, hp: 33,
-            order: Order { kind: "move".into(), x: 3.0, y: 4.0, target: 9 },
-            queue: vec![Order { kind: "attack".into(), x: 5.0, y: 6.0, target: 11 }],
-            cargo: 12, cargo_kind: ResourceKind::Catalyst, returning: true,
-            next_attack: 101, shot_tick: 102, shot_x: 7.5, shot_y: 8.5,
-            production: vec![Production { kind: "worker".into(), finish_tick: 500 }],
-            construction_remaining: 13, stock: 3, expires_tick: 900, max_hp: 80,
-            shields: 14, max_shields: 40, damaged_tick: 103, warp_tick: 104,
-            arrive_tick: 105, energy: 55, ability_ready_tick: 106,
-            cast: Some(Cast { kind: "recall".into(), x: 9.5, y: 10.5, complete_tick: 107 }),
-            passive_ready_tick: 108, last_attacker: 21, contact_tick: 109, kills: 4,
-            anchor_x: 11.5, anchor_y: 12.5, anchor_tick: 110,
+            id: 7,
+            owner: 2,
+            kind: "soldier".into(),
+            x: 1.5,
+            y: 2.5,
+            hp: 33,
+            order: Order {
+                kind: "move".into(),
+                x: 3.0,
+                y: 4.0,
+                target: 9,
+            },
+            queue: vec![Order {
+                kind: "attack".into(),
+                x: 5.0,
+                y: 6.0,
+                target: 11,
+            }],
+            cargo: 12,
+            cargo_kind: ResourceKind::Catalyst,
+            returning: true,
+            next_attack: 101,
+            shot_tick: 102,
+            shot_x: 7.5,
+            shot_y: 8.5,
+            production: vec![Production {
+                kind: "worker".into(),
+                finish_tick: 500,
+            }],
+            construction_remaining: 13,
+            stock: 3,
+            expires_tick: 900,
+            max_hp: 80,
+            shields: 14,
+            max_shields: 40,
+            damaged_tick: 103,
+            warp_tick: 104,
+            arrive_tick: 105,
+            energy: 55,
+            ability_ready_tick: 106,
+            cast: Some(Cast {
+                kind: "recall".into(),
+                x: 9.5,
+                y: 10.5,
+                complete_tick: 107,
+            }),
+            passive_ready_tick: 108,
+            last_attacker: 21,
+            contact_tick: 109,
+            kills: 4,
+            anchor_x: 11.5,
+            anchor_y: 12.5,
+            anchor_tick: 110,
             behavior: Some(Behavior {
-                preset: "guard".into(), goal_x: 13.5, goal_y: 14.5, home_x: 15.5,
-                home_y: 16.5, state: 1, entered_tick: 111,
+                preset: "guard".into(),
+                goal_x: 13.5,
+                goal_y: 14.5,
+                home_x: 15.5,
+                home_y: 16.5,
+                state: 1,
+                entered_tick: 111,
             }),
         };
         let (cold, motion, vitals, state, behavior) = e.split();
@@ -3545,11 +3825,14 @@ mod tests {
     #[test]
     fn every_army_kind_of_every_faction_can_be_ordered_at_its_building() {
         for faction in crate::FACTION_ROTATION {
-            let mut world = World::new_on_with_factions(crate::maps::default_map(), &[(0, faction)]);
+            let mut world =
+                World::new_on_with_factions(crate::maps::default_map(), &[(0, faction)]);
             idle_labour(&mut world);
             world.balances.insert(0, Balance::new(5000, 5000));
             // Both tiers owned, so only the building gates the roster here.
-            world.research.insert(0, vec!["tier_1".into(), "tier_2".into()]);
+            world
+                .research
+                .insert(0, vec!["tier_1".into(), "tier_2".into()]);
             let [x, y] = crate::maps::default_map().starts[0];
             world.spawn(0, "barracks", x + 200.0, y);
             let barracks = world.units.last().unwrap().id;
@@ -3937,7 +4220,11 @@ mod tests {
             build.order.x = 600.0;
             build.order.y = 300.0;
             let result = world.validate(&build);
-            assert_eq!(result.is_ok(), faction == Faction::Organic, "{faction}: {result:?}");
+            assert_eq!(
+                result.is_ok(),
+                faction == Faction::Organic,
+                "{faction}: {result:?}"
+            );
             if faction == Faction::Organic {
                 world.execute(&build).unwrap();
                 assert_eq!(world.balances[&0].material, 3000 - 75);
@@ -4593,7 +4880,7 @@ mod tests {
         assert!(world
             .validate(&command(5, 0, 1, "research_weapons", 0))
             .unwrap_err()
-            .contains("Already"));
+            .contains("Requires Tier 2"));
         for _ in 0..300 {
             world.step();
         }
@@ -5206,7 +5493,7 @@ mod tests {
         );
         assert_eq!(
             held(ResourceKind::Material),
-            24000 + 4 * 250 + 4 * crate::stipend_total(first.tick)
+            18000 + 4 * 250 + 4 * crate::stipend_total(first.tick)
         );
         assert_eq!(held(ResourceKind::Catalyst), 2400 + 4 * 100);
         // Terrazine is minted only as the by-product of what was mined.
@@ -5327,7 +5614,12 @@ mod tests {
     fn a_full_selection_of_four_hundred_is_one_command() {
         let mut world = World::new(&[0, 1]);
         for index in 0..MAX_UNITS - 1 {
-            world.spawn(0, "soldier", 300.0 + (index % 20) as f32 * 10.0, 300.0 + (index / 20) as f32 * 10.0);
+            world.spawn(
+                0,
+                "soldier",
+                300.0 + (index % 20) as f32 * 10.0,
+                300.0 + (index / 20) as f32 * 10.0,
+            );
         }
         let selection: Vec<u32> = world
             .units
@@ -5360,7 +5652,11 @@ mod tests {
             .units
             .iter()
             .filter(|unit| selection.contains(&unit.id))
-            .all(|unit| unit.order == Order { target: 0, ..order.clone() }));
+            .all(|unit| unit.order
+                == Order {
+                    target: 0,
+                    ..order.clone()
+                }));
         let enemy = world.units.iter().find(|unit| unit.owner == 1).unwrap().id;
         command.units[200] = enemy;
         assert_eq!(
@@ -5571,7 +5867,10 @@ mod tests {
                     distance(site.0, site.1, unit.x, unit.y) >= 44.0,
                     "unit {id} is still inside the footprint"
                 );
-                assert!(navigation.free(unit.x, unit.y), "unit {id} stands on bad ground");
+                assert!(
+                    navigation.free(unit.x, unit.y),
+                    "unit {id} stands on bad ground"
+                );
             }
 
             // An enemy unit on a fresh site refuses it by name.
@@ -7622,7 +7921,16 @@ mod tests {
             assert!(passive(kind).is_some(), "{kind}");
             assert!(crate::is_static_defense(kind) && is_building(kind));
         }
-        for kind in ["worker", "drifter", "harvester", "brood", "brute", "hq", "turret", "barracks"] {
+        for kind in [
+            "worker",
+            "drifter",
+            "harvester",
+            "brood",
+            "brute",
+            "hq",
+            "turret",
+            "barracks",
+        ] {
             assert_eq!(passive(kind), None, "{kind}");
         }
         assert_eq!(passive("devourer"), Some(Passive::Veteran));
@@ -7646,7 +7954,11 @@ mod tests {
         ] {
             assert_eq!(army_building(kind), Some(building), "{kind}");
             for other in [Faction::Industrial, Faction::Network, Faction::Organic] {
-                assert_eq!(producer(kind, building, other), other == faction, "{kind} {other}");
+                assert_eq!(
+                    producer(kind, building, other),
+                    other == faction,
+                    "{kind} {other}"
+                );
             }
             assert!(!producer(kind, "hq", faction));
         }
@@ -7703,11 +8015,18 @@ mod tests {
                 build.order.x = 600.0;
                 build.order.y = 300.0;
                 let result = world.validate(&build);
-                assert_eq!(result.is_ok(), faction == owner_faction, "{faction} {kind}: {result:?}");
+                assert_eq!(
+                    result.is_ok(),
+                    faction == owner_faction,
+                    "{faction} {kind}: {result:?}"
+                );
                 if faction == owner_faction {
                     world.execute(&build).unwrap();
                     assert_eq!(world.balances[&0].terrazine, 0);
-                    assert_eq!((world.balances[&0].material, world.balances[&0].catalyst), (3000, 1000));
+                    assert_eq!(
+                        (world.balances[&0].material, world.balances[&0].catalyst),
+                        (3000, 1000)
+                    );
                 }
             }
         }
@@ -7717,7 +8036,12 @@ mod tests {
             &[(0, Faction::Industrial), (1, Faction::Industrial)],
         );
         world.balances.insert(0, Balance::new(3000, 1000));
-        let labour = world.units.iter().find(|unit| is_labour(&unit.kind) && unit.owner == 0).unwrap().id;
+        let labour = world
+            .units
+            .iter()
+            .find(|unit| is_labour(&unit.kind) && unit.owner == 0)
+            .unwrap()
+            .id;
         let mut build = command(world.tick, 0, labour, "build_bunker", 0);
         build.order.x = 600.0;
         build.order.y = 300.0;
@@ -7742,8 +8066,15 @@ mod tests {
             for _ in 0..40 {
                 world.step();
             }
-            assert!(unit_of(&world, near).hp < unit_of(&world, near).max_hp, "{kind} shot");
-            assert_eq!(unit_of(&world, far).hp, unit_of(&world, far).max_hp, "{kind} out of range");
+            assert!(
+                unit_of(&world, near).hp < unit_of(&world, near).max_hp,
+                "{kind} shot"
+            );
+            assert_eq!(
+                unit_of(&world, far).hp,
+                unit_of(&world, far).max_hp,
+                "{kind} out of range"
+            );
             assert!(unit_of(&world, defense).shot_tick > 0, "{kind}");
         }
     }
@@ -7755,7 +8086,10 @@ mod tests {
         spawned(&mut world, 1, "soldier", at(60.0, 0.0));
         let before = unit_of(&world, bunker).hp;
         world.step();
-        assert_eq!(unit_of(&world, bunker).hp, before - (18 - crate::FORTIFIED_ARMOUR));
+        assert_eq!(
+            unit_of(&world, bunker).hp,
+            before - (18 - crate::FORTIFIED_ARMOUR)
+        );
         // A turret in the same place takes the full hit.
         let mut world = industrial_arena();
         let turret = spawned(&mut world, 0, "turret", ARENA);
@@ -7764,7 +8098,11 @@ mod tests {
         assert_eq!(unit_of(&world, turret).hp, stats("turret").unwrap().hp - 18);
         // With armour research the bunker takes 18 - 3 - 2.
         let mut world = industrial_arena();
-        world.research.entry(0).or_default().push("research_armor".into());
+        world
+            .research
+            .entry(0)
+            .or_default()
+            .push("research_armor".into());
         let bunker = spawned(&mut world, 0, "bunker", ARENA);
         spawned(&mut world, 1, "soldier", at(60.0, 0.0));
         world.step();
@@ -7786,11 +8124,17 @@ mod tests {
         let zones = ZoneField::default();
         let base = stats("soldier").unwrap().speed;
         let speed = movement_speed(unit_of(&world, soldier), &zones, 0, world.tick);
-        assert!((speed - base * 1.09).abs() < 0.01, "3 stacks is +9%: {speed}");
+        assert!(
+            (speed - base * 1.09).abs() < 0.01,
+            "3 stacks is +9%: {speed}"
+        );
         // The cap.
         unit_mut(&mut world, soldier).kills = 40;
         let speed = movement_speed(unit_of(&world, soldier), &zones, 0, world.tick);
-        assert!((speed - base * 1.45).abs() < 0.01, "15 stacks is +45%: {speed}");
+        assert!(
+            (speed - base * 1.45).abs() < 0.01,
+            "15 stacks is +45%: {speed}"
+        );
         // Attack rate goes the same way: a shorter cooldown, never below one tick.
         assert_eq!(crate::veteran_cooldown(12, 0), 12);
         assert_eq!(crate::veteran_cooldown(12, 15), 8);
@@ -7800,7 +8144,10 @@ mod tests {
         let scout = spawned(&mut world, 0, "scout", at(0.0, 300.0));
         unit_mut(&mut world, scout).kills = 15;
         unit_mut(&mut world, scout).contact_tick = world.tick;
-        assert_eq!(movement_speed(unit_of(&world, scout), &zones, 0, world.tick), 180.0);
+        assert_eq!(
+            movement_speed(unit_of(&world, scout), &zones, 0, world.tick),
+            180.0
+        );
     }
 
     #[test]
@@ -7812,7 +8159,10 @@ mod tests {
         unit_mut(&mut world, victim).hp = 10;
         world.step();
         assert!(!present(&world, victim));
-        assert_eq!((unit_of(&world, first).kills, unit_of(&world, second).kills), (1, 0));
+        assert_eq!(
+            (unit_of(&world, first).kills, unit_of(&world, second).kills),
+            (1, 0)
+        );
         // A bigger contributor wins over a lower id: a marksman (24) beats a soldier (18).
         let mut world = industrial_arena();
         let soldier = spawned(&mut world, 0, "soldier", ARENA);
@@ -7821,7 +8171,13 @@ mod tests {
         unit_mut(&mut world, victim).hp = 30;
         world.step();
         assert!(!present(&world, victim));
-        assert_eq!((unit_of(&world, soldier).kills, unit_of(&world, marksman).kills), (0, 1));
+        assert_eq!(
+            (
+                unit_of(&world, soldier).kills,
+                unit_of(&world, marksman).kills
+            ),
+            (0, 1)
+        );
     }
 
     #[test]
@@ -7830,11 +8186,15 @@ mod tests {
         let scout = spawned(&mut world, 0, "scout", at(0.0, 300.0));
         let zones = ZoneField::default();
         let base = stats("scout").unwrap().speed;
-        let speed_at = |world: &World, tick: u64| movement_speed(unit_of(world, scout), &zones, 0, tick);
+        let speed_at =
+            |world: &World, tick: u64| movement_speed(unit_of(world, scout), &zones, 0, tick);
         assert!((speed_at(&world, 1000) - base * 1.4).abs() < 0.01);
         unit_mut(&mut world, scout).contact_tick = 900;
         assert_eq!(speed_at(&world, 1099), base, "99 ticks is not enough");
-        assert!((speed_at(&world, 1100) - base * 1.4).abs() < 0.01, "ten seconds");
+        assert!(
+            (speed_at(&world, 1100) - base * 1.4).abs() < 0.01,
+            "ten seconds"
+        );
         // Dealing damage is contact...
         let victim = spawned(&mut world, 1, "worker", at(40.0, 300.0));
         tough(&mut world, victim, 1000);
@@ -7847,7 +8207,10 @@ mod tests {
         spawned(&mut world, 1, "marksman", at(120.0, 300.0));
         world.step();
         assert_eq!(unit_of(&world, scout).contact_tick, world.tick);
-        assert_eq!(movement_speed(unit_of(&world, scout), &zones, 0, world.tick), base);
+        assert_eq!(
+            movement_speed(unit_of(&world, scout), &zones, 0, world.tick),
+            base
+        );
     }
 
     #[test]
@@ -7869,10 +8232,17 @@ mod tests {
             let shot = stats(kind).unwrap().damage;
             assert!(unit_of(&world, shooter).shot_tick == world.tick);
             assert_eq!(unit_of(&world, target).hp, 60 - shot, "{kind} primary");
-            assert_eq!(unit_of(&world, inside).hp, 60 - shot * 50 / 100, "{kind} splash");
+            assert_eq!(
+                unit_of(&world, inside).hp,
+                60 - shot * 50 / 100,
+                "{kind} splash"
+            );
             assert_eq!(unit_of(&world, outside).hp, 60, "{kind} outside the radius");
             assert_eq!(unit_of(&world, friend).hp, 60, "{kind} friendly fire");
-            assert_eq!(unit_of(&world, building).hp, unit_of(&world, building).max_hp);
+            assert_eq!(
+                unit_of(&world, building).hp,
+                unit_of(&world, building).max_hp
+            );
         }
         // Kill attribution: a unit killed by splash counts for the shooter's slot.
         let mut world = passive_arena(&[(0, Faction::Industrial), (1, Faction::Industrial)]);
@@ -7899,30 +8269,61 @@ mod tests {
             world.step();
         }
         assert!(!super::entrenched(unit_of(&world, marksman), world.tick));
-        assert_eq!(unit_of(&world, target).hp, 10_000, "out of range until it digs in");
+        assert_eq!(
+            unit_of(&world, target).hp,
+            10_000,
+            "out of range until it digs in"
+        );
         for _ in 0..12 {
             world.step();
         }
         assert!(super::entrenched(unit_of(&world, marksman), world.tick));
-        assert!(unit_of(&world, target).hp < 10_000, "the extra range reaches it");
+        assert!(
+            unit_of(&world, target).hp < 10_000,
+            "the extra range reaches it"
+        );
         // Armour: a hit of 18 lands for 16.
         let unit = unit_of(&world, marksman);
-        assert_eq!(super::mitigated(18, unit, false, 0, Faction::Industrial, world.tick), 16);
-        assert_eq!(super::mitigated(1, unit, false, 0, Faction::Industrial, world.tick), 1, "never below 1");
+        assert_eq!(
+            super::mitigated(18, unit, 0, 0, Faction::Industrial, world.tick),
+            16
+        );
+        assert_eq!(
+            super::mitigated(1, unit, 0, 0, Faction::Industrial, world.tick),
+            1,
+            "never below 1"
+        );
         // Move off the anchor: the bonus lingers, then goes, and has to be re-earned.
         unit_mut(&mut world, marksman).x += 100.0;
         world.step();
-        assert_eq!(unit_of(&world, marksman).anchor_tick, world.tick, "re-anchored");
+        assert_eq!(
+            unit_of(&world, marksman).anchor_tick,
+            world.tick,
+            "re-anchored"
+        );
         for _ in 0..20 {
             world.step();
         }
-        assert!(super::entrenched(unit_of(&world, marksman), world.tick), "lingering");
+        assert!(
+            super::entrenched(unit_of(&world, marksman), world.tick),
+            "lingering"
+        );
         for _ in 0..40 {
             world.step();
         }
-        assert!(!super::entrenched(unit_of(&world, marksman), world.tick), "gone");
+        assert!(
+            !super::entrenched(unit_of(&world, marksman), world.tick),
+            "gone"
+        );
         assert_eq!(
-            super::mitigated(18, unit_of(&world, marksman), false, 0, Faction::Industrial, world.tick),
+            super::mitigated(
+                18,
+                unit_of(&world, marksman),
+                0,
+                0,
+                Faction::Industrial,
+                world.tick
+            ),
             18
         );
     }
@@ -7985,9 +8386,20 @@ mod tests {
         let friend = spawned(&mut world, 0, "soldier", at(40.0, 40.0));
         let far_friend = spawned(&mut world, 0, "soldier", at(0.0, 300.0));
         let shooters: Vec<u32> = (0..5)
-            .map(|index| spawned(&mut world, 1, "marksman", at(110.0, 40.0 + index as f32 * 20.0 - 40.0)))
+            .map(|index| {
+                spawned(
+                    &mut world,
+                    1,
+                    "marksman",
+                    at(110.0, 40.0 + index as f32 * 20.0 - 40.0),
+                )
+            })
             .collect();
-        for id in shooters.iter().copied().chain([friend, bulwark, far_friend]) {
+        for id in shooters
+            .iter()
+            .copied()
+            .chain([friend, bulwark, far_friend])
+        {
             tough(&mut world, id, 5000);
         }
         // Five marksmen fire at the nearest unit, the friend.
@@ -7998,18 +8410,29 @@ mod tests {
         let taken_bulwark = 5000 - unit_of(&world, bulwark).hp;
         assert!(taken_friend > 0 && taken_bulwark > 0);
         // Return fire does not touch these two, so the damage is exactly the volley.
-        assert!(taken_friend + taken_bulwark <= 5 * hit, "never more than the damage");
+        assert!(
+            taken_friend + taken_bulwark <= 5 * hit,
+            "never more than the damage"
+        );
         let volley = taken_friend + taken_bulwark;
         assert_eq!(volley % hit, 0, "the shares always sum to whole hits");
         assert_eq!(taken_bulwark, redirected * (volley / hit));
-        assert_eq!(unit_of(&world, far_friend).hp, 5000, "outside reach nothing is redirected");
+        assert_eq!(
+            unit_of(&world, far_friend).hp,
+            5000,
+            "outside reach nothing is redirected"
+        );
         // A bulwark never redirects its own damage, and buildings are not guarded.
         let mut world = industrial_arena();
         let bulwark = spawned(&mut world, 0, "bulwark", ARENA);
         let bunker = spawned(&mut world, 0, "bunker", at(40.0, 0.0));
         spawned(&mut world, 1, "soldier", at(60.0, 0.0));
         world.step();
-        assert_eq!(unit_of(&world, bulwark).hp, stats("bulwark").unwrap().hp, "building hit stays on the building");
+        assert_eq!(
+            unit_of(&world, bulwark).hp,
+            stats("bulwark").unwrap().hp,
+            "building hit stays on the building"
+        );
         assert!(unit_of(&world, bunker).hp < stats("bunker").unwrap().hp);
     }
 
@@ -8044,9 +8467,16 @@ mod tests {
         let (mut world, attacker, sentinel) = blink_setup(start, at(-60.0, 0.0));
         world.step();
         let unit = unit_of(&world, sentinel);
-        assert!(((unit.x - start.0) - 160.0).abs() < 2.0, "straight away: {}", unit.x - start.0);
+        assert!(
+            ((unit.x - start.0) - 160.0).abs() < 2.0,
+            "straight away: {}",
+            unit.x - start.0
+        );
         assert!((unit.y - start.1).abs() < 2.0);
-        assert_eq!(unit.passive_ready_tick, world.tick + crate::BLINK_COOLDOWN_TICKS);
+        assert_eq!(
+            unit.passive_ready_tick,
+            world.tick + crate::BLINK_COOLDOWN_TICKS
+        );
         assert_eq!(unit.last_attacker, attacker);
         assert!(Navigation::new(crate::maps::default_map(), &world.units).free(unit.x, unit.y));
         // On cooldown: hit again from beside it and it stays.
@@ -8056,13 +8486,19 @@ mod tests {
         unit_mut(&mut world, sentinel).hp = 40;
         unit_mut(&mut world, attacker).next_attack = 0;
         world.step();
-        assert_eq!((unit_of(&world, sentinel).x, unit_of(&world, sentinel).y), landed);
+        assert_eq!(
+            (unit_of(&world, sentinel).x, unit_of(&world, sentinel).y),
+            landed
+        );
         // Ready again after twelve seconds.
         world.tick += 240;
         unit_mut(&mut world, sentinel).hp = 40;
         unit_mut(&mut world, attacker).next_attack = 0;
         world.step();
-        assert!(unit_of(&world, sentinel).x > landed.0 + 100.0, "second blink");
+        assert!(
+            unit_of(&world, sentinel).x > landed.0 + 100.0,
+            "second blink"
+        );
     }
 
     #[test]
@@ -8078,7 +8514,12 @@ mod tests {
         let unit = unit_of(&world, sentinel);
         assert!((unit.x - 1060.0).abs() > 40.0, "it blinked: {}", unit.x);
         let map = crate::maps::default_map();
-        assert!(map.terrain_free(unit.x, unit.y, 0.0), "landed in terrain at {},{}", unit.x, unit.y);
+        assert!(
+            map.terrain_free(unit.x, unit.y, 0.0),
+            "landed in terrain at {},{}",
+            unit.x,
+            unit.y
+        );
         assert!(Navigation::new(map, &world.units).free(unit.x, unit.y));
     }
 
@@ -8105,7 +8546,11 @@ mod tests {
         for _ in 0..40 {
             world.step();
         }
-        assert_eq!(lost(&world) - before, shot, "no overwatch without ten idle seconds");
+        assert_eq!(
+            lost(&world) - before,
+            shot,
+            "no overwatch without ten idle seconds"
+        );
         // Idle for ten seconds (no target): the next first shot is boosted again.
         unit_mut(&mut world, target).x += 2000.0;
         for _ in 0..205 {
@@ -8138,8 +8583,15 @@ mod tests {
         assert_eq!(1000 - unit_of(&world, second).hp, shot / 2);
         assert_eq!(1000 - unit_of(&world, third).hp, shot / 4);
         assert_eq!(unit_of(&world, fourth).hp, 1000, "two bounces at most");
-        assert_eq!(unit_of(&world, off_line).hp, 1000, "the nearest unstruck enemy is next, not the first one in reach");
-        assert_eq!(unit_of(&world, building).hp, unit_of(&world, building).max_hp);
+        assert_eq!(
+            unit_of(&world, off_line).hp,
+            1000,
+            "the nearest unstruck enemy is next, not the first one in reach"
+        );
+        assert_eq!(
+            unit_of(&world, building).hp,
+            unit_of(&world, building).max_hp
+        );
         // A bounce kill is credited to the arcer's slot.
         let mut world = passive_arena(&[(0, Faction::Network), (1, Faction::Industrial)]);
         spawned(&mut world, 0, "arcer", ARENA);
@@ -8191,7 +8643,11 @@ mod tests {
                 }
             }
         }
-        assert_eq!(absorbed, vec![1, 169], "the first shot, then the first one after eight seconds");
+        assert_eq!(
+            absorbed,
+            vec![1, 169],
+            "the first shot, then the first one after eight seconds"
+        );
     }
 
     #[test]
@@ -8259,7 +8715,10 @@ mod tests {
         tough(&mut world, target, 1000);
         unit_mut(&mut world, spine).hp = 100;
         world.step();
-        assert_eq!(unit_of(&world, spine).hp, 100 + stats("spine").unwrap().damage * 30 / 100);
+        assert_eq!(
+            unit_of(&world, spine).hp,
+            100 + stats("spine").unwrap().damage * 30 / 100
+        );
     }
 
     #[test]
@@ -8272,7 +8731,11 @@ mod tests {
         for _ in 0..99 {
             world.step();
         }
-        assert_eq!(unit_of(&world, crusher).hp, 200, "five seconds of quiet first");
+        assert_eq!(
+            unit_of(&world, crusher).hp,
+            200,
+            "five seconds of quiet first"
+        );
         for _ in 0..20 {
             world.step();
         }
@@ -8311,9 +8774,16 @@ mod tests {
         assert_eq!(unit_of(&world, near).hp, 140 - 28 - 80);
         assert_eq!(unit_of(&world, mid).hp, 140 - 80);
         assert_eq!(unit_of(&world, outside).hp, 140, "outside 70");
-        assert_eq!(unit_of(&world, building).hp, unit_of(&world, building).max_hp, "buildings are spared");
+        assert_eq!(
+            unit_of(&world, building).hp,
+            unit_of(&world, building).max_hp,
+            "buildings are spared"
+        );
         // The soldiers shoot the friend (it is nearer to them): a burst would be 80.
-        assert!(10_000 - unit_of(&world, friend).hp <= 4 * 18, "friends are spared");
+        assert!(
+            10_000 - unit_of(&world, friend).hp <= 4 * 18,
+            "friends are spared"
+        );
         // The unit the burst killed counts for the behemoth's slot.
         assert!(!present(&world, dies));
         assert_eq!(world.killed(0), Cost::catalyst(100));
@@ -8331,7 +8801,10 @@ mod tests {
         world.step();
         assert!(!present(&world, first));
         assert!(!present(&world, second), "the first burst killed it");
-        assert!(unit_of(&world, third).hp <= 450 - 80, "and its burst reached the third");
+        assert!(
+            unit_of(&world, third).hp <= 450 - 80,
+            "and its burst reached the third"
+        );
     }
 
     #[test]
@@ -8384,14 +8857,18 @@ mod tests {
             row += 26.0;
         }
         let mut row = 0.0;
-        for kind in ["sentinel", "arcer", "phantom", "warden", "lancer", "skimmer"] {
+        for kind in [
+            "sentinel", "arcer", "phantom", "warden", "lancer", "skimmer",
+        ] {
             for column in 0..4 {
                 place(1, kind, 1400.0 - column as f32 * 24.0, 420.0 + row);
             }
             row += 26.0;
         }
         let mut row = 0.0;
-        for kind in ["swarmer", "devourer", "prowler", "spitter", "crusher", "behemoth"] {
+        for kind in [
+            "swarmer", "devourer", "prowler", "spitter", "crusher", "behemoth",
+        ] {
             for column in 0..6 {
                 place(2, kind, 1100.0 + column as f32 * 20.0, 700.0 + row);
             }
@@ -8412,10 +8889,22 @@ mod tests {
             second.step();
         }
         assert_eq!(first, second);
-        assert!(first.killed(0).total() + first.killed(1).total() + first.killed(2).total() > 0, "the brawl produced kills");
-        assert!(first.units.iter().any(|unit| unit.kills > 0), "veteran stacks accrued");
-        assert!(first.units.iter().all(|unit| unit.x.is_finite() && unit.y.is_finite()));
-        assert!(first.units.iter().all(|unit| unit.hp <= unit.max_hp && unit.shields <= unit.max_shields));
+        assert!(
+            first.killed(0).total() + first.killed(1).total() + first.killed(2).total() > 0,
+            "the brawl produced kills"
+        );
+        assert!(
+            first.units.iter().any(|unit| unit.kills > 0),
+            "veteran stacks accrued"
+        );
+        assert!(first
+            .units
+            .iter()
+            .all(|unit| unit.x.is_finite() && unit.y.is_finite()));
+        assert!(first
+            .units
+            .iter()
+            .all(|unit| unit.hp <= unit.max_hp && unit.shields <= unit.max_shields));
     }
 
     fn eight_patch_line() -> Vec<Node> {
@@ -8445,31 +8934,75 @@ mod tests {
         world.nodes = eight_patch_line();
         // Five already mining the first five patches of a 490-wide line...
         for index in 0..5u32 {
-            let id = spawned(&mut world, 0, "drifter", (1000.0 + index as f32 * 70.0, 470.0));
-            unit_mut(&mut world, id).order = Order { kind: "gather".into(), x: 0.0, y: 0.0, target: 100 + index };
+            let id = spawned(
+                &mut world,
+                0,
+                "drifter",
+                (1000.0 + index as f32 * 70.0, 470.0),
+            );
+            unit_mut(&mut world, id).order = Order {
+                kind: "gather".into(),
+                x: 0.0,
+                y: 0.0,
+                target: 100 + index,
+            };
         }
         // ... and two more sent to the first one. The free patches are 350 and
         // 420 from it: out of reach of the old radius (250, from the taken
         // patch), inside the new one (450, from the unit).
         for index in 0..2 {
-            let id = spawned(&mut world, 0, "drifter", (1000.0 + index as f32 * 20.0, 480.0));
-            unit_mut(&mut world, id).order = Order { kind: "gather".into(), x: 0.0, y: 0.0, target: 100 };
+            let id = spawned(
+                &mut world,
+                0,
+                "drifter",
+                (1000.0 + index as f32 * 20.0, 480.0),
+            );
+            unit_mut(&mut world, id).order = Order {
+                kind: "gather".into(),
+                x: 0.0,
+                y: 0.0,
+                target: 100,
+            };
         }
         for _ in 0..400 {
             world.step();
         }
-        let held: BTreeSet<u32> = world.nodes.iter().filter(|node| node.miner != 0).map(|node| node.id).collect();
-        let holders: BTreeSet<u32> = world.nodes.iter().filter(|node| node.miner != 0).map(|node| node.miner).collect();
+        let held: BTreeSet<u32> = world
+            .nodes
+            .iter()
+            .filter(|node| node.miner != 0)
+            .map(|node| node.id)
+            .collect();
+        let holders: BTreeSet<u32> = world
+            .nodes
+            .iter()
+            .filter(|node| node.miner != 0)
+            .map(|node| node.miner)
+            .collect();
         assert_eq!(held.len(), 7, "seven distinct patches are held");
         assert_eq!(holders.len(), 7, "by seven distinct units");
-        let targets: BTreeSet<u32> = world.units.iter().filter(|unit| unit.kind == "drifter").map(|unit| unit.order.target).collect();
-        assert_eq!(targets.len(), 7, "and nobody is still waiting at a taken one");
+        let targets: BTreeSet<u32> = world
+            .units
+            .iter()
+            .filter(|unit| unit.kind == "drifter")
+            .map(|unit| unit.order.target)
+            .collect();
+        assert_eq!(
+            targets.len(),
+            7,
+            "and nobody is still waiting at a taken one"
+        );
     }
 
     // --- N2: instant research and tiers ------------------------------------
 
     fn buy(world: &mut World, kind: &str) -> Result<(), String> {
-        let hq = world.units.iter().find(|unit| unit.owner == 0 && unit.kind == "hq").unwrap().id;
+        let hq = world
+            .units
+            .iter()
+            .find(|unit| unit.owner == 0 && unit.kind == "hq")
+            .unwrap()
+            .id;
         world.execute(&command(world.tick, 0, hq, kind, 0))
     }
 
@@ -8491,10 +9024,19 @@ mod tests {
         buy(&mut world, "research_armor").unwrap();
         assert!(world.has_research(0, "research_armor"));
         assert_eq!(world.balances[&0], Balance::new(4850, 0));
-        assert!(buy(&mut world, "research_armor").unwrap_err().contains("Already"));
+        // The same order now offers level 2, which waits for tier 2.
+        assert!(buy(&mut world, "research_armor")
+            .unwrap_err()
+            .contains("Requires Tier 2"));
+        assert!(buy(&mut world, "research_logistics").is_ok());
+        assert!(buy(&mut world, "research_logistics")
+            .unwrap_err()
+            .contains("Already"));
         // Another player's unit cannot issue it, and it cannot be queued.
         let rival = world.units.iter().find(|unit| unit.owner == 1).unwrap().id;
-        assert!(world.validate(&command(1, 0, rival, "research_weapons", 0)).is_err());
+        assert!(world
+            .validate(&command(1, 0, rival, "research_weapons", 0))
+            .is_err());
         let hq = world.units.iter().find(|unit| unit.owner == 0).unwrap().id;
         let mut queued = command(1, 0, hq, "research_weapons", 0);
         queued.queued = true;
@@ -8502,8 +9044,174 @@ mod tests {
         assert!(world.units.iter().all(|unit| unit.production.is_empty()));
         // Short of material: refused with the currency named, nothing charged.
         world.balances.insert(0, Balance::new(149, 0));
-        assert!(buy(&mut world, "research_weapons").unwrap_err().contains("material"));
+        assert!(buy(&mut world, "research_weapons")
+            .unwrap_err()
+            .contains("material"));
         assert_eq!(world.balances[&0], Balance::new(149, 0));
+    }
+
+    #[test]
+    fn weapons_and_armour_are_leveled_priced_and_gated_by_tier() {
+        let mut world = tech_world(Faction::Industrial, &["barracks", "factory", "lab"]);
+        world.balances.insert(0, Balance::new(10_000, 0));
+        for kind in ["research_weapons", "research_armor"] {
+            // Level 1: 150, no tier.
+            buy(&mut world, kind).unwrap();
+            assert_eq!(world.research_level(0, kind), 1);
+            assert_eq!(
+                world.balances[&0].material,
+                if kind == "research_weapons" {
+                    9850
+                } else {
+                    9700
+                }
+            );
+            // Level 2 needs tier 2, level 3 needs tier 3.
+            assert_eq!(buy(&mut world, kind).unwrap_err(), "Requires Tier 2");
+        }
+        world.balances.insert(0, Balance::new(10_000, 0));
+        for tier in ["tier_1", "tier_2"] {
+            buy(&mut world, tier).unwrap();
+        }
+        world.balances.insert(0, Balance::new(10_000, 0));
+        buy(&mut world, "research_weapons").unwrap();
+        assert_eq!(world.balances[&0].material, 10_000 - 400);
+        assert!(world.has_research(0, "research_weapons_2"));
+        assert_eq!(
+            buy(&mut world, "research_weapons").unwrap_err(),
+            "Requires Tier 3"
+        );
+        buy(&mut world, "tier_3").unwrap();
+        world.balances.insert(0, Balance::new(799, 0));
+        assert!(buy(&mut world, "research_weapons")
+            .unwrap_err()
+            .contains("material"));
+        world.balances.insert(0, Balance::new(800, 0));
+        buy(&mut world, "research_weapons").unwrap();
+        assert_eq!(world.balances[&0].material, 0);
+        assert!(world.has_research(0, "research_weapons_3"));
+        assert_eq!(world.research_level(0, "research_weapons"), 3);
+        world.balances.insert(0, Balance::new(10_000, 0));
+        assert!(buy(&mut world, "research_weapons")
+            .unwrap_err()
+            .contains("Already"));
+        // Armour is its own track.
+        assert_eq!(world.research_level(0, "research_armor"), 1);
+        buy(&mut world, "research_armor").unwrap();
+        buy(&mut world, "research_armor").unwrap();
+        assert!(buy(&mut world, "research_armor")
+            .unwrap_err()
+            .contains("Already"));
+        assert_eq!(world.research_level(0, "research_armor"), 3);
+        assert_eq!(world.balances[&0].material, 10_000 - 400 - 800);
+    }
+
+    #[test]
+    fn weapon_damage_and_armour_scale_with_level() {
+        for level in 0u8..=3 {
+            let mut world = passive_arena(&[(0, Faction::Industrial), (1, Faction::Industrial)]);
+            let turret = spawned(&mut world, 0, "turret", ARENA);
+            let target = spawned(&mut world, 1, "worker", at(100.0, 0.0));
+            tough(&mut world, target, 10_000);
+            let keys: Vec<String> = (1..=level)
+                .map(|l| crate::research_key("research_weapons", l))
+                .collect();
+            world.research.insert(0, keys);
+            for _ in 0..5 {
+                world.step();
+            }
+            assert!(unit_of(&world, turret).shot_tick > 0);
+            let lost = 10_000 - unit_of(&world, target).hp;
+            assert_eq!(lost, 16 + 4 * level as i32, "weapons level {level}");
+        }
+        let world = tech_world(Faction::Industrial, &[]);
+        let unit = world.units.iter().find(|unit| unit.owner == 0).unwrap();
+        for level in 0u8..=3 {
+            assert_eq!(
+                super::mitigated(18, unit, level, 0, Faction::Industrial, world.tick),
+                18 - 3 * level as i32
+            );
+        }
+    }
+
+    #[test]
+    fn a_synthesizer_needs_tier_two_to_place() {
+        let mut world = World::new_on_with_factions(
+            crate::maps::default_map(),
+            &[(0, Faction::Industrial), (1, Faction::Industrial)],
+        );
+        world.balances.insert(0, Balance::new(3000, 0));
+        let labour = world
+            .units
+            .iter()
+            .find(|unit| is_labour(&unit.kind) && unit.owner == 0)
+            .unwrap()
+            .id;
+        let mut build = command(world.tick, 0, labour, "build_synthesizer", 0);
+        build.order.x = 600.0;
+        build.order.y = 300.0;
+        assert_eq!(world.validate(&build).unwrap_err(), "Requires Tier 2");
+        world.research.insert(0, vec!["tier_1".into()]);
+        assert_eq!(world.validate(&build).unwrap_err(), "Requires Tier 2");
+        world
+            .research
+            .insert(0, vec!["tier_1".into(), "tier_2".into()]);
+        world.execute(&build).unwrap();
+        assert_eq!(world.balances[&0].material, 2700);
+        let site = world.units.last().unwrap();
+        assert_eq!((site.kind.as_str(), site.max_hp), ("synthesizer", 600));
+        assert_eq!(stats("synthesizer").unwrap().training_ticks, 200);
+        assert!(!is_hub("synthesizer") && !crate::is_static_defense("synthesizer"));
+        assert_eq!(crate::building_faction("synthesizer"), None);
+    }
+
+    #[test]
+    fn a_finished_synthesizer_tops_up_the_lower_of_catalyst_and_terrazine() {
+        // 0 = none, 1 = finished, 2 = under construction. The opening stipend
+        // keeps adding the odd material, so material is compared with a run
+        // that has no synthesizer.
+        let run = |balance: Balance, synthesizer: u8, seconds: u64| {
+            let mut world = tech_world(Faction::Industrial, &[]);
+            if synthesizer > 0 {
+                let id = spawned(&mut world, 0, "synthesizer", at(0.0, 0.0));
+                unit_mut(&mut world, id).construction_remaining =
+                    if synthesizer == 1 { 0 } else { 150 };
+            }
+            world.tick = 4000;
+            world.balances.insert(0, balance);
+            for _ in 0..seconds * TICKS_PER_SECOND {
+                world.step();
+            }
+            world.balances[&0]
+        };
+        let check = |balance: Balance, seconds: u64, spent: u32, catalyst: u32, terrazine: u32| {
+            let after = run(balance, 1, seconds);
+            let base = run(balance, 0, seconds);
+            assert_eq!(
+                after.material + spent,
+                base.material,
+                "{balance:?} material"
+            );
+            assert_eq!(
+                (after.catalyst, after.terrazine),
+                (catalyst, terrazine),
+                "{balance:?}"
+            );
+        };
+        // Tie goes to catalyst; 4 material makes 1.
+        check(Balance::new(1000, 5).with_terrazine(5), 1, 4, 6, 5);
+        // Terrazine lower: terrazine.
+        check(Balance::new(1000, 50).with_terrazine(5), 1, 4, 50, 6);
+        // It keeps topping up whichever is lower: (2, 0) -> (2, 1) -> (2, 2) -> (3, 2).
+        check(Balance::new(1000, 2).with_terrazine(0), 3, 12, 3, 2);
+        // Not while under construction.
+        let idle = run(Balance::new(1000, 0), 2, 2);
+        assert_eq!((idle.catalyst, idle.terrazine), (0, 0));
+        // At or below the reserve nothing runs; just above it, it does.
+        let low = run(Balance::new(290, 0), 1, 2);
+        assert_eq!((low.catalyst, low.terrazine), (0, 0));
+        let above = run(Balance::new(301, 0), 1, 1);
+        assert_eq!((above.catalyst, above.terrazine), (1, 0));
     }
 
     #[test]
@@ -8513,7 +9221,10 @@ mod tests {
         assert!(buy(&mut world, "tier_1").unwrap_err().contains("barracks"));
         let barracks = spawned(&mut world, 0, "barracks", at(0.0, 0.0));
         unit_mut(&mut world, barracks).construction_remaining = 5;
-        assert!(buy(&mut world, "tier_1").unwrap_err().contains("barracks"), "still building");
+        assert!(
+            buy(&mut world, "tier_1").unwrap_err().contains("barracks"),
+            "still building"
+        );
         unit_mut(&mut world, barracks).construction_remaining = 0;
         // Out of order.
         assert!(buy(&mut world, "tier_2").unwrap_err().contains("Tier 1"));
@@ -8538,7 +9249,9 @@ mod tests {
         assert_eq!(world.balances[&0], Balance::new(3400, 0));
         assert_eq!(world.tier(0), 3);
         // Owned forever: the buildings may fall, the tiers stay.
-        world.units.retain(|unit| !matches!(unit.kind.as_str(), "barracks" | "factory" | "lab"));
+        world
+            .units
+            .retain(|unit| !matches!(unit.kind.as_str(), "barracks" | "factory" | "lab"));
         assert_eq!(world.tier(0), 3);
     }
 
@@ -8551,8 +9264,18 @@ mod tests {
         ] {
             let mut world = tech_world(faction, &["barracks", "factory", "lab"]);
             world.balances.insert(0, Balance::new(5000, 5000));
-            let barracks = world.units.iter().find(|unit| unit.kind == "barracks").unwrap().id;
-            let factory = world.units.iter().find(|unit| unit.kind == "factory").unwrap().id;
+            let barracks = world
+                .units
+                .iter()
+                .find(|unit| unit.kind == "barracks")
+                .unwrap()
+                .id;
+            let factory = world
+                .units
+                .iter()
+                .find(|unit| unit.kind == "factory")
+                .unwrap()
+                .id;
             let train = |world: &World, building: u32, kind: &str| {
                 world.validate(&command(1, 0, building, &format!("train_{kind}"), 0))
             };
@@ -8560,16 +9283,30 @@ mod tests {
             let basic = crate::basic_fighter(faction);
             assert_eq!(train(&world, barracks, basic), Ok(()), "{faction} {basic}");
             for kind in tier_one {
-                assert_eq!(train(&world, barracks, kind).unwrap_err(), "Requires Tier 1", "{kind}");
+                assert_eq!(
+                    train(&world, barracks, kind).unwrap_err(),
+                    "Requires Tier 1",
+                    "{kind}"
+                );
             }
-            assert_eq!(train(&world, factory, tier_two).unwrap_err(), "Requires Tier 2");
+            assert_eq!(
+                train(&world, factory, tier_two).unwrap_err(),
+                "Requires Tier 2"
+            );
             buy(&mut world, "tier_1").unwrap();
             for kind in tier_one {
                 assert_eq!(train(&world, barracks, kind), Ok(()), "{kind} at tier 1");
             }
-            assert_eq!(train(&world, factory, tier_two).unwrap_err(), "Requires Tier 2");
+            assert_eq!(
+                train(&world, factory, tier_two).unwrap_err(),
+                "Requires Tier 2"
+            );
             buy(&mut world, "tier_2").unwrap();
-            assert_eq!(train(&world, factory, tier_two), Ok(()), "{tier_two} at tier 2");
+            assert_eq!(
+                train(&world, factory, tier_two),
+                Ok(()),
+                "{tier_two} at tier 2"
+            );
         }
     }
 
@@ -8588,7 +9325,10 @@ mod tests {
         assert!(loaded.has_research(0, "research_logistics"));
         // A rebuilt unit is born with the tier's hit points.
         let soldier = spawned(&mut loaded, 0, "soldier", ARENA);
-        assert_eq!(unit_of(&loaded, soldier).max_hp, 140 + crate::COMBAT_SHIELDS_HP);
+        assert_eq!(
+            unit_of(&loaded, soldier).max_hp,
+            140 + crate::COMBAT_SHIELDS_HP
+        );
     }
 
     #[test]
@@ -8599,11 +9339,17 @@ mod tests {
         unit_mut(&mut world, before).hp = 100;
         let rival = spawned(&mut world, 1, "soldier", at(0.0, 200.0));
         buy(&mut world, "tier_1").unwrap();
-        assert_eq!((unit_of(&world, before).hp, unit_of(&world, before).max_hp), (120, 160));
+        assert_eq!(
+            (unit_of(&world, before).hp, unit_of(&world, before).max_hp),
+            (120, 160)
+        );
         assert_eq!(unit_of(&world, scout).max_hp, 80, "only soldiers");
         assert_eq!(unit_of(&world, rival).max_hp, 140, "only the buyer's");
         let after = spawned(&mut world, 0, "soldier", at(0.0, 250.0));
-        assert_eq!((unit_of(&world, after).hp, unit_of(&world, after).max_hp), (160, 160));
+        assert_eq!(
+            (unit_of(&world, after).hp, unit_of(&world, after).max_hp),
+            (160, 160)
+        );
     }
 
     #[test]
@@ -8613,7 +9359,10 @@ mod tests {
         world.step();
         let unit = unit_of(&world, sentinel);
         assert!(unit.x > at(0.0, 0.0).0 + 100.0, "it blinked");
-        assert_eq!(unit.passive_ready_tick, world.tick + crate::QUICK_BLINK_COOLDOWN_TICKS);
+        assert_eq!(
+            unit.passive_ready_tick,
+            world.tick + crate::QUICK_BLINK_COOLDOWN_TICKS
+        );
         assert_eq!(crate::QUICK_BLINK_COOLDOWN_TICKS, 160);
     }
 
@@ -8624,7 +9373,10 @@ mod tests {
         let spitter = spawned(&mut world, 0, "spitter", ARENA);
         let zones = ZoneField::default();
         let base = stats("swarmer").unwrap().speed;
-        assert_eq!(movement_speed(unit_of(&world, swarmer), &zones, 0, world.tick), base);
+        assert_eq!(
+            movement_speed(unit_of(&world, swarmer), &zones, 0, world.tick),
+            base
+        );
         let boosted = movement_speed(unit_of(&world, swarmer), &zones, 1, world.tick);
         assert!((boosted - base * 1.15).abs() < 0.001, "{boosted} vs {base}");
         let prowler = spawned(&mut world, 0, "prowler", ARENA);
@@ -8634,7 +9386,10 @@ mod tests {
         let boosted = movement_speed(unit_of(&world, prowler), &zones, 1, world.tick);
         assert!((boosted - base * 1.15).abs() < 0.001);
         let base = stats("spitter").unwrap().speed;
-        assert_eq!(movement_speed(unit_of(&world, spitter), &zones, 3, world.tick), base);
+        assert_eq!(
+            movement_speed(unit_of(&world, spitter), &zones, 3, world.tick),
+            base
+        );
     }
 
     #[test]
@@ -8642,7 +9397,9 @@ mod tests {
         let held = |tiers: &[&str]| {
             let mut world = industrial_arena();
             if !tiers.is_empty() {
-                world.research.insert(0, tiers.iter().map(|tier| tier.to_string()).collect());
+                world
+                    .research
+                    .insert(0, tiers.iter().map(|tier| tier.to_string()).collect());
             }
             let marksman = spawned(&mut world, 0, "marksman", ARENA);
             for _ in 0..85 {
@@ -8664,7 +9421,12 @@ mod tests {
                     world.research.insert(0, vec!["tier_1".into(), tier.into()]);
                 }
                 spawned(&mut world, 0, kind, ARENA);
-                let target = spawned(&mut world, 1, "worker", at(stats(kind).unwrap().range + 10.0, 0.0));
+                let target = spawned(
+                    &mut world,
+                    1,
+                    "worker",
+                    at(stats(kind).unwrap().range + 10.0, 0.0),
+                );
                 tough(&mut world, target, 10_000);
                 for _ in 0..3 {
                     world.step();
@@ -8681,8 +9443,16 @@ mod tests {
         let world = industrial_arena();
         let mut world = world;
         let barracks = spawned(&mut world, 0, "barracks", at(0.0, 0.0));
-        for (faction, expected) in [(Faction::Industrial, 16), (Faction::Network, 18), (Faction::Organic, 18)] {
-            assert_eq!(super::mitigated(18, unit_of(&world, barracks), false, 3, faction, 0), expected, "{faction}");
+        for (faction, expected) in [
+            (Faction::Industrial, 16),
+            (Faction::Network, 18),
+            (Faction::Organic, 18),
+        ] {
+            assert_eq!(
+                super::mitigated(18, unit_of(&world, barracks), 0, 3, faction, 0),
+                expected,
+                "{faction}"
+            );
         }
     }
 
@@ -8693,13 +9463,31 @@ mod tests {
         let barracks = spawned(&mut world, 0, "barracks", at(100.0, 0.0));
         let soldier = spawned(&mut world, 0, "soldier", at(200.0, 0.0));
         // Bunker: fortified 2. Barracks: nothing. Soldier: nothing.
-        assert_eq!(super::mitigated(18, unit_of(&world, bunker), false, 2, Faction::Industrial, 0), 16);
-        assert_eq!(super::mitigated(18, unit_of(&world, bunker), false, 3, Faction::Industrial, 0), 14);
-        assert_eq!(super::mitigated(18, unit_of(&world, barracks), false, 2, Faction::Industrial, 0), 18);
-        assert_eq!(super::mitigated(18, unit_of(&world, barracks), false, 3, Faction::Industrial, 0), 16);
-        assert_eq!(super::mitigated(18, unit_of(&world, soldier), false, 3, Faction::Industrial, 0), 18);
+        assert_eq!(
+            super::mitigated(18, unit_of(&world, bunker), 0, 2, Faction::Industrial, 0),
+            16
+        );
+        assert_eq!(
+            super::mitigated(18, unit_of(&world, bunker), 0, 3, Faction::Industrial, 0),
+            14
+        );
+        assert_eq!(
+            super::mitigated(18, unit_of(&world, barracks), 0, 2, Faction::Industrial, 0),
+            18
+        );
+        assert_eq!(
+            super::mitigated(18, unit_of(&world, barracks), 0, 3, Faction::Industrial, 0),
+            16
+        );
+        assert_eq!(
+            super::mitigated(18, unit_of(&world, soldier), 0, 3, Faction::Industrial, 0),
+            18
+        );
         // Armour research (3), Fortified (2) and plating (2) all stack.
-        assert_eq!(super::mitigated(18, unit_of(&world, bunker), true, 3, Faction::Industrial, 0), 11);
+        assert_eq!(
+            super::mitigated(18, unit_of(&world, bunker), 1, 3, Faction::Industrial, 0),
+            11
+        );
     }
 
     #[test]
@@ -8708,7 +9496,9 @@ mod tests {
         let absorbed_at = |tier: bool| {
             let mut world = passive_arena(&[(0, Faction::Industrial), (1, Faction::Network)]);
             if tier {
-                world.research.insert(1, vec!["tier_1".into(), "tier_2".into(), "tier_3".into()]);
+                world
+                    .research
+                    .insert(1, vec!["tier_1".into(), "tier_2".into(), "tier_3".into()]);
             }
             let soldier = spawned(&mut world, 0, "soldier", ARENA);
             let phantom = spawned(&mut world, 1, "phantom", at(30.0, 0.0));
@@ -8738,7 +9528,9 @@ mod tests {
         let run = |tier: bool, with_warden: bool| {
             let mut world = passive_arena(&[(0, Faction::Industrial), (1, Faction::Network)]);
             if tier {
-                world.research.insert(1, vec!["tier_1".into(), "tier_2".into(), "tier_3".into()]);
+                world
+                    .research
+                    .insert(1, vec!["tier_1".into(), "tier_2".into(), "tier_3".into()]);
             }
             let attacker = spawned(&mut world, 0, "soldier", ARENA);
             let sentinel = spawned(&mut world, 1, "sentinel", at(60.0, 0.0));
@@ -8763,14 +9555,19 @@ mod tests {
     fn adrenal_glands_speed_swarmers_and_devourers_and_armour_crushers() {
         let cooldown = stats("swarmer").unwrap().cooldown;
         let shortened = super::tier_cooldown("swarmer", cooldown, 3);
-        assert!(shortened < cooldown && shortened >= cooldown * 100 / 121, "{shortened} vs {cooldown}");
+        assert!(
+            shortened < cooldown && shortened >= cooldown * 100 / 121,
+            "{shortened} vs {cooldown}"
+        );
         assert_eq!(super::tier_cooldown("swarmer", cooldown, 2), cooldown);
         assert_eq!(super::tier_cooldown("spitter", cooldown, 3), cooldown);
         // In play: the swarmer's next attack comes sooner.
         let gap = |tiers: bool| {
             let mut world = passive_arena(&[(0, Faction::Organic), (1, Faction::Industrial)]);
             if tiers {
-                world.research.insert(0, vec!["tier_1".into(), "tier_2".into(), "tier_3".into()]);
+                world
+                    .research
+                    .insert(0, vec!["tier_1".into(), "tier_2".into(), "tier_3".into()]);
             }
             let swarmer = spawned(&mut world, 0, "swarmer", ARENA);
             let target = spawned(&mut world, 1, "worker", at(15.0, 0.0));
@@ -8784,8 +9581,14 @@ mod tests {
         // Crusher: +2 armour at tier 3 only.
         let mut world = passive_arena(&[(0, Faction::Organic), (1, Faction::Industrial)]);
         let crusher = spawned(&mut world, 0, "crusher", ARENA);
-        assert_eq!(super::mitigated(18, unit_of(&world, crusher), false, 2, Faction::Organic, 0), 18);
-        assert_eq!(super::mitigated(18, unit_of(&world, crusher), false, 3, Faction::Organic, 0), 16);
+        assert_eq!(
+            super::mitigated(18, unit_of(&world, crusher), 0, 2, Faction::Organic, 0),
+            18
+        );
+        assert_eq!(
+            super::mitigated(18, unit_of(&world, crusher), 0, 3, Faction::Organic, 0),
+            16
+        );
     }
 }
 
@@ -8833,7 +9636,12 @@ mod behavior_tests {
             id: 1,
             owner: 0,
             units,
-            order: Order { kind: kind.into(), x: at.0, y: at.1, target: 0 },
+            order: Order {
+                kind: kind.into(),
+                x: at.0,
+                y: at.1,
+                target: 0,
+            },
             queued: false,
             execute_tick: 0,
             status: "scheduled".into(),
@@ -8857,7 +9665,10 @@ mod behavior_tests {
             world.step();
         }
         let unit = unit_of(world, id);
-        panic!("still in {state} after {limit} ticks at ({}, {}) order {:?}", unit.x, unit.y, unit.order);
+        panic!(
+            "still in {state} after {limit} ticks at ({}, {}) order {:?}",
+            unit.x, unit.y, unit.order
+        );
     }
 
     #[test]
@@ -8868,10 +9679,16 @@ mod behavior_tests {
         // inside the footprint, where no unit can stand.
         let home = at(-310.0, 0.0);
         let soldier = spawned(&mut world, 0, "soldier", ARENA);
-        world.execute(&order(vec![soldier], "harass", at(400.0, 0.0))).unwrap();
+        world
+            .execute(&order(vec![soldier], "harass", at(400.0, 0.0)))
+            .unwrap();
         let unit = unit_of(&world, soldier);
         let running = unit.behavior.clone().unwrap();
-        assert_eq!((running.home_x, running.home_y), home, "beside the nearest completed hub");
+        assert_eq!(
+            (running.home_x, running.home_y),
+            home,
+            "beside the nearest completed hub"
+        );
         assert_eq!(
             (unit.order.kind.as_str(), unit.order.x, unit.order.y),
             ("attack_move", ARENA.0 + 400.0, ARENA.1),
@@ -8888,7 +9705,10 @@ mod behavior_tests {
             world.step();
             assert_eq!(shown(&world, soldier), "advance", "tick {}", world.tick);
         }
-        assert!(unit_of(&world, soldier).x > ARENA.0, "it advanced meanwhile");
+        assert!(
+            unit_of(&world, soldier).x > ARENA.0,
+            "it advanced meanwhile"
+        );
         world.step();
         assert_eq!(world.tick, 1000 + MIN_DWELL_TICKS);
         assert_eq!(shown(&world, soldier), "retreat");
@@ -8930,11 +9750,17 @@ mod behavior_tests {
             for index in 0..enemies {
                 spawned(&mut world, 1, "soldier", at(index as f32 * 40.0, 300.0));
             }
-            world.execute(&order(vec![soldier], "harass", at(300.0, 0.0))).unwrap();
+            world
+                .execute(&order(vec![soldier], "harass", at(300.0, 0.0)))
+                .unwrap();
             for _ in 0..MIN_DWELL_TICKS {
                 world.step();
             }
-            assert_eq!(unit_of(&world, soldier).hp, 140, "untouched: health is not the cause");
+            assert_eq!(
+                unit_of(&world, soldier).hp,
+                140,
+                "untouched: health is not the cause"
+            );
             assert_eq!(shown(&world, soldier), expected, "{enemies} enemies");
         }
     }
@@ -8943,7 +9769,9 @@ mod behavior_tests {
     fn guard_leash_walks_back_without_fighting_and_resumes_watch() {
         let mut world = arena();
         let soldier = spawned(&mut world, 0, "soldier", ARENA);
-        world.execute(&order(vec![soldier], "guard", ARENA)).unwrap();
+        world
+            .execute(&order(vec![soldier], "guard", ARENA))
+            .unwrap();
         assert_eq!(shown(&world, soldier), "return");
         assert_eq!(unit_of(&world, soldier).order.kind, "move");
         step_while_in(&mut world, soldier, "return", 40);
@@ -8952,7 +9780,11 @@ mod behavior_tests {
         // stopped there with nothing to fight is still watching, and the
         // order is not rewritten every pass.
         let unit = unit_of(&world, soldier);
-        assert!(matches!(unit.order.kind.as_str(), "attack_move" | "stop"), "{:?}", unit.order);
+        assert!(
+            matches!(unit.order.kind.as_str(), "attack_move" | "stop"),
+            "{:?}",
+            unit.order
+        );
         for _ in 0..20 {
             world.step();
         }
@@ -8972,13 +9804,26 @@ mod behavior_tests {
 
     #[test]
     fn any_explicit_order_clears_the_behavior() {
-        for kind in ["stop", "hold", "move", "attack_move", "attack", "queued move", "raid"] {
+        for kind in [
+            "stop",
+            "hold",
+            "move",
+            "attack_move",
+            "attack",
+            "queued move",
+            "raid",
+        ] {
             let mut world = arena();
             let soldier = spawned(&mut world, 0, "soldier", ARENA);
             let enemy = spawned(&mut world, 1, "soldier", at(500.0, 0.0));
-            world.execute(&order(vec![soldier], "harass", at(300.0, 0.0))).unwrap();
-            let mut explicit =
-                order(vec![soldier], kind.trim_start_matches("queued "), at(100.0, 50.0));
+            world
+                .execute(&order(vec![soldier], "harass", at(300.0, 0.0)))
+                .unwrap();
+            let mut explicit = order(
+                vec![soldier],
+                kind.trim_start_matches("queued "),
+                at(100.0, 50.0),
+            );
             explicit.queued = kind.starts_with("queued");
             explicit.order.target = enemy;
             world.execute(&explicit).unwrap();
@@ -8997,7 +9842,11 @@ mod behavior_tests {
             for _ in 0..10 {
                 world.step();
             }
-            assert_eq!(unit_of(&world, soldier).behavior, None, "{kind} stays cleared");
+            assert_eq!(
+                unit_of(&world, soldier).behavior,
+                None,
+                "{kind} stays cleared"
+            );
         }
     }
 
@@ -9024,12 +9873,16 @@ mod behavior_tests {
             (vec![outpost], "outpost"),
             (vec![soldier, worker], "mixed selection"),
         ] {
-            let error = world.execute(&order(units, "harass", at(200.0, 0.0))).unwrap_err();
+            let error = world
+                .execute(&order(units, "harass", at(200.0, 0.0)))
+                .unwrap_err();
             assert!(error.contains("Only army units"), "{label}: {error}");
         }
         assert!(world.units.iter().all(|unit| unit.behavior.is_none()));
         // Off the map is refused like any other destination.
-        assert!(world.validate(&order(vec![soldier], "raid", (5.0, 5.0))).is_err());
+        assert!(world
+            .validate(&order(vec![soldier], "raid", (5.0, 5.0)))
+            .is_err());
     }
 
     #[test]
@@ -9043,7 +9896,9 @@ mod behavior_tests {
                 unit_mut(&mut world, id).hp = 10_000;
                 unit_mut(&mut world, id).max_hp = 10_000;
             }
-            world.execute(&order(vec![soldier], kind, at(300.0, 0.0))).unwrap();
+            world
+                .execute(&order(vec![soldier], kind, at(300.0, 0.0)))
+                .unwrap();
             world.step();
             let expected = if prefers_labour { labour } else { fighter };
             assert_eq!(unit_of(&world, soldier).order.target, expected, "{kind}");
@@ -9087,7 +9942,10 @@ mod behavior_tests {
                     }
                 }
             }
-            assert!(world.commands.iter().all(|command| command.status == "executed"));
+            assert!(world
+                .commands
+                .iter()
+                .all(|command| command.status == "executed"));
             (world, seen)
         };
         let (first, seen) = run();
@@ -9108,10 +9966,14 @@ mod behavior_tests {
     fn a_behavior_rally_starts_the_behavior_on_trained_army_not_on_labour() {
         let (mut world, barracks) = rally_world();
         let goal = at(0.0, 0.0);
-        world.execute(&order(vec![barracks], "rally_guard", goal)).unwrap();
+        world
+            .execute(&order(vec![barracks], "rally_guard", goal))
+            .unwrap();
         assert_eq!(unit_of(&world, barracks).order.kind, "rally_guard");
         world.balances.insert(0, Balance::new(1000, 1000));
-        world.execute(&order(vec![barracks], "train_soldier", (0.0, 0.0))).unwrap();
+        world
+            .execute(&order(vec![barracks], "train_soldier", (0.0, 0.0)))
+            .unwrap();
         let before = world.units.len();
         for _ in 0..600 {
             world.step();
@@ -9125,21 +9987,36 @@ mod behavior_tests {
         assert_eq!(running.preset, "guard");
         assert_eq!((running.goal_x, running.goal_y), goal);
         // Anchored beside the nearest completed hub, as an issued order would.
-        let hub = world.units.iter().find(|unit| unit.owner == 0 && unit.kind == "hq").unwrap();
+        let hub = world
+            .units
+            .iter()
+            .find(|unit| unit.owner == 0 && unit.kind == "hq")
+            .unwrap();
         assert!(distance(running.home_x, running.home_y, hub.x, hub.y) < 200.0);
         assert!(unit_of(&world, barracks).behavior.is_none());
 
         // Labour from the same kind of rally gets a plain move, no behavior.
         let mut world = arena();
-        let hq = world.units.iter().find(|unit| unit.owner == 0 && unit.kind == "hq").unwrap().id;
+        let hq = world
+            .units
+            .iter()
+            .find(|unit| unit.owner == 0 && unit.kind == "hq")
+            .unwrap()
+            .id;
         world.execute(&order(vec![hq], "rally_raid", goal)).unwrap();
         world.balances.insert(0, Balance::new(1000, 1000));
-        world.execute(&order(vec![hq], "train_worker", (0.0, 0.0))).unwrap();
+        world
+            .execute(&order(vec![hq], "train_worker", (0.0, 0.0)))
+            .unwrap();
         while !world.units.iter().any(|unit| unit.kind == "worker") {
             world.step();
             assert!(world.tick < 3000, "the worker was never trained");
         }
-        let worker = world.units.iter().find(|unit| unit.kind == "worker").unwrap();
+        let worker = world
+            .units
+            .iter()
+            .find(|unit| unit.kind == "worker")
+            .unwrap();
         assert!(worker.behavior.is_none());
         assert_eq!(worker.order.kind, "move");
     }
@@ -9147,7 +10024,12 @@ mod behavior_tests {
     #[test]
     fn behavior_rally_validation_mirrors_rally_move() {
         let (mut world, barracks) = rally_world();
-        let hq = world.units.iter().find(|unit| unit.owner == 0 && unit.kind == "hq").unwrap().id;
+        let hq = world
+            .units
+            .iter()
+            .find(|unit| unit.owner == 0 && unit.kind == "hq")
+            .unwrap()
+            .id;
         let soldier = spawned(&mut world, 0, "soldier", at(50.0, 50.0));
         for kind in ["rally_move", "rally_harass", "rally_guard", "rally_raid"] {
             let ok = order(vec![barracks], kind, at(100.0, 0.0));
@@ -9158,14 +10040,250 @@ mod behavior_tests {
             let two = order(vec![barracks, hq], kind, at(100.0, 0.0));
             assert!(world.validate(&two).is_err(), "{kind} two producers");
             let not_producer = order(vec![soldier], kind, at(100.0, 0.0));
-            assert!(world.validate(&not_producer).is_err(), "{kind} non-producer");
+            assert!(
+                world.validate(&not_producer).is_err(),
+                "{kind} non-producer"
+            );
             let off_map = order(vec![barracks], kind, (-50.0, -50.0));
             assert!(world.validate(&off_map).is_err(), "{kind} off map");
         }
-        assert!(world.validate(&order(vec![barracks], "rally_bogus", at(0.0, 0.0))).is_err());
+        assert!(world
+            .validate(&order(vec![barracks], "rally_bogus", at(0.0, 0.0)))
+            .is_err());
         // clear_rally clears a behavior rally.
-        world.execute(&order(vec![barracks], "rally_guard", at(0.0, 0.0))).unwrap();
-        world.execute(&order(vec![barracks], "clear_rally", (0.0, 0.0))).unwrap();
+        world
+            .execute(&order(vec![barracks], "rally_guard", at(0.0, 0.0)))
+            .unwrap();
+        world
+            .execute(&order(vec![barracks], "clear_rally", (0.0, 0.0)))
+            .unwrap();
         assert_eq!(unit_of(&world, barracks).order.kind, "stop");
+    }
+}
+
+#[cfg(test)]
+mod stance_tests {
+    use super::*;
+
+    const ARENA: (f32, f32) = (1100.0, 520.0);
+
+    fn arena() -> World {
+        let mut world = World::new_on_with_factions(
+            crate::maps::default_map(),
+            &[(0, Faction::Industrial), (1, Faction::Industrial)],
+        );
+        world.units.clear();
+        world.spawn(0, "hq", 200.0, 1300.0);
+        world.spawn(1, "hq", 1400.0, 1400.0);
+        world.tick = 1000;
+        world
+    }
+
+    fn spawned(world: &mut World, owner: u8, kind: &str, dx: f32) -> u32 {
+        world.spawn(owner, kind, ARENA.0 + dx, ARENA.1);
+        world.units.last().unwrap().id
+    }
+
+    fn unit_mut(world: &mut World, id: u32) -> &mut Entity {
+        world.units.iter_mut().find(|unit| unit.id == id).unwrap()
+    }
+
+    fn x_of(world: &World, id: u32) -> f32 {
+        world.units.iter().find(|unit| unit.id == id).unwrap().x
+    }
+
+    fn tough(world: &mut World, id: u32) {
+        let unit = unit_mut(world, id);
+        unit.hp = 100_000;
+        unit.max_hp = 100_000;
+        unit.max_shields = 0;
+        unit.shields = 0;
+    }
+
+    fn order(units: Vec<u32>, kind: &str, dx: f32) -> Command {
+        Command {
+            id: 1,
+            owner: 0,
+            units,
+            order: Order {
+                kind: kind.into(),
+                x: ARENA.0 + dx,
+                y: ARENA.1,
+                target: 0,
+            },
+            queued: false,
+            execute_tick: 0,
+            status: "scheduled".into(),
+            reason: String::new(),
+        }
+    }
+
+    /// A unit of `kind` at the arena origin attack-moving east past an idle,
+    /// invulnerable `target_kind` `gap` units ahead.
+    fn setup(kind: &str, stance: Stance, target_kind: &str, gap: f32) -> (World, u32, u32) {
+        let mut world = arena();
+        world.stances.insert((0, kind.into()), stance);
+        let unit = spawned(&mut world, 0, kind, 0.0);
+        let target = spawned(&mut world, 1, target_kind, gap);
+        tough(&mut world, unit);
+        tough(&mut world, target);
+        world
+            .execute(&order(vec![unit], "attack_move", 400.0))
+            .unwrap();
+        (world, unit, target)
+    }
+
+    #[test]
+    fn defaults_per_kind() {
+        for kind in ["marksman", "lancer", "spitter"] {
+            assert_eq!(default_stance(kind), Stance::Kite, "{kind}");
+        }
+        for kind in ["bulwark", "behemoth", "crusher"] {
+            assert_eq!(default_stance(kind), Stance::Charge, "{kind}");
+        }
+        for kind in crate::ARMY_KINDS {
+            if ![
+                "marksman", "lancer", "spitter", "bulwark", "behemoth", "crusher",
+            ]
+            .contains(&kind)
+            {
+                assert_eq!(default_stance(kind), Stance::Standard, "{kind}");
+            }
+        }
+    }
+
+    #[test]
+    fn charge_closes_nearer_than_standard() {
+        let settle = |stance| {
+            let (mut world, unit, target) = setup("soldier", stance, "worker", 160.0);
+            for _ in 0..60 {
+                world.step();
+            }
+            x_of(&world, target) - x_of(&world, unit)
+        };
+        let standard = settle(Stance::Standard);
+        let charge = settle(Stance::Charge);
+        assert!((standard - 105.0 * 0.9).abs() < 8.0, "standard {standard}");
+        assert!(
+            (charge - 105.0 * CHARGE_RANGE_PERCENT).abs() < 8.0,
+            "charge {charge}"
+        );
+    }
+
+    #[test]
+    fn kite_steps_away_while_reloading_and_advances_when_ready() {
+        // Marksman range 170: 100 away is under the 80% (136) trigger.
+        let (mut world, unit, _) = setup("marksman", Stance::Kite, "soldier", 100.0);
+        unit_mut(&mut world, unit).next_attack = world.tick + 50;
+        let before = x_of(&world, unit);
+        world.step();
+        assert!(x_of(&world, unit) < before - 1.0, "backed off");
+        // Ready to fire: no retreat from inside standard range.
+        let (mut world, unit, _) = setup("marksman", Stance::Kite, "soldier", 100.0);
+        unit_mut(&mut world, unit).next_attack = 0;
+        let before = x_of(&world, unit);
+        world.step();
+        assert!((x_of(&world, unit) - before).abs() < 0.01, "stood to fire");
+        // Out of range it still closes, reloading or not.
+        let (mut world, unit, _) = setup("marksman", Stance::Kite, "soldier", 170.0);
+        unit_mut(&mut world, unit).next_attack = world.tick + 50;
+        let before = x_of(&world, unit);
+        world.step();
+        assert!(x_of(&world, unit) > before + 1.0, "advanced");
+        // Standard stance never backs off.
+        let (mut world, unit, _) = setup("marksman", Stance::Standard, "soldier", 100.0);
+        unit_mut(&mut world, unit).next_attack = world.tick + 50;
+        let before = x_of(&world, unit);
+        world.step();
+        assert!(x_of(&world, unit) >= before - 0.01);
+    }
+
+    #[test]
+    fn kite_does_not_back_off_from_an_unarmed_target() {
+        let (mut world, unit, _) = setup("marksman", Stance::Kite, "worker", 100.0);
+        unit_mut(&mut world, unit).next_attack = world.tick + 50;
+        let before = x_of(&world, unit);
+        world.step();
+        assert!(x_of(&world, unit) >= before - 0.01);
+    }
+
+    #[test]
+    fn kite_does_nothing_on_a_move_order() {
+        let mut world = arena();
+        let unit = spawned(&mut world, 0, "marksman", 0.0);
+        let enemy = spawned(&mut world, 1, "soldier", 60.0);
+        tough(&mut world, unit);
+        tough(&mut world, enemy);
+        world.execute(&order(vec![unit], "move", 300.0)).unwrap();
+        unit_mut(&mut world, unit).next_attack = world.tick + 50;
+        let before = x_of(&world, unit);
+        world.step();
+        assert!(
+            x_of(&world, unit) > before + 1.0,
+            "walked on regardless of stance"
+        );
+    }
+
+    #[test]
+    fn hold_ground_never_walks_toward_a_target_but_walks_the_path_without_one() {
+        // Soldier range 105, acquires out to 180.
+        let (mut world, unit, _) = setup("soldier", Stance::HoldGround, "worker", 150.0);
+        let before = x_of(&world, unit);
+        for _ in 0..20 {
+            world.step();
+        }
+        assert!((x_of(&world, unit) - before).abs() < 0.01, "stood still");
+        let mut world = arena();
+        world
+            .stances
+            .insert((0, "soldier".into()), Stance::HoldGround);
+        let unit = spawned(&mut world, 0, "soldier", 0.0);
+        world
+            .execute(&order(vec![unit], "attack_move", 400.0))
+            .unwrap();
+        let before = x_of(&world, unit);
+        for _ in 0..20 {
+            world.step();
+        }
+        assert!(x_of(&world, unit) > before + 20.0, "kept walking the path");
+    }
+
+    #[test]
+    fn setting_a_stance_is_a_validated_free_command() {
+        let mut world = arena();
+        let hq = world.units[0].id;
+        let funds = world.balances[&0];
+        world
+            .execute(&order(vec![hq], "stance_marksman_standard", 0.0))
+            .unwrap();
+        assert_eq!(world.stance_of(0, "marksman"), Stance::Standard);
+        assert_eq!(world.stances.len(), 1);
+        assert_eq!(world.balances[&0], funds, "free");
+        // Back to the default drops the row.
+        world
+            .execute(&order(vec![hq], "stance_marksman_kite", 0.0))
+            .unwrap();
+        assert!(world.stances.is_empty());
+        world
+            .execute(&order(vec![hq], "stance_soldier_hold_ground", 0.0))
+            .unwrap();
+        assert_eq!(world.stance_of(0, "soldier"), Stance::HoldGround);
+        assert_eq!(
+            world.stance_of(1, "soldier"),
+            Stance::Standard,
+            "per player"
+        );
+        for bad in [
+            "stance_marksman_dance",
+            "stance_lancer_kite",
+            "stance_worker_charge",
+            "stance_hq_charge",
+            "stance_kite",
+        ] {
+            assert!(world.validate(&order(vec![hq], bad, 0.0)).is_err(), "{bad}");
+        }
+        let mut other = order(vec![hq], "stance_soldier_charge", 0.0);
+        other.owner = 1;
+        assert!(world.validate(&other).is_err(), "not the owner's unit");
     }
 }

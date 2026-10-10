@@ -111,7 +111,7 @@ export class Practice {
     if (this.starting || this.thinking || !this.bot.ready || !this.bot.matchReady) return;
     this.thinking = true;
     try {
-      const { room, me, units, nodes, commands, creep } = this.bot.snapshot;
+      const { room, me, units, nodes, commands, creep, missions } = this.bot.snapshot;
       if (!room || !me) return;
       if (this.human.ready && this.human.snapshot.me && this.human.snapshot.room?.id !== room.id) {
         await this.bot.act(connection => connection.reducers.leaveRoom({}));
@@ -146,7 +146,7 @@ export class Practice {
       const decide = async () => {
         const busy = new Set(commands.filter(command => command.owner === me.slot && command.status === "scheduled").flatMap(command => command.units));
         for (const pending of this.bot.pending.values()) for (const id of pending.units) busy.add(id);
-        for (const decision of chooseOrders(me.slot, factionOf(me.faction), { material: me.material, catalyst: me.catalyst, terrazine: me.terrazine, research: me.research }, units, nodes, busy, room.tick < PRACTICE_FIRST_PUSH_TICK, { tick: room.tick, creep })) await this.bot.order(decision.units, decision.order);
+        for (const decision of chooseOrders(me.slot, factionOf(me.faction), { material: me.material, catalyst: me.catalyst, terrazine: me.terrazine, research: me.research }, units, nodes, busy, room.tick < PRACTICE_FIRST_PUSH_TICK, { tick: room.tick, creep }, missions)) await this.bot.order(decision.units, decision.order);
       };
       if (navigator.locks) await navigator.locks.request(`practice-ai:${this.activeKey}`, { ifAvailable: true }, async lock => { if (lock) await decide(); });
       else await decide();

@@ -18,6 +18,9 @@ export const UNIT_KEYS = {
   harass: "j",
   guard: "k",
   raid: "n",
+  // Rush and Gather then strike: M is the last letter no unit, train or build key uses, so Gather takes the comma.
+  rush: "m",
+  gather: ",",
 } as const;
 
 /**
@@ -26,7 +29,7 @@ export const UNIT_KEYS = {
  */
 export const TRAIN_KEYS = ["q", "w", "e", "r", "d", "z", "x"] as const;
 /** Pressed after B, in the order the build buttons are shown. */
-export const BUILD_KEYS = ["q", "w", "e", "r", "t", "y", "u", "i"] as const;
+export const BUILD_KEYS = ["q", "w", "e", "r", "t", "y", "u", "i", "p"] as const;
 export const BUILD_MENU_KEY = "b";
 /**
  * Operations (src/operations.ts), both buttons of the Strategy panel and live from anywhere:

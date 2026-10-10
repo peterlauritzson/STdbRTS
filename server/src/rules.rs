@@ -1,8 +1,10 @@
 pub mod behavior;
+pub mod doctrine;
 pub mod maps;
+pub mod mission;
 pub mod navigation;
-pub mod spatial;
 pub mod simulation;
+pub mod spatial;
 
 /// Identity of the frozen rules surface. Bump this whenever anything a running
 /// match depends on changes: unit stats, costs, damage rules, production
@@ -10,7 +12,7 @@ pub mod simulation;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 21;
+pub const RULESET_VERSION: u32 = 24;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -332,6 +334,20 @@ pub const FACTION_DEFENSE_TERRAZINE_COST: u32 = 125;
 pub const REFINERY_MATERIAL_COST: u32 = 75;
 /// Material price of an outpost (a mineral hub and town hall).
 pub const OUTPOST_MATERIAL_COST: u32 = 300;
+/// Material price of a synthesizer. **Experimental.**
+pub const SYNTHESIZER_MATERIAL_COST: u32 = 300;
+/// Tier a player must own before placing a synthesizer. **Experimental.**
+pub const SYNTHESIZER_TIER: u8 = 2;
+/// Material a finished synthesizer burns per second (every
+/// `TICKS_PER_SECOND` ticks). **Experimental.**
+pub const SYNTH_MATERIAL_PER_SECOND: u32 = 4;
+/// Catalyst or terrazine a finished synthesizer makes per second from
+/// `SYNTH_MATERIAL_PER_SECOND` material: whichever of the two the owner holds
+/// less of, catalyst on a tie. **Experimental.**
+pub const SYNTH_OUTPUT_PER_SECOND: u32 = 1;
+/// A synthesizer only runs while the owner's material is above this, so it
+/// never starves building. **Experimental.**
+pub const SYNTH_RESERVE: u32 = 300;
 
 /// What every player starts a match holding.
 pub const STARTING_BALANCE: Balance = Balance::new(250, STARTING_CATALYST);
@@ -520,6 +536,7 @@ pub fn is_building(kind: &str) -> bool {
             | "bunker"
             | "bastion"
             | "spine"
+            | "synthesizer"
     )
 }
 
@@ -588,6 +605,63 @@ pub fn army_faction(kind: &str) -> Option<Faction> {
         }
         _ => None,
     }
+}
+
+/// How an army kind fights once it has a target on an `attack_move`. Chosen per
+/// player per kind; see `World::stance_of`. Every number is **experimental**.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Stance {
+    /// Close to 90% of weapon range and fire.
+    Standard,
+    /// Close to [`CHARGE_RANGE_PERCENT`] of weapon range.
+    Charge,
+    /// Step away while reloading from a closer, armed target.
+    Kite,
+    /// Never walk towards a target; fire at what is in range.
+    HoldGround,
+}
+
+impl Stance {
+    pub const ALL: [Stance; 4] = [Self::Standard, Self::Charge, Self::Kite, Self::HoldGround];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Charge => "charge",
+            Self::Kite => "kite",
+            Self::HoldGround => "hold_ground",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|stance| stance.as_str() == name)
+    }
+}
+
+/// A charging unit closes to this share of its weapon range.
+pub const CHARGE_RANGE_PERCENT: f32 = 0.4;
+/// A kiting unit backs off while reloading when the target is nearer than this
+/// share of its weapon range.
+pub const KITE_TRIGGER_PERCENT: f32 = 0.8;
+
+/// The stance a kind fights in until its owner chooses otherwise.
+pub fn default_stance(kind: &str) -> Stance {
+    match kind {
+        "marksman" | "lancer" | "spitter" => Stance::Kite,
+        "bulwark" | "behemoth" | "crusher" => Stance::Charge,
+        _ => Stance::Standard,
+    }
+}
+
+/// Splits a `stance_<kind>_<stance>` order kind into its parts, or `None` when
+/// it is not one or the stance is unknown. The kind is not checked here.
+pub fn parse_stance_order(order: &str) -> Option<(&str, Stance)> {
+    let rest = order.strip_prefix("stance_")?;
+    Stance::ALL.into_iter().find_map(|stance| {
+        rest.strip_suffix(stance.as_str())
+            .and_then(|kind| kind.strip_suffix('_'))
+            .map(|kind| (kind, stance))
+    })
 }
 
 /// The faction any trainable unit belongs to: labour or army.
@@ -836,8 +910,64 @@ pub fn producer(kind: &str, building: &str, faction: Faction) -> bool {
 // queues anything. Every number is **experimental** (DECISIONS.md, N2).
 
 /// Material price of each of the three technologies (weapons, armour,
-/// logistics).
+/// logistics) at level 1.
 pub const RESEARCH_COST: u32 = 150;
+/// Material price of weapons and armour at levels 1, 2 and 3. **Experimental.**
+pub const LEVELED_RESEARCH_COSTS: [u32; 3] = [RESEARCH_COST, 400, 800];
+/// Weapons damage per level. **Experimental.**
+pub const WEAPONS_DAMAGE_PER_LEVEL: i32 = 4;
+/// Armour per level. **Experimental.**
+pub const ARMOUR_PER_LEVEL: i32 = 3;
+
+/// The highest level of a leveled technology (`research_weapons`,
+/// `research_armor`); 1 for every other research kind.
+pub fn max_research_level(kind: &str) -> u8 {
+    if matches!(kind, "research_weapons" | "research_armor") {
+        3
+    } else {
+        1
+    }
+}
+
+/// The research-list entry that records `level` of `kind`: the kind itself for
+/// level 1 (so saved data stays valid), `kind_2`, `kind_3` after.
+pub fn research_key(kind: &str, level: u8) -> String {
+    if level <= 1 {
+        kind.to_string()
+    } else {
+        format!("{kind}_{level}")
+    }
+}
+
+/// The level of `kind` a research list holds: 0 with none.
+pub fn research_level(research: &[String], kind: &str) -> u8 {
+    (1..=max_research_level(kind))
+        .take_while(|level| {
+            research
+                .iter()
+                .any(|item| *item == research_key(kind, *level))
+        })
+        .count() as u8
+}
+
+/// Material price of `kind` at `level`.
+pub fn research_cost_at(kind: &str, level: u8) -> u32 {
+    if max_research_level(kind) > 1 {
+        LEVELED_RESEARCH_COSTS[(level.clamp(1, 3) - 1) as usize]
+    } else {
+        RESEARCH_COST
+    }
+}
+
+/// The tier a player must own to buy `level` of a leveled technology: level 2
+/// needs tier 2, level 3 needs tier 3.
+pub fn research_level_tier(level: u8) -> u8 {
+    if level >= 2 {
+        level
+    } else {
+        0
+    }
+}
 /// Material price of tier 1, Mobilisation.
 pub const TIER_1_COST: u32 = 300;
 /// Material price of tier 2, Escalation.
@@ -1064,7 +1194,7 @@ pub fn stats(kind: &str) -> Option<Stats> {
             training_ticks: 0,
         }),
         "barracks" | "factory" | "turret" | "bunker" | "bastion" | "spine" | "outpost" | "lab"
-        | "sensor" | "relay" | "tumor" | "refinery" => {
+        | "sensor" | "relay" | "tumor" | "refinery" | "synthesizer" => {
             let (hp, cost, training_ticks) = match kind {
                 "barracks" => (700, Cost::material(150), 160),
                 "factory" => (900, Cost::material(250), 240),
@@ -1098,6 +1228,9 @@ pub fn stats(kind: &str) -> Option<Stats> {
                 // time, a creep source of radius 250. It cannot shoot, produce
                 // or receive cargo.
                 "tumor" => (250, Cost::material(75), 100),
+                // The late-game outlet for surplus material: converts it into
+                // catalyst or terrazine (see `SYNTH_*`). Needs tier 2.
+                "synthesizer" => (600, Cost::material(SYNTHESIZER_MATERIAL_COST), 200),
                 _ => (650, Cost::material(200), 200),
             };
             Some(Stats {
@@ -2432,7 +2565,10 @@ const ZONE_BUCKET_THRESHOLD: usize = 16;
 const ZONE_BUCKET_MAX_RADIUS: f32 = 2048.0;
 
 fn zone_bucket(x: f32, y: f32) -> (i32, i32) {
-    ((x / ZONE_BUCKET).floor() as i32, (y / ZONE_BUCKET).floor() as i32)
+    (
+        (x / ZONE_BUCKET).floor() as i32,
+        (y / ZONE_BUCKET).floor() as i32,
+    )
 }
 
 impl ZoneField {
@@ -2755,11 +2891,29 @@ mod tests {
                 1 => power_field(),
                 _ => creep_zone(),
             };
-            let radius = if source % 3 == 2 { next() * 300.0 } else { template.radius };
-            zones.push(Zone { source, owner, x, y, radius, template });
+            let radius = if source % 3 == 2 {
+                next() * 300.0
+            } else {
+                template.radius
+            };
+            zones.push(Zone {
+                source,
+                owner,
+                x,
+                y,
+                radius,
+                template,
+            });
         }
         let bucketed = ZoneField::from_sources(zones.into_iter());
-        assert!(bucketed.by_area.iter().filter(|slot| slot.is_some()).count() >= 3);
+        assert!(
+            bucketed
+                .by_area
+                .iter()
+                .filter(|slot| slot.is_some())
+                .count()
+                >= 3
+        );
         let mut linear = bucketed.clone();
         linear.by_area = Default::default();
         for _ in 0..20_000 {
@@ -2771,7 +2925,10 @@ mod tests {
                         linear.movement_multiplier(subject, kind, x, y).to_bits()
                     );
                 }
-                assert_eq!(bucketed.powered(subject, x, y), linear.powered(subject, x, y));
+                assert_eq!(
+                    bucketed.powered(subject, x, y),
+                    linear.powered(subject, x, y)
+                );
                 assert_eq!(
                     bucketed.spawns_on_death(subject, x, y),
                     linear.spawns_on_death(subject, x, y)
@@ -3245,7 +3402,7 @@ mod tests {
         // base income. 15: unit cap 400 and building cap 150, and routes from
         // shared breadth-first fields (equally short routes may tie-break
         // differently from the old per-unit A*).
-        assert_eq!(RULESET_VERSION, 21);
+        assert_eq!(RULESET_VERSION, 24);
         assert!(RULESET_VERSION > 0);
     }
 
@@ -3273,6 +3430,7 @@ mod tests {
             ("relay", 75, 0, 0),
             ("tumor", 75, 0, 0),
             ("refinery", 75, 0, 0),
+            ("synthesizer", 300, 0, 0),
             ("research_weapons", 150, 0, 0),
             ("research_armor", 150, 0, 0),
             ("research_logistics", 150, 0, 0),
@@ -3318,6 +3476,7 @@ mod tests {
             "relay",
             "tumor",
             "refinery",
+            "synthesizer",
             "research_weapons",
             "research_armor",
             "research_logistics",
@@ -3354,6 +3513,7 @@ mod tests {
             ("turret", 500, 140),
             ("outpost", 650, 120),
             ("lab", 650, 200),
+            ("synthesizer", 600, 200),
             ("sensor", 450, 140),
             ("tumor", 250, 100),
             ("research_weapons", 0, 0),

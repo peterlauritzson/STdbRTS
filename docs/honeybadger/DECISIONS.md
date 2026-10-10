@@ -864,3 +864,69 @@ staffing too slowly for fast reinforcement (then a server-side rally mission).
 **Would overturn it.** Organic expansion proving too cheap (raise the tumor's
 price or require creep to place it), or the practice AI starving behind a 300
 outpost (then lower it again).
+
+---
+
+## 2026-10-09 - Leveled weapons and armour, the synthesizer, less material
+
+**Decision.** All three are **experimental**.
+
+- **Weapons and Armour have levels 1-3.** The order kinds are unchanged
+  (`research_weapons`, `research_armor`); the server buys the next level and
+  stores `research_weapons`, `research_weapons_2`, `research_weapons_3` (same
+  for armour), so old saved lists still read as level 1. Material 150 / 400 /
+  800. Level 2 needs tier 2, level 3 needs tier 3 ("Requires Tier N"), which
+  gives tier 3 a purpose. Effects are per level: +4 damage and 3 armour each.
+  Logistics stays one level. The client shows the next level and price, the tier
+  tag while gated, and "max" at level 3; pending spend prices queued purchases
+  level by level.
+- **New building, the synthesizer ("synthesizer").** All factions, 600 hp, 300
+  material, 200 build ticks, needs tier 2 to place. While finished it converts
+  `SYNTH_MATERIAL_PER_SECOND` 4 material per second into
+  `SYNTH_OUTPUT_PER_SECOND` 1 of whichever of catalyst or terrazine the owner
+  holds less of (catalyst on a tie), once every `TICKS_PER_SECOND` ticks, only
+  while material is above `SYNTH_RESERVE` 300. Not a hub, drop-off, producer or
+  territory source; no victory weight. Synthesized income is not "mined": it
+  does not touch `collected` or the terrazine by-product. Build key P.
+- **Material patches x0.75** (rounded to 50) in every map, versions bumped
+  (skirmish 3, the rest 2); catalyst deposits unchanged. Map hashes re-pinned.
+- `RULESET_VERSION` 21 -> 22. No schema change.
+
+**Why.** Late game left players on ~50k material with nothing to buy while
+catalyst and terrazine ran dry. Leveled research and the synthesizer give
+material a late sink without breaking "one currency per purpose" (the
+synthesizer is slow: 4:1 and one per second per building). Fewer patches'
+worth of material makes the surplus smaller to begin with.
+
+**Would overturn it.** Material still piling up unspent (raise the rate or
+lower the reserve), synthesizers making catalyst/terrazine mining irrelevant
+(worsen the ratio or cap the count), or tier 3 gating feeling like a tax rather
+than a goal.
+
+---
+
+## 2026-10-09 - Combat stances (strategy layer 1)
+
+**Decision.** Per player and army kind, one of standard, charge (stop at 40% of range), kite (while reloading and an armed target is within 80% of range, step 40 units directly away if the spot is free) or hold ground (never advance on a target). Defaults: kite for marksman, lancer, spitter; charge for bulwark, behemoth, crusher; standard otherwise. Applies only to `attack_move` orders (missions included); idle units do not move when auto-acquiring, so nothing changes there. Stored in a new `stance` table (non-default rows only, additive); set by the free delayed command `stance_<kind>_<stance>`. `RULESET_VERSION` 22 -> 23. All numbers are **experimental**.
+
+**Why.** Gives players a cheap way to tell a kind how to fight without per-unit micro, as the first layer of [STRATEGY-LAYERS.md](STRATEGY-LAYERS.md). Stateless per tick, so no unit fields changed.
+
+**Would overturn it.** Kiting dominating fights (it is automatic micro for both sides: raise the trigger fraction, add a cooldown, or drop kite from defaults), charge being a pure loss, or players never opening the panel (then make defaults smarter).
+
+## 2026-10-09 - Missions move to the server; Rush and Gather then strike
+
+**Decision.** Missions (strategy layer 2, [STRATEGY-LAYERS.md](STRATEGY-LAYERS.md)) are now rows of an additive `mission` table, evaluated by the simulation once per second (every 20 ticks, `server/src/mission.rs`), so they staff with the tab closed. Commands `mission_new_<tactic>`, `mission_tactic_<tactic>`, `mission_size`, `mission_gather`, `mission_fallback`, `mission_rally`, `mission_cancel`, `mission_assign`. Two tactics added: Rush (new per-unit preset `assault`: attack-move, never retreats) and Gather then strike (gather -> strike -> fall back -> gather). Client staffing (`src/missions.ts`) and the localStorage persistence are removed. A member the player orders leaves its mission when that order executes; cast abilities do not release. Gather numbers are experimental: strike at 80% of target size at the rally (rest: at least 8 present), fall back below 40% of the strength at strike start, rally radius 250, rally default 65% from the nearest hub, fall back ends when all living members are within 250 of the rally or after 20 s. Limit 16 missions per player.
+
+**Why.** The 2026-10-06 entry named the tab-closed case as the reason to move server-side. The server knows exactly when a player order executes, which removes the client's guessing about who is player-controlled, and the same code can later serve the practice bot. The table is additive; the unit Behavior struct did not change.
+
+**Would overturn it.** Strike or fall back thrashing (retune thresholds or add hysteresis), the one-second pass staffing too slowly, or players wanting a per-mission retreat health. Deferred: that retreat-health knob (it needs a change to the unit Behavior struct) and the practice bot using missions.
+
+---
+
+## 2026-10-09 - Production doctrine (strategy layer 3)
+
+**Decision.** Per player, an opt-in server policy (`server/src/doctrine.rs`, one pass every 20 ticks): Auto-train queues one unit at each finished, idle barracks or factory, choosing the kind with the largest deficit against weights of 0 to 10 per army kind (default 5), skipping tier-locked kinds and keeping catalyst at or above a reserve (0 to 2000); Auto-tier and Auto-research buy the next tier, then Weapons/Armour (cheaper first, Weapons on a tie), then Logistics, at most one purchase per owner per pass. Everything is off by default. Queued units and purchases run through the same validation and execution as the manual `train_*`, `tier_*` and `research_*` commands. Stored in new additive tables `doctrine` and `doctrine_weight`; set by delayed commands `doctrine_train`, `doctrine_tier`, `doctrine_research`, `doctrine_reserve` and `doctrine_weight_<kind>`. `RULESET_VERSION` 23 -> 24. All numbers are **experimental**. Deferred: "add a production building when catalyst stays high" (belongs to the economy layer).
+
+**Why.** Third layer of [STRATEGY-LAYERS.md](STRATEGY-LAYERS.md): lets a player state a composition once instead of re-queueing units. Reusing the command path keeps cost, tier, unit-cap, rally and power-field rules from drifting apart from manual play.
+
+**Would overturn it.** Players never opening the panel, the deficit rule oscillating between kinds in a way that wastes build time, or the reserve being too blunt (then make it per building or time-based).

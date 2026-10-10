@@ -1,107 +1,93 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { allocate, behaviorGoals, excessMembers, isOverridden, missionLabel, parse, recruitPool, serialize, type Mission, type MissionUnit } from "../src/missions";
+import type { MissionRow } from "../src/bindings/types";
+import { TACTIC_IDS, gatherNeeded, gatherRadius, memberActivities, missionActivity, TACTICS, clampPercent, clampSize, missionAt, missionGoals, missionLabel, missionOrders, ownMissions, type Mission } from "../src/missions";
 
-let next = 1;
-const unit = (x: number, y: number, extra: Partial<MissionUnit> = {}): MissionUnit => ({ id: next++, owner: 0, kind: "soldier", x, y, order: { kind: "stop" }, ...extra });
-const mission = (id: number, kind: Mission["kind"], x: number, y: number, size: Mission["size"], members: number[] = []): Mission => ({ id, kind, x, y, size, members: new Set(members) });
-const none = new Set<number>();
+// Staffing, release, shrink and the gather state machine live on the server
+// (server/src/mission.rs, with Rust tests). What is left here is how the client
+// reads the rows, labels them and builds their commands.
 
-test("pool: idle army only; labour, buildings, enemies, members, controlled and busy units are left out", () => {
-  const idle = unit(0, 0), moving = unit(0, 0, { order: { kind: "move" } }), worker = unit(0, 0, { kind: "worker" }), enemy = unit(0, 0, { owner: 1 });
-  const member = unit(0, 0), controlled = unit(0, 0), busy = unit(0, 0), running = unit(0, 0, { behavior: "raid" }), hq = unit(0, 0, { kind: "hq" });
-  const pool = recruitPool([idle, moving, worker, enemy, member, controlled, busy, running, hq], 0, { assigned: new Set([member.id]), controlled: new Set([controlled.id]), fresh: none, busy: new Set([busy.id]) });
-  assert.deepEqual(pool.map(entry => entry.id), [idle.id]);
+const row = (extra: Partial<MissionRow> = {}): MissionRow => ({
+  key: 1n, matchId: 1n, id: 1, owner: 0, tactic: "harass", x: 100, y: 200, size: 4, state: "",
+  stateTick: 0n, rallyX: 60, rallyY: 120, gatherPercent: 80, fallbackPercent: 40, strikeStrength: 0, members: [7, 8, 9], ...extra,
+});
+const mission = (extra: Partial<Mission> = {}): Mission => ({
+  id: 1, tactic: "harass", x: 100, y: 200, size: 4, state: "", rally: { x: 60, y: 120 }, gatherPercent: 80, fallbackPercent: 40, members: new Set([7, 8, 9]), ...extra,
 });
 
-test("pool: a brand-new unit walking to its rally is recruitable, an old one on a player's move is not", () => {
-  const spawned = unit(0, 0, { order: { kind: "move" } }), ordered = unit(0, 0, { order: { kind: "move" } });
-  const pool = recruitPool([spawned, ordered], 0, { assigned: none, controlled: none, fresh: new Set([spawned.id]), busy: none });
-  assert.deepEqual(pool.map(entry => entry.id), [spawned.id]);
+test("own missions: only mine, in creation order, -1 reads as rest, unknown tactics are skipped", () => {
+  const list = ownMissions([row({ id: 3, owner: 0 }), row({ id: 2, owner: 1 }), row({ id: 1, size: -1, tactic: "raid" }), row({ id: 4, tactic: "bogus" })], 0);
+  assert.deepEqual(list.map(entry => entry.id), [1, 3]);
+  assert.equal(list[0].size, "rest");
+  assert.deepEqual([...list[1].members], [7, 8, 9]);
+  assert.deepEqual(ownMissions([row()], undefined), []);
 });
 
-test("allocation: numeric missions in creation order, nearest units first, up to their size", () => {
-  const near = unit(100, 100), mid = unit(500, 500), far = unit(5000, 5000);
-  const first = mission(1, "harass", 0, 0, 2), second = mission(2, "guard", 5200, 5200, 1);
-  const result = allocate([first, second], [far, mid, near]);
-  assert.deepEqual(result, [{ missionId: 1, ids: [near.id, mid.id] }, { missionId: 2, ids: [far.id] }]);
+test("labels: numeric and rest missions, and the gather states", () => {
+  assert.equal(missionLabel(mission()), "HARASS 3/4");
+  assert.equal(missionLabel(mission({ tactic: "raid", size: "rest" })), "RAID 3");
+  assert.equal(missionLabel(mission({ tactic: "rush", size: "rest" })), "RUSH 3");
+  assert.equal(missionLabel(mission({ tactic: "gather", size: 8, state: "gather", members: new Set([1, 2, 3, 4, 5]) })), "GATHER 5/8");
+  assert.equal(missionLabel(mission({ tactic: "gather", size: "rest", state: "gather" })), "GATHER 3");
+  assert.equal(missionLabel(mission({ tactic: "gather", state: "strike", members: new Set([1, 2, 3, 4, 5, 6, 7]) })), "STRIKE 7");
+  assert.equal(missionLabel(mission({ tactic: "gather", state: "fallback" })), "FALL BACK");
+  assert.equal(missionLabel(mission({ tactic: "gather", state: "defend", members: new Set([1, 2, 3, 4, 5]) })), "DEFEND 5");
+  // Progress toward the strike: gathered over needed (80% of 8 = 7).
+  assert.equal(missionLabel(mission({ tactic: "gather", size: 8, state: "gather", members: new Set([1, 2, 3, 4, 5]) }), 3), "GATHER 3/7");
+  assert.equal(missionLabel(mission({ tactic: "gather", size: "rest", state: "gather" }), 2), "GATHER 2/8");
 });
 
-test("allocation: a partly staffed mission only asks for what it is missing; a full one asks for nothing", () => {
-  const a = unit(0, 0), b = unit(10, 10), c = unit(20, 20);
-  const result = allocate([mission(1, "harass", 0, 0, 3, [901, 902]), mission(2, "guard", 0, 0, 1, [903])], [a, b, c]);
-  assert.deepEqual(result, [{ missionId: 1, ids: [a.id] }]);
+test("gather radius scales with the members; needed follows size and share", () => {
+  assert.equal(gatherRadius(1), 250);
+  assert.equal(gatherRadius(12), 250);
+  assert.ok(Math.abs(gatherRadius(100) - 700) < 1e-9);
+  assert.equal(gatherNeeded({ size: 8, members: new Set(), gatherPercent: 80 }), 7);
+  assert.equal(gatherNeeded({ size: 1, members: new Set(), gatherPercent: 10 }), 1);
+  assert.equal(gatherNeeded({ size: "rest", members: new Set([1, 2, 3]), gatherPercent: 80 }), 8);
+  assert.equal(gatherNeeded({ size: "rest", members: new Set(Array.from({ length: 20 }, (_, i) => i)), gatherPercent: 80 }), 16);
 });
 
-test("allocation: a rest mission takes whatever the numeric ones left", () => {
-  const units = [unit(0, 0), unit(10, 0), unit(20, 0), unit(30, 0), unit(40, 0)];
-  const result = allocate([mission(1, "raid", 9000, 9000, "rest"), mission(2, "harass", 0, 0, 2)], units);
-  assert.deepEqual(result.find(entry => entry.missionId === 2)?.ids, [units[0].id, units[1].id]);
-  assert.deepEqual(result.find(entry => entry.missionId === 1)?.ids.sort(), [units[2].id, units[3].id, units[4].id].sort());
+test("roster activity: mission tactic, or the gather state; a strike's late joiners read Gather", () => {
+  assert.equal(missionActivity(mission({ tactic: "raid" })), "Hit & retreat");
+  assert.equal(missionActivity(mission({ tactic: "gather", state: "gather" }), "guard"), "Gather");
+  assert.equal(missionActivity(mission({ tactic: "gather", state: "strike" }), "assault"), "Strike");
+  assert.equal(missionActivity(mission({ tactic: "gather", state: "strike" }), "guard"), "Gather");
+  assert.equal(missionActivity(mission({ tactic: "gather", state: "defend" })), "Defend");
+  assert.equal(missionActivity(mission({ tactic: "gather", state: "fallback" })), "Fall back");
+  assert.deepEqual([...memberActivities([mission({ tactic: "rush", members: new Set([7]) })], [{ id: 7 }, { id: 8 }])], [[7, "Rush"]]);
 });
 
-test("allocation: several rest missions split the remainder evenly, each taking its nearest", () => {
-  const west = [unit(0, 0), unit(10, 0), unit(20, 0)], east = [unit(9000, 0), unit(9010, 0), unit(9020, 0)];
-  const result = allocate([mission(1, "raid", 0, 0, "rest"), mission(2, "raid", 9000, 0, "rest")], [...east, ...west]);
-  assert.deepEqual(result.find(entry => entry.missionId === 1)?.ids.sort(), west.map(entry => entry.id).sort());
-  assert.deepEqual(result.find(entry => entry.missionId === 2)?.ids.sort(), east.map(entry => entry.id).sort());
-  const odd = allocate([mission(1, "raid", 0, 0, "rest"), mission(2, "raid", 9000, 0, "rest")], [unit(1, 1), unit(2, 2), unit(3, 3)]);
-  assert.deepEqual(odd.map(entry => entry.ids.length), [2, 1], "ceil for the older mission, the rest for the next");
+test("tactics: five, raid keeps its id but reads Hit & retreat, defaults match the server", () => {
+  assert.deepEqual(TACTIC_IDS, ["harass", "guard", "raid", "rush", "gather"]);
+  assert.equal(TACTICS.raid.label, "Hit & retreat");
+  assert.deepEqual(TACTIC_IDS.map(id => TACTICS[id].defaultSize), [4, 6, "rest", "rest", "rest"]);
+  assert.equal(TACTICS.rush.preset, "assault");
 });
 
-test("allocation: no pool, no orders", () => {
-  assert.deepEqual(allocate([mission(1, "raid", 0, 0, "rest"), mission(2, "harass", 0, 0, 4)], []), []);
+test("goals: a gather mission is labelled by its rally while gathering and by its point while striking", () => {
+  assert.deepEqual(missionGoals(mission({ tactic: "gather", state: "gather" })), [{ preset: "guard", x: 60, y: 120 }]);
+  assert.deepEqual(missionGoals(mission({ tactic: "gather", state: "strike" })), [{ preset: "assault", x: 100, y: 200 }, { preset: "guard", x: 60, y: 120 }]);
+  assert.deepEqual(missionGoals(mission({ tactic: "guard" })), [{ preset: "guard", x: 100, y: 200 }]);
 });
 
-test("shrinking releases the farthest members only", () => {
-  const close = unit(10, 0), middle = unit(500, 0), far = unit(5000, 0);
-  const shrunk = mission(1, "guard", 0, 0, 1, [close.id, middle.id, far.id]);
-  const byId = new Map([close, middle, far].map(entry => [entry.id, entry]));
-  assert.deepEqual(excessMembers(shrunk, byId).sort(), [middle.id, far.id].sort());
-  assert.deepEqual(excessMembers(mission(2, "raid", 0, 0, "rest", [close.id]), byId), []);
-  assert.deepEqual(excessMembers(mission(3, "raid", 0, 0, 3, [close.id]), byId), []);
+test("click: the first mission within its radius", () => {
+  const list = [mission({ id: 1, x: 0, y: 0 }), mission({ id: 2, x: 500, y: 500 })];
+  assert.equal(missionAt(list, { x: 30, y: 30 })?.id, 1);
+  assert.equal(missionAt(list, { x: 500, y: 560 })?.id, 2);
+  assert.equal(missionAt(list, { x: 300, y: 300 }), undefined);
 });
 
-test("override: the player's own order frees a member, but not inside the grace window", () => {
-  const goal = mission(1, "raid", 1000, 1000, "rest");
-  const running = unit(0, 0, { behavior: "raid" });
-  assert.equal(isOverridden(running, goal, { preset: "raid", x: 1000, y: 1000 }, false), false);
-  const moved = unit(0, 0, { behavior: undefined, order: { kind: "move" } });
-  assert.equal(isOverridden(moved, goal, undefined, false), true);
-  assert.equal(isOverridden(moved, goal, undefined, true), false, "its order is still in the command delay");
-  const other = unit(0, 0, { behavior: "guard" });
-  assert.equal(isOverridden(other, goal, undefined, false), true, "a different preset");
-  assert.equal(isOverridden(running, goal, { preset: "raid", x: 4000, y: 1000 }, false), true, "same preset, new goal");
-  assert.equal(isOverridden(running, goal, undefined, false), false, "goal unknown: trust the preset");
-});
-
-test("goals come from the newest accepted behavior command naming the unit", () => {
-  const command = (id: bigint, kind: string, x: number, units: number[], status = "executed", owner = 0) => ({ id, owner, status, units, order: { kind, x, y: 0 } });
-  const goals = behaviorGoals([command(1n, "raid", 100, [7]), command(3n, "raid", 300, [7]), command(4n, "raid", 400, [7], "rejected"), command(5n, "move", 500, [7]), command(6n, "guard", 600, [8], "executed", 1)], 0);
-  assert.deepEqual(goals.get(7), { id: 3n, preset: "raid", x: 300, y: 0 });
-  assert.equal(goals.has(8), false, "another player's command");
-});
-
-test("labels: sized missions read members/size, rest missions just the count", () => {
-  assert.equal(missionLabel(mission(1, "harass", 0, 0, 4, [1, 2, 3])), "HARASS 3/4");
-  assert.equal(missionLabel(mission(2, "raid", 0, 0, "rest", [1, 2, 3, 4, 5, 6, 7])), "RAID 7");
-});
-
-test("missions survive a round trip through storage; garbage is dropped", () => {
-  const saved = serialize([mission(3, "guard", 12, 34, 6, [5, 6]), mission(4, "raid", 56, 78, "rest")], 5);
-  const loaded = parse(saved);
-  assert.equal(loaded.nextId, 5);
-  assert.deepEqual(loaded.missions.map(entry => [entry.id, entry.kind, entry.x, entry.y, entry.size, [...entry.members]]), [[3, "guard", 12, 34, 6, [5, 6]], [4, "raid", 56, 78, "rest", []]]);
-  assert.deepEqual(parse("not json"), { nextId: 1, missions: [] });
-  assert.deepEqual(parse(null), { nextId: 1, missions: [] });
-  assert.equal(parse(JSON.stringify({ nextId: 2, missions: [{ id: 1, kind: "dance", x: 0, y: 0 }, null] })).missions.length, 0);
-});
-
-test("allocation: a sized mission peels units off an 'all rest' mission after free units, nearest first; rest missions never take from the reserve", () => {
-  const free = unit(0, 0), raiderNear = unit(10, 10), raiderFar = unit(4000, 4000);
-  const raid = mission(1, "raid", 9000, 9000, "rest", [raiderNear.id, raiderFar.id]);
-  const guard = mission(2, "guard", 0, 0, 2);
-  assert.deepEqual(allocate([raid, guard], [free], [raiderNear, raiderFar]), [{ missionId: 2, ids: [free.id, raiderNear.id] }]);
-  // With no sized mission short of units, the reserve stays where it is.
-  assert.deepEqual(allocate([raid], [], [raiderNear, raiderFar]), []);
+test("commands: kinds, the mission in target, rest as -1, knobs clamped to 10..100", () => {
+  assert.deepEqual(missionOrders.create("gather", { x: 100, y: 200 }), { kind: "mission_new_gather", x: 100, y: 200, target: 0 });
+  assert.equal(missionOrders.create("rush", { x: -50, y: 99999 }).x, 16, "placed inside the map");
+  assert.deepEqual(missionOrders.tactic(5, "raid"), { kind: "mission_tactic_raid", x: 0, y: 0, target: 5 });
+  assert.deepEqual(missionOrders.size(5, "rest"), { kind: "mission_size", x: -1, y: 0, target: 5 });
+  assert.equal(missionOrders.size(5, 500).x, 99);
+  assert.equal(missionOrders.gather(5, 3).x, 10);
+  assert.equal(missionOrders.fallback(5, 250).x, 100);
+  assert.deepEqual(missionOrders.rally(5, { x: 300, y: 400 }), { kind: "mission_rally", x: 300, y: 400, target: 5 });
+  assert.equal(missionOrders.cancel(5).kind, "mission_cancel");
+  assert.equal(missionOrders.assign(5).kind, "mission_assign");
+  assert.equal(clampSize(0), 1);
+  assert.equal(clampPercent(55.4), 55);
 });

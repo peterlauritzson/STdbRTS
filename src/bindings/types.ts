@@ -86,6 +86,27 @@ export const CreepPatchRow = __t.object("CreepPatchRow", {
 });
 export type CreepPatchRow = __Infer<typeof CreepPatchRow>;
 
+export const DoctrineRow = __t.object("DoctrineRow", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  slot: __t.u8(),
+  enabled: __t.bool(),
+  autoTier: __t.bool(),
+  autoResearch: __t.bool(),
+  autoBuild: __t.bool(),
+  catalystReserve: __t.u32(),
+});
+export type DoctrineRow = __Infer<typeof DoctrineRow>;
+
+export const DoctrineWeightRow = __t.object("DoctrineWeightRow", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  slot: __t.u8(),
+  kind: __t.string(),
+  weight: __t.u8(),
+});
+export type DoctrineWeightRow = __Infer<typeof DoctrineWeightRow>;
+
 export const EntityCold = __t.object("EntityCold", {
   id: __t.u32(),
   owner: __t.u8(),
@@ -177,6 +198,26 @@ export const MatchSample = __t.object("MatchSample", {
 });
 export type MatchSample = __Infer<typeof MatchSample>;
 
+export const MissionRow = __t.object("MissionRow", {
+  key: __t.u64(),
+  matchId: __t.u64(),
+  id: __t.u32(),
+  owner: __t.u8(),
+  tactic: __t.string(),
+  x: __t.f32(),
+  y: __t.f32(),
+  size: __t.i32(),
+  state: __t.string(),
+  stateTick: __t.u64(),
+  rallyX: __t.f32(),
+  rallyY: __t.f32(),
+  gatherPercent: __t.u8(),
+  fallbackPercent: __t.u8(),
+  strikeStrength: __t.u32(),
+  members: __t.array(__t.u32()),
+});
+export type MissionRow = __Infer<typeof MissionRow>;
+
 export const Node = __t.object("Node", {
   id: __t.u32(),
   x: __t.f32(),
@@ -266,6 +307,15 @@ export const Room = __t.object("Room", {
   lastTickMicros: __t.i64(),
 });
 export type Room = __Infer<typeof Room>;
+
+export const StanceRow = __t.object("StanceRow", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  slot: __t.u8(),
+  kind: __t.string(),
+  stance: __t.string(),
+});
+export type StanceRow = __Infer<typeof StanceRow>;
 
 export const TickSchedule = __t.object("TickSchedule", {
   scheduledId: __t.u64(),

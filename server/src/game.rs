@@ -2,7 +2,7 @@ use crate::{lobby::current_player, schema::*};
 use rts_core::{
     is_army, is_building, is_labour, is_sample_tick, maps, scheduled_tick,
     simulation::{Command as CoreCommand, Order, World},
-    stats, Balance, Cost,
+    doctrine::Doctrine, mission::Mission, stats, Balance, Cost, Stance,
 };
 use spacetimedb::{ReducerContext, ScheduleAt, Table, TimeDuration};
 
@@ -65,6 +65,30 @@ pub fn sync_tick_schedule(ctx: &ReducerContext) {
 }
 
 pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
+    // Missions in creation order: the index hands rows back in no promised order.
+    let mut missions: Vec<Mission> = ctx
+        .db
+        .mission()
+        .match_id()
+        .filter(room.id)
+        .map(|row| Mission {
+            id: row.id,
+            owner: row.owner,
+            tactic: row.tactic,
+            x: row.x,
+            y: row.y,
+            size: row.size,
+            state: row.state,
+            state_tick: row.state_tick,
+            rally_x: row.rally_x,
+            rally_y: row.rally_y,
+            gather_percent: row.gather_percent,
+            fallback_percent: row.fallback_percent,
+            strike_strength: row.strike_strength,
+            members: row.members,
+        })
+        .collect();
+    missions.sort_unstable_by_key(|mission| mission.id);
     World {
         tick: room.tick,
         next_id: room.next_entity_id,
@@ -220,11 +244,58 @@ pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
             .filter(room.id)
             .map(|player| (player.slot, player.research))
             .collect(),
+        stances: ctx
+            .db
+            .stance()
+            .match_id()
+            .filter(room.id)
+            .filter_map(|row| {
+                Stance::parse(&row.stance).map(|stance| ((row.slot, row.kind), stance))
+            })
+            .collect(),
+        doctrines: {
+            let mut doctrines = std::collections::BTreeMap::<u8, Doctrine>::new();
+            for row in ctx.db.doctrine().match_id().filter(room.id) {
+                let doctrine = doctrines.entry(row.slot).or_default();
+                doctrine.enabled = row.enabled;
+                doctrine.auto_tier = row.auto_tier;
+                doctrine.auto_research = row.auto_research;
+                doctrine.auto_build = row.auto_build;
+                doctrine.reserve = row.catalyst_reserve;
+            }
+            for row in ctx.db.doctrine_weight().match_id().filter(room.id) {
+                doctrines.entry(row.slot).or_default().weights.insert(row.kind, row.weight);
+            }
+            doctrines
+        },
+        next_mission_id: missions.iter().map(|mission| mission.id).max().unwrap_or(0) + 1,
+        missions,
         outcome: if room.state == "finished" {
             Some(room.winner)
         } else {
             None
         },
+    }
+}
+
+fn mission_row(match_id: u64, mission: &Mission, key: u64) -> MissionRow {
+    MissionRow {
+        key,
+        match_id,
+        id: mission.id,
+        owner: mission.owner,
+        tactic: mission.tactic.clone(),
+        x: mission.x,
+        y: mission.y,
+        size: mission.size,
+        state: mission.state.clone(),
+        state_tick: mission.state_tick,
+        rally_x: mission.rally_x,
+        rally_y: mission.rally_y,
+        gather_percent: mission.gather_percent,
+        fallback_percent: mission.fallback_percent,
+        strike_strength: mission.strike_strength,
+        members: mission.members.clone(),
     }
 }
 
@@ -420,6 +491,118 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
             ctx.db.player().identity().update(player);
         }
     }
+    // Stance rows are diffed against the world's map: stale rows deleted,
+    // changed ones updated, new ones inserted. Almost always writes nothing.
+    let mut pending = world.stances.clone();
+    for old in ctx.db.stance().match_id().filter(room.id).collect::<Vec<_>>() {
+        match pending.remove(&(old.slot, old.kind.clone())) {
+            None => {
+                ctx.db.stance().id().delete(old.id);
+            }
+            Some(stance) if stance.as_str() != old.stance => {
+                ctx.db.stance().id().update(StanceRow {
+                    stance: stance.as_str().into(),
+                    ..old
+                });
+            }
+            Some(_) => {}
+        }
+    }
+    for ((slot, kind), stance) in pending {
+        ctx.db.stance().insert(StanceRow {
+            id: 0,
+            match_id: room.id,
+            slot,
+            kind,
+            stance: stance.as_str().into(),
+        });
+    }
+    // Doctrine rows: one per player, plus one per non-default weight.
+    let mut pending = world.doctrines.clone();
+    for old in ctx.db.doctrine().match_id().filter(room.id).collect::<Vec<_>>() {
+        match pending.get(&old.slot) {
+            None => {
+                ctx.db.doctrine().id().delete(old.id);
+            }
+            Some(doctrine) => {
+                if doctrine.enabled != old.enabled
+                    || doctrine.auto_tier != old.auto_tier
+                    || doctrine.auto_research != old.auto_research
+                    || doctrine.auto_build != old.auto_build
+                    || doctrine.reserve != old.catalyst_reserve
+                {
+                    ctx.db.doctrine().id().update(DoctrineRow {
+                        enabled: doctrine.enabled,
+                        auto_tier: doctrine.auto_tier,
+                        auto_research: doctrine.auto_research,
+                        auto_build: doctrine.auto_build,
+                        catalyst_reserve: doctrine.reserve,
+                        ..old
+                    });
+                }
+                // Marks the player's row as present.
+                pending.remove(&old.slot);
+            }
+        }
+    }
+    for (slot, doctrine) in pending {
+        ctx.db.doctrine().insert(DoctrineRow {
+            id: 0,
+            match_id: room.id,
+            slot,
+            enabled: doctrine.enabled,
+            auto_tier: doctrine.auto_tier,
+            auto_research: doctrine.auto_research,
+            auto_build: doctrine.auto_build,
+            catalyst_reserve: doctrine.reserve,
+        });
+    }
+    let mut pending: std::collections::BTreeMap<(u8, String), u8> = world
+        .doctrines
+        .iter()
+        .flat_map(|(slot, doctrine)| {
+            doctrine.weights.iter().map(|(kind, weight)| ((*slot, kind.clone()), *weight))
+        })
+        .collect();
+    for old in ctx.db.doctrine_weight().match_id().filter(room.id).collect::<Vec<_>>() {
+        match pending.remove(&(old.slot, old.kind.clone())) {
+            None => {
+                ctx.db.doctrine_weight().id().delete(old.id);
+            }
+            Some(weight) if weight != old.weight => {
+                ctx.db.doctrine_weight().id().update(DoctrineWeightRow { weight, ..old });
+            }
+            Some(_) => {}
+        }
+    }
+    for ((slot, kind), weight) in pending {
+        ctx.db.doctrine_weight().insert(DoctrineWeightRow {
+            id: 0,
+            match_id: room.id,
+            slot,
+            kind,
+            weight,
+        });
+    }
+    // Missions are diffed the same way, by their room-local id.
+    let mut pending: std::collections::BTreeMap<u32, &Mission> =
+        world.missions.iter().map(|mission| (mission.id, mission)).collect();
+    for old in ctx.db.mission().match_id().filter(room.id).collect::<Vec<_>>() {
+        match pending.remove(&old.id) {
+            None => {
+                ctx.db.mission().key().delete(old.key);
+            }
+            Some(mission) => {
+                let row = mission_row(room.id, mission, old.key);
+                if row != old {
+                    ctx.db.mission().key().update(row);
+                }
+            }
+        }
+    }
+    for mission in pending.into_values() {
+        ctx.db.mission().insert(mission_row(room.id, mission, 0));
+    }
     for result in &world.commands {
         if let Some(mut row) = ctx.db.command().id().find(result.id) {
             if row.status != result.status || row.reason != result.reason {
@@ -517,6 +700,10 @@ pub fn delete_room(ctx: &ReducerContext, match_id: u64) {
     ctx.db.unit_vitals().match_id().delete(match_id);
     ctx.db.unit_state().match_id().delete(match_id);
     ctx.db.creep_patch().match_id().delete(match_id);
+    ctx.db.stance().match_id().delete(match_id);
+    ctx.db.mission().match_id().delete(match_id);
+    ctx.db.doctrine().match_id().delete(match_id);
+    ctx.db.doctrine_weight().match_id().delete(match_id);
     ctx.db.resource_node().match_id().delete(match_id);
     ctx.db.command().match_id().delete(match_id);
     ctx.db.chat_message().match_id().delete(match_id);

@@ -2,7 +2,7 @@ import type { CreepPatch, Node as Deposit, Order } from "./bindings/types";
 import type { Entity } from "./units";
 import { Session } from "./network";
 import { clamp, clampToMap, countdown, legibleRadius, ownerColor, VISUALS, WORLD_SIZE } from "./presentation";
-import { BUILD_RADIUS, buildReachCircles, buildSite, cargoCapacity, costOf, NO_COST, type Cost, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isCompletedHub, isVeteran, RALLIES, isLabour, isTemporary, mapIdentity, placementError, shortfallReason, starts, terrain, veteranStacks, type FactionName } from "./catalog";
+import { BUILD_RADIUS, buildReachCircles, buildSite, buildTierError, cargoCapacity, costOf, NO_COST, type Cost, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isCompletedHub, isVeteran, RALLIES, isLabour, isTemporary, mapIdentity, placementError, shortfallReason, starts, terrain, veteranStacks, type FactionName } from "./catalog";
 import { entrenched, FX_MS, passiveEffects, removalEffects, type Fx } from "./passives";
 import { DOUBLE_TAP_MS, EDGE_SCROLL_DWELL_MS, EDGE_SCROLL_WINDOW_PX, edgeDirection, groupAction, UNIT_KEYS } from "./hotkeys";
 import { creepLabels, lifetimeFraction, offCreep } from "./creep";
@@ -12,15 +12,24 @@ import { availableAfter, pendingSpend } from "./spend";
 import { assignPatches, baseOf, baseSaturation, hubPatches, ownHubs, snapSite, takenPatches } from "./macro";
 import type { OverlayPath } from "./operations";
 import { BEHAVIORS, behaviorUnits, isBehavior, rallyBehavior, stateColor, type BehaviorKind } from "./behaviors";
+import type { Tactic } from "./missions";
 import { ABILITIES, abilityOf, castingHub, maxEnergy, onCreep, recallable, scheduledCasts, type AbilityKind } from "./abilities";
 import { arriving, canTeleport, channelFraction, fieldsOf, powered, POWER_FIELD_RADIUS, recharging, SENSOR_FIELD_RADIUS, shieldsRegenerating, type Field } from "./zones";
 
 interface Point { x: number; y: number }
 interface Motion { from: Point; to: Point; at: number }
 type InputMode = "select" | "order" | "pan";
-type TargetMode = "attack_move" | "repair" | "rally" | "teleport" | "expand" | "territory" | `mission_${BehaviorKind}` | AbilityKind | `build_${string}`;
+type TargetMode = "attack_move" | "repair" | "rally" | "teleport" | "expand" | "territory" | `mission_${Tactic}` | "set_mission_rally" | AbilityKind | `build_${string}`;
 /** What the battlefield needs to draw and click a mission; the rules live in missions.ts. */
-export interface MissionView { id: number; kind: BehaviorKind; x: number; y: number; label: string }
+export interface MissionView {
+  id: number; x: number; y: number; label: string; color: string;
+  /** A guard mission also draws its 600-unit leash. */
+  leash: boolean;
+  /** Preset and point pairs its members run now; a unit goal on one is labelled by this marker instead. */
+  goals: { preset: string; x: number; y: number }[];
+  /** Gather missions: where the group gathers, drawn dashed to the point. */
+  rally?: Point;
+}
 
 /** How long a click ping, a target flash and a death burst last, in ms. */
 const PING_MS = 520;
@@ -94,7 +103,10 @@ export class Battlefield {
   /** The chains of running expansions, drawn dashed and numbered on the map and the minimap. */
   overlays: () => OverlayPath[] = () => [];
   /** A mission was placed at a point (with these army units selected); see missions.ts. */
-  onMission: (kind: BehaviorKind, point: Point, selected: number[]) => void = () => {};
+  onMission: (tactic: Tactic, point: Point, selected: number[]) => void = () => {};
+  /** The rally point of this mission was aimed at a point (button, then click). */
+  onMissionRally: (id: number, point: Point) => void = () => {};
+  private rallyMission: number | undefined;
   /** The standing missions, drawn as markers on the map and the minimap. */
   missions: () => MissionView[] = () => [];
   /** The mission under a point, and sending army units into it (right-click on its marker). */
@@ -216,6 +228,8 @@ export class Battlefield {
       else if (key === UNIT_KEYS.harass) this.arm("mission_harass");
       else if (key === UNIT_KEYS.guard) this.arm("mission_guard");
       else if (key === UNIT_KEYS.raid) this.arm("mission_raid");
+      else if (key === UNIT_KEYS.rush) this.arm("mission_rush");
+      else if (key === UNIT_KEYS.gather) this.arm("mission_gather");
       else if (key === UNIT_KEYS.ability) { const rule = abilityOf(this.factionAt(this.session.snapshot.me?.slot ?? -1)); if (rule) this.arm(rule.kind); }
       else if (event.key === "." || event.key === "F1") this.selectIdleWorker();
       else if (event.key === "F2") this.selectArmy();
@@ -401,7 +415,7 @@ export class Battlefield {
   spendable(): Cost {
     const { me, commands } = this.session.snapshot;
     if (!me) return NO_COST;
-    return availableAfter({ material: me.material, catalyst: me.catalyst, terrazine: me.terrazine }, pendingSpend(commands, this.session.pending.values(), me.slot));
+    return availableAfter({ material: me.material, catalyst: me.catalyst, terrazine: me.terrazine }, pendingSpend(commands, this.session.pending.values(), me.slot, me.research));
   }
 
   ownedSelection(): Entity[] {
@@ -479,9 +493,16 @@ export class Battlefield {
 
   zoom(amount: number): void { this.camera.zoom = clamp(this.camera.zoom * amount, this.minZoom(), 2.2); this.boundCamera(); }
 
+  /** Aims the rally point of a gather mission: the next map or minimap click moves it. */
+  armMissionRally(id: number): void {
+    this.rallyMission = id;
+    this.targeting = undefined;
+    this.arm("set_mission_rally");
+  }
+
   arm(kind: TargetMode): void {
     // A mission is about a place, not a selection: it can be placed whenever a match is on.
-    const allowed = kind.startsWith("mission_") ? this.session.matchReady
+    const allowed = kind.startsWith("mission_") || kind === "set_mission_rally" ? this.session.matchReady
       : kind === "rally"
       ? this.session.snapshot.units.some(unit => RALLIES.includes(unit.kind) && unit.owner === this.session.snapshot.me?.slot)
       : kind.startsWith("build_") || kind === "expand" || kind === "territory" ? !!this.issuer()
@@ -698,11 +719,18 @@ export class Battlefield {
     // rally-gather target; clicking one with labour explains why instead.
     const node = clicked && currencyOf(clicked.kind) === "material" ? clicked : undefined;
     const owned = this.ownedSelection();
+    if (this.targeting === "set_mission_rally") {
+      if (this.rallyMission !== undefined) this.onMissionRally(this.rallyMission, { x: clampToMap(point.x), y: clampToMap(point.y) });
+      this.acknowledge("move", point);
+      this.rallyMission = undefined;
+      this.spend(false);
+      return;
+    }
     if (this.targeting?.startsWith("mission_")) {
-      // Missions are standing and managed by missions.ts; selected army units join this one.
-      const kind = this.targeting.slice(8) as BehaviorKind;
-      this.onMission(kind, { x: clampToMap(point.x), y: clampToMap(point.y) }, behaviorUnits(owned).map(unit => unit.id));
-      this.acknowledge(kind, point);
+      // Missions are standing server rows (missions.ts); selected army units join this one.
+      const tactic = this.targeting.slice(8) as Tactic;
+      this.onMission(tactic, { x: clampToMap(point.x), y: clampToMap(point.y) }, behaviorUnits(owned).map(unit => unit.id));
+      this.acknowledge(tactic in BEHAVIORS ? tactic : "assault", point);
       this.spend(queued);
       return;
     }
@@ -732,7 +760,7 @@ export class Battlefield {
       const planned = this.withPlannedSites();
       const snapped = snapSite(kind, point.x, point.y, me.slot, planned, nodes);
       const aim = snapped ?? point;
-      const error = snapped ? undefined : placementError(kind, point.x, point.y, me.slot, planned, nodes);
+      const error = buildTierError(kind, me.research) ?? (snapped ? undefined : placementError(kind, point.x, point.y, me.slot, planned, nodes));
       // Money already promised to orders still inside the delay is not free to spend.
       const short = shortfallReason(this.spendable(), costOf(kind));
       const refusal = error ?? short;
@@ -1045,7 +1073,7 @@ export class Battlefield {
       const short = shortfallReason(this.spendable(), costOf(kind));
       const planned = this.withPlannedSites();
       const snapped = snapSite(kind, this.pointer.x, this.pointer.y, this.session.snapshot.me.slot, planned, nodes);
-      const error = (snapped ? undefined : placementError(kind, this.pointer.x, this.pointer.y, this.session.snapshot.me.slot, planned, nodes)) ?? short;
+      const error = buildTierError(kind, this.session.snapshot.me.research) ?? (snapped ? undefined : placementError(kind, this.pointer.x, this.pointer.y, this.session.snapshot.me.slot, planned, nodes)) ?? short;
       // The preview is drawn where the building will stand: a refinery snaps
       // onto the catalyst deposit it is aimed at; any other kind slides to the
       // nearest valid spot (a faint line shows the slide).
@@ -1570,6 +1598,12 @@ export class Battlefield {
         context.beginPath(); context.moveTo(-10, 16); context.lineTo(0, -8); context.lineTo(10, 16); context.stroke();
         context.fillStyle = color; context.strokeStyle = "#243832"; context.lineWidth = 2;
         context.beginPath(); context.ellipse(0, -14, 16, 8, -0.4, 0, Math.PI * 2); context.fill(); context.stroke();
+      } else if (unit.kind === "synthesizer") {
+        // A squat vat with two opposed arrows: material in, the other currency out.
+        context.fillStyle = "#2f3f3a"; context.fillRect(-24, -6, 48, 24); context.strokeRect(-24, -6, 48, 24);
+        context.fillStyle = "#e6d38a"; context.beginPath(); context.arc(-12, -12, 11, Math.PI, 0); context.fill(); context.stroke();
+        context.fillStyle = "#c79bff"; context.beginPath(); context.arc(12, -12, 11, Math.PI, 0); context.fill(); context.stroke();
+        context.fillStyle = color; context.fillRect(-24, 18, 48, 5);
       } else if (unit.kind === "refinery") {
         // Two violet tanks on a pump: the catalyst colour, over the deposit.
         context.fillStyle = "#3c2c5c"; context.fillRect(-26, -20, 52, 36);
@@ -1921,7 +1955,7 @@ export class Battlefield {
         context.beginPath(); context.arc(goal.x, goal.y, 600, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
       }
       // A goal that is a mission's point is labelled by the mission marker instead.
-      if (!this.missions().some(mission => mission.kind === preset && Math.hypot(mission.x - goal.x, mission.y - goal.y) <= 1)) this.marker(goal, color, `${BEHAVIORS[preset].label.toUpperCase()} ×${count}`);
+      if (!this.missions().some(mission => mission.goals.some(own => own.preset === preset && Math.hypot(own.x - goal.x, own.y - goal.y) <= 1))) this.marker(goal, color, `${BEHAVIORS[preset].label.toUpperCase()} ×${count}`);
     }
   }
 
@@ -1930,8 +1964,14 @@ export class Battlefield {
     const context = this.context;
     const zoom = this.camera.zoom;
     for (const mission of this.missions()) {
-      const color = BEHAVIORS[mission.kind].color;
-      if (mission.kind === "guard") {
+      const color = mission.color;
+      if (mission.rally) {
+        context.strokeStyle = `${color}90`; context.lineWidth = 1.5 / zoom; context.setLineDash([6 / zoom, 6 / zoom]);
+        context.beginPath(); context.moveTo(mission.rally.x, mission.rally.y); context.lineTo(mission.x, mission.y); context.stroke();
+        context.beginPath(); context.arc(mission.rally.x, mission.rally.y, 250, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
+        context.fillStyle = color; context.font = `${11 / zoom}px 'IBM Plex Mono'`; context.textAlign = "center"; context.fillText("RALLY", mission.rally.x, mission.rally.y + 4 / zoom);
+      }
+      if (mission.leash) {
         context.strokeStyle = `${color}70`; context.lineWidth = 1.5 / zoom; context.setLineDash([10 / zoom, 8 / zoom]);
         context.beginPath(); context.arc(mission.x, mission.y, 600, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
       }
@@ -2029,7 +2069,7 @@ export class Battlefield {
     }
     for (const mission of this.missions()) {
       const x = mission.x * scale, y = mission.y * scale;
-      context.fillStyle = BEHAVIORS[mission.kind].color; context.strokeStyle = "#10201f"; context.lineWidth = 1;
+      context.fillStyle = mission.color; context.strokeStyle = "#10201f"; context.lineWidth = 1;
       context.beginPath(); context.moveTo(x, y - 6); context.lineTo(x + 6, y); context.lineTo(x, y + 6); context.lineTo(x - 6, y); context.closePath(); context.fill(); context.stroke();
     }
     const me = this.session.snapshot.me?.slot;

@@ -88,6 +88,7 @@ Every structure is built by placing it on the map; it then raises itself and nee
 | **Laboratory** | Everyone | 650 | 200 material | 10 | barracks | Required for buying tier 3. It researches nothing itself: research is instant and needs no building. |
 | **Outpost** | Everyone | 650 | 300 material | 6 | - | A second hub, and an investment. Receives mined material and trains labour. For Organic it also spreads creep and stores harvester stock; for Network it projects a power field. |
 | **Refinery** | Everyone | 400 | 75 material | 6 | catalyst deposit | Must be built on a catalyst deposit (it snaps to one within 60 units; one per deposit). Extracts 4 catalyst every half second with no workers. |
+| **Synthesizer** | Everyone | 600 | 300 material | 10 | tier 2 | Late-game outlet for surplus material. Every second, while your material is above 300, it turns 4 material into 1 catalyst or terrazine, whichever you hold less of (catalyst on a tie). Not a hub, drop-off, producer or territory source; does not count for victory. Refused with "Requires Tier 2". |
 | **Turret** | Everyone | 500 | 100 terrazine | 7 | - | Static defense. Range 210, damage 16, cooldown 0.9 s. |
 | **Sensor tower** | Industrial | 450 | 100 material | 7 | - | Projects a sensor field (radius 450) that speeds up your units by 30%. Cannot shoot or train. |
 | **Bunker** | Industrial | 800 | 125 terrazine | 8 | - | Static defense. Range 150, damage 20, cooldown 0.9 s. Passive: Fortified. |
@@ -151,17 +152,17 @@ Network and Organic hubs (HQ and outposts) carry energy: up to 200, starting at 
 
 ## Research
 
-Bought from the Research tab with material. It is **instant**: no building is selected, nothing queues, and you own it the moment you pay. Each can be bought once; it applies to all your existing and future units and is never lost, even if every building falls.
+Bought from the Research tab with material. It is **instant**: no building is selected, nothing queues, and you own it the moment you pay. Logistics can be bought once; Weapons and Armour have three levels, each bought by the same order, in sequence. It applies to all your existing and future units and is never lost, even if every building falls.
 
 | Technology | Cost | Effect |
 | --- | ---: | --- |
-| **Weapons** | 150 material | +4 attack damage on every attack, before multipliers. |
-| **Armor** | 150 material | Every hit against your units and structures does 3 less damage (a hit never does less than 1). |
+| **Weapons** | 150 / 400 / 800 material (levels 1 / 2 / 3; level 2 needs tier 2, level 3 needs tier 3) | +4 attack damage per level on every attack, before multipliers (up to +12). |
+| **Armor** | 150 / 400 / 800 material (levels 1 / 2 / 3; level 2 needs tier 2, level 3 needs tier 3) | Every hit against your units and structures does 3 less damage per level, up to 9 (a hit never does less than 1). |
 | **Logistics** | 150 material | Carry capacity 25 to 40 (harvesters 10 to 16); mining 5 to 7 per pulse (drifters 1 every 0.25 s to 3 every 0.5 s). |
 
 ### Tiers
 
-Bought in order, instantly, with material. The finished building is needed only at the moment of purchase. Refusals: "Already researched", "Requires Tier N first", "Requires a finished barracks" (factory, lab), or the usual material shortfall. Training a locked unit is refused with "Requires Tier N".
+Bought in order, instantly, with material. The finished building is needed only at the moment of purchase. Refusals: "Already researched" (also a finished Weapons or Armour level 3), "Requires Tier N first", "Requires Tier N" (Weapons or Armour level 2 or 3, and the synthesizer), "Requires a finished barracks" (factory, lab), or the usual material shortfall. Training a locked unit is refused with "Requires Tier N".
 
 | Tier | Cost | Needs | Unlocks | Industrial | Network | Organic |
 | --- | ---: | --- | --- | --- | --- | --- |
@@ -178,7 +179,8 @@ Bought in order, instantly, with material. The finished building is needed only 
 | Free income | 200 material a minute for the first 90 s, then 100 material a minute for the rest of the match |
 | Mining pulse | Every 0.5 s a carrier takes 5 (7 with logistics); a worker's 25 load takes 2.5 s |
 | Drifter credit | 1 material every 0.25 s (3 every 0.5 s with logistics) |
-| Patch holds | Material 1200 or 1500; catalyst 2000 or 2500 |
+| Patch holds | Material 900 or 1150 (Expanse); catalyst 2000 or 2500 |
+| Synthesizer | 4 material a second becomes 1 catalyst or terrazine a second (the lower of the two, catalyst on a tie) while material is above 300 |
 | Miners per patch | One. A labour unit that finds its patch taken looks for a free one within 450 of itself, else waits |
 | Refinery | 4 catalyst every 0.5 s (8 per second); snaps to a catalyst deposit within 60 |
 | Terrazine by-product | 12% of material mined (Industrial), 10% (Network, Organic); catalyst mined adds none |
@@ -205,7 +207,7 @@ Army units can be given a behavior instead of a single order. It goes through th
 
 Home is a spot beside your hub nearest the unit when the behavior started.
 
-Behavior rally (`rally_harass`, `rally_guard`, `rally_raid`): still accepted by the server, no longer sent by the client, which uses missions instead (below). A producer that already carries one still starts it on each army unit it trains.
+Behavior rally (`rally_harass`, `rally_guard`, `rally_raid`): still accepted by the server, no longer sent by the client, which uses missions instead (below). The per-unit `assault` preset (attack-move to the goal, never retreats) is used by the Rush and Gather then strike missions. A producer that already carries one still starts it on each army unit it trains.
 
 | Behavior | States |
 | --- | --- |
@@ -215,20 +217,57 @@ Behavior rally (`rally_harass`, `rally_guard`, `rally_raid`): still accepted by 
 
 Health is hit points plus shields.
 
+## Stances
+
+Per player, per army kind; set by the order `stance_<kind>_<stance>` (free, delayed like any command, validated against your faction's army). Only non-default choices are stored (table `stance`). Applies only while a unit's order is `attack_move` (missions included); `move`, `hold`, `attack` and idle units are untouched. Every number is **experimental**.
+
+| Stance | Rule |
+| --- | --- |
+| Standard | stop at 90% of weapon range |
+| Charge | stop at 40% of weapon range |
+| Kite | while reloading, target armed and closer than 80% of range: step 40 units straight away if that spot is free and in line of sight, else as Standard |
+| Hold | with a target acquired, never advance; with none, walk the path |
+
+With no line of sight to the target, Standard and Charge stop at 55 as before.
+
+| Default | Kinds |
+| --- | --- |
+| Kite | marksman, lancer, spitter |
+| Charge | bulwark, behemoth, crusher |
+| Standard | every other army kind |
+
+## Production doctrine
+
+Per player, all off by default. Stored in the additive tables `doctrine` (one row per player with any non-default value: `enabled`, `auto_tier`, `auto_research`, `auto_build`, `catalyst_reserve`) and `doctrine_weight` (non-default weights only). Set by free delayed commands issued by one of your units: `doctrine_train`, `doctrine_tier`, `doctrine_research`, `doctrine_build` (x = 0 or 1), `doctrine_reserve` (x = 0 to 2000, the client steps by 50) and `doctrine_weight_<kind>` (x = whole 0 to 10, kind must be an army kind of your faction).
+
+| Number | Value |
+| --- | --- |
+| Pass interval | 20 ticks (1 second), owners and buildings in id order |
+| Weight | 0 to 10, default 5 |
+| Auto-build | One construction per owner per pass, none while a barracks, factory, laboratory or synthesizer is unfinished. First, a refinery on the nearest free catalyst deposit within 500 of a finished hub of yours. Then, if below tier 3 and owning none of the next tier's building (barracks for 1, factory for 2, laboratory for 3), that building. Else barracks or factory when catalyst >= reserve + 400: lowest (buildings + 1) / weight sum of the roster kinds it trains, ties to barracks, weight sum 0 skipped. Else synthesizer at tier 2 when material >= 1500 and fewer than 4. Sites: rings 260/320/380/440 from the HQ (else lowest-id hub), 24 bearings from angle 0, skipping any within 220 of a resource node; first one that validates wins |
+| Reserve | 0 to 2000, default 0, step 50 |
+| Items per building per pass | 1, only if the production queue is empty |
+| Purchases per owner per pass | 1 (tier, else Weapons/Armour cheaper first with Weapons on a tie, else Logistics) |
+
+Auto-train picks, among kinds the building trains with weight above 0 and the tier unlocked, the largest deficit = weight / (sum of weights of all kinds trainable now) minus (living + queued of the kind) / (living + queued army units); ties go to the earlier unit in the faction's roster order. Every queue and purchase goes through the same validation and execution as a manual `train_*`, `tier_*` or `research_*` command. Presets: Even = 5 each; Basics = first roster unit 10, second 4, others 0; Heavy = factory units 8, barracks units 3. All numbers are **experimental**.
+
 ## Missions
 
-Client-side standing objectives, in the spirit of operations: only ordinary orders, one pass a second, after the normal command delay. They live in the tab; the point, size and members are saved in localStorage under the room id and restored on reload in the same room, and dropped when the room ends or you leave it.
+Server-side standing objectives (table `mission`, one row per mission), evaluated by the simulation once per second (every 20 ticks; pass in `server/src/mission.rs`), so they keep staffing with the tab closed. Commands: `mission_new_<tactic>`, `mission_tactic_<tactic>`, `mission_size`, `mission_gather`, `mission_fallback`, `mission_rally`, `mission_cancel`, `mission_assign`. Every number is **experimental**.
 
 | Rule | Details |
 | --- | --- |
-| Placing | J / K / N or the Strategy panel buttons arm placement; the next map or minimap click places it (Shift keeps the mode armed, Escape or right-click cancels). Works with any selection. Selected army units join it at once (taken from other missions) and a numeric size is raised to at least their number |
-| Size | Default Harass 4, Guard 6, Raid "rest". Numeric sizes run 1 to 99. "Rest" takes every recruit left after the numeric missions. Several rest missions split the recruits evenly, in creation order: each takes its nearest ceil(left / rest missions left) |
+| Tactics | Harass (J), Guard (K), Hit & retreat (N, id `raid`), Rush (M, attack-move and never retreat, preset `assault`), Gather then strike (, comma). The tactic of an existing mission can be changed from the Strategy panel. At most 16 missions per player |
+| Placing | J / K / N / M / , or the Strategy panel buttons arm placement; the next map or minimap click places it (Shift keeps the mode armed, Escape or right-click cancels). Works with any selection. Selected army units join it at once (taken from other missions) and a numeric size is raised to at least their number |
+| Size | Default Harass 4, Guard 6, Hit & retreat, Rush and Gather then strike "rest" (all spare units). Numeric sizes run 1 to 99. "Rest" takes every recruit left after the numeric missions. Several rest missions split the recruits evenly, in creation order: each takes its nearest ceil(left / rest missions left) |
 | Army | Your own living units for which the army test passes (labour, buildings and temporary units never join) |
-| Pass | 1: members that died drop out. 2: a member whose behavior is not the mission's preset, or whose newest accepted behavior command has another goal, is released as player-controlled; a unit with an order of its own or of the pass still in the command delay is never judged (plus 3.5 s of grace after the pass sent it one). 3: a mission over its size stops its farthest members. 4: the pool is dealt out, numeric missions in creation order, nearest first, then rest missions. A numeric mission still short after the free pool takes the nearest members of rest missions (leftovers by definition); rest missions only ever take free units. 5: one behavior order per mission per pass |
-| Pool | Own army, in no mission, not player-controlled, not mid-order, running no behavior, and either idle (order stop) or newly seen since the last pass and walking a plain move (a fresh unit going to its rally point). A player-controlled unit is forgotten once it is idle again, which is also why a plain Stop does not remove a unit from the pool for long |
-| Limits | At most 8 orders per pass, none while 24 or more of your orders are pending (the server refuses more than 8 per tick and 32 pending); what does not fit waits for the next pass |
-| Removing | Cancelling a mission sends its members a Stop, so they are idle and the remaining missions recruit them on the next pass |
-| Display | Marker at the point in the preset's colour (guard also its 600 leash), label "HARASS 3/4" or "RAID 7", a diamond on the minimap. Right-click a marker with army selected: those units join it |
+| Pass | Once per second. 1: dead members drop out. 2: a member the player orders (any ordinary order or another behavior) leaves its mission at the moment that order executes; cast abilities do not release. 3: a mission over its size releases and stops its farthest extras. 4: idle army units are recruited in creation order up to size, nearest to the mission point first; then rest missions split the remainder (each takes the nearest ceil(left / rest missions left)); a sized mission with free slots can also peel the nearest members off rest missions. A unit is in at most one mission. 5: the tactic's behavior orders are issued |
+| Pool | Own army that is idle: no behavior, order stop, finished. Units trained with a rally point (moving, not stopped) are not idle and are not recruited until they stop |
+| Gather then strike | Group state gather -> strike -> fall back -> gather, plus defend. Gather: members guard the rally point. Defend: while gathering, if 3 or more enemy army units are near one of your buildings, the gathering members attack-move (preset assault) to that building and return to gathering when the threat is gone; after a defence the group may not strike for 15 s. Strike when units within max(250, 70 * sqrt(members)) of the rally number at least gather% (default 80) of the target size (numeric size: max(1, ceil(size * gather% / 100)); for "rest": max(8, ceil(members * gather% / 100))); the strength at strike start is recorded and members attack-move to the mission point. During a strike, members that joined after it began guard the rally point; once enough of them are within 250 of it (4 for "rest"; for a numeric size, enough to bring the strikers back up to gather% of the size and at least a quarter of the size) they go in as a wave and are added to the recorded strength. Fall back when the members still striking drop below fallback% (default 40) of that strength (waiting members do not count): everyone moves to the rally point. Fall back ends (back to gather) when all living members are within 250 of the rally, or after 20 s. Gather% and fallback% are steppers clamped 10 to 100 |
+| Rally point | Default 65% of the way from the owner's nearest finished hub to the mission point, clamped to the map and nudged to free ground, computed at creation. Move it with the "rally" button in the Strategy panel, then a map click |
+| Removing | Cancelling a mission releases and stops all its members, so they are idle and the remaining missions recruit them on the next pass |
+| Strategy panel | Per mission: tactic picker, size -/+/All, cancel, go-to on the name; gather missions also gather% / fallback% steppers and a rally button |
+| Display | Marker at the point in the preset's colour (guard also its 600 leash), label "HARASS 3/4" or "RAID 7" (the Hit & retreat label); gather missions show their state, "GATHER 5/8" (members gathered at the rally over the number needed to strike), "STRIKE 7", "DEFEND 5", "FALL BACK", with the rally point joined to the mission point by a dashed line; a diamond on the minimap. Right-click a marker with army selected: those units join it |
 
 ## Operations
 
@@ -238,7 +277,7 @@ Client-side helpers that send ordinary orders for you, once a second. They exist
 | --- | --- |
 | Expand | Armed with the Strategy panel's Expand button or V. Click the map or minimap. Base sites are clusters of deposits within 400 of each other with no hub (anyone's, finished or not) within 600 of their centre. The plan starts at your finished building nearest the site and hops at most 488 units per link, each hop your faction's territory link (Industrial sensor, Network relay, Organic tumor); the last building is an outpost 150-250 from the deposits (at least 112 from any catalyst deposit, so a refinery still fits), then up to two refineries on the site's catalysts. A hop that already has any of your buildings within 45 counts as built. The next link is ordered while the previous one is still under construction if that one is within 500 of a finished building (the build-radius look-ahead), so it runs one hop ahead. One order per pass; none while an earlier build of yours is still waiting out the command delay |
 | Territory | Armed with the Strategy panel's Territory button or O. Click the map or minimap. The same chain logic from your finished building nearest the point, every link your faction's territory link (hops at most 488), the last on the legal spot nearest the point (searched within 200). No outpost, no refineries. Refused with a notice when the faction has no link building, no finished building exists, or no legal spot is near the point |
-| Saturate workers (auto-labour) | Toggled with the Strategy panel's Saturate workers button or L. Each pass, every finished hub with an empty queue and no train order pending trains one labour unit while your labour (including queued) is below the number of non-empty material patches within 320 of your finished hubs (their mineral lines; a natural counts once it has its own hub) plus 2 (plus 0 for Network: a drifter holds its patch for good), you can afford it (Organic: the hub has stock) and you are under the unit cap. Paused while an expansion waits for material. Newly trained labour goes to work on its own |
+| Saturate workers (auto-labour) | Toggled with the Strategy panel's Saturate workers button or L. Each pass, every finished hub with an empty queue and no train order pending trains one labour unit while your labour (including queued) is below the number of non-empty material patches within 320 of your finished hubs (their mineral lines; a natural counts once it has its own hub) plus 2 (plus 0 for Network: a drifter holds its patch for good), you can afford it (Organic: the hub has stock) and you are under the unit cap. Paused while an expansion waits for material. Newly trained labour goes to work on its own. It stays on until toggled off; a finished Expand or Territory shows a "complete" notice and leaves the list |
 | Pending spend | Not an operation: the money readouts show (−N) for build, train and research orders that are sent but not yet run, and buttons use the balance after them |
 
 ## Macro helpers
@@ -266,10 +305,10 @@ Client-side helpers that send ordinary orders for you, once a second. They exist
 | Y | Set a rally point (with a production building selected) |
 | T / C | Teleport / faction ability (Recall, Bloom) |
 | Q W E R D Z X | Train: labour, then your six army units in card order. With the Research tab open: Weapons, Armor, Logistics, Tier 1, Tier 2, Tier 3 |
-| B, then Q W E R T Y U I | Build menu: barracks, outpost, turret, factory, laboratory, then your faction structure, refinery, faction defense |
+| B, then Q W E R T Y U I P | Build menu: barracks, outpost, turret, factory, laboratory, then your faction structure, refinery, faction defense, synthesizer |
 | V | Expand (operation, see above) |
 | O | Territory (operation, see above) |
-| J / K / N, then click | Place a Harass / Guard / Raid mission at the clicked point (selected army joins it; see Missions) |
+| J / K / N / M / ,, then click | Place a Harass / Guard / Hit & retreat / Rush / Gather then strike mission at the clicked point (selected army joins it; see Missions) |
 | L | Toggle Saturate workers (auto-labour) |
 | Space (tap) | Jump to the latest attack on you |
 | Ctrl or Alt + 0-9 | Set control group |
@@ -288,7 +327,7 @@ Client-side helpers that send ordinary orders for you, once a second. They exist
 A panel under the player list (hidden on phone widths, and when you have no army). Army means the same units F2 selects: your own combat units, not labour, buildings or temporary units.
 
 - Grouping: by activity first, then by distance. Units chained within 400 of one another form one cluster, so two squads standing apart are two rows.
-- Activity: a running behavior (Harass, Guard, Raid) wins; otherwise the order: attack-move is "Attack-moving", attack "Attacking", move "Moving", hold "Holding", stop "Idle"; any other order shows its name.
+- Activity: a unit that belongs to a mission is labelled by the mission (Harass, Guard, Hit & retreat, Rush; for Gather then strike: Gather, Strike, Defend, Fall back; members waiting at the rally during a strike read Gather). Otherwise a running behavior (Harass, Guard, Raid, Assault) wins; otherwise the order: attack-move is "Attack-moving", attack "Attacking", move "Moving", hold "Holding", stop "Idle"; any other order shows its name.
 - Row: activity, unit count, "at base" (cluster centre within 600 of a finished hub) or "field", and the makeup, most numerous first.
 - Order: fighting, moving, holding, idle. Idle clusters in the field are tinted red and are never cut off; other rows beyond six collapse into "+N more".
 - Click selects exactly that cluster and centres the camera on it; Shift+click adds it to the selection without moving the camera. The header ("ARMY n") collapses the panel and the choice is remembered in this browser.

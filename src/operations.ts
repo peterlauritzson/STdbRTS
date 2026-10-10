@@ -392,11 +392,20 @@ export class Operations {
     setInterval(() => this.pass(), 1000);
   }
 
-  /** Auto-labour is saved for this match only, in memory. */
-  get autoLabour(): boolean { return this.auto.get(this.room) ?? false; }
+  /** Auto-labour is saved for this match only, and survives a reload (a reload used to switch it off silently). */
+  get autoLabour(): boolean {
+    if (!this.auto.has(this.room)) {
+      let saved = false;
+      try { saved = localStorage.getItem(`stdbrts:saturate:${this.room}`) === "1"; } catch { /* storage blocked: off */ }
+      this.auto.set(this.room, saved);
+    }
+    return this.auto.get(this.room) ?? false;
+  }
 
   toggleAutoLabour(): boolean {
-    this.auto.set(this.room, !this.autoLabour);
+    const on = !this.autoLabour;
+    this.auto.set(this.room, on);
+    try { if (on) localStorage.setItem(`stdbrts:saturate:${this.room}`, "1"); else localStorage.removeItem(`stdbrts:saturate:${this.room}`); } catch { /* storage blocked: memory only */ }
     this.onChange();
     return this.autoLabour;
   }
@@ -492,7 +501,7 @@ export class Operations {
     const view = this.view();
     const issuer = this.issuer();
     if (!view || !issuer) return;
-    let available = availableAfter({ material: me.material, catalyst: me.catalyst, terrazine: me.terrazine }, pendingSpend(this.session.snapshot.commands, this.session.pending.values(), me.slot));
+    let available = availableAfter({ material: me.material, catalyst: me.catalyst, terrazine: me.terrazine }, pendingSpend(this.session.snapshot.commands, this.session.pending.values(), me.slot, me.research));
     // A build of yours still in the delay holds the issuer: the same build must not be ordered twice.
     let busy = view.sent.some(item => item.order.kind.startsWith("build_") && item.units.includes(issuer.id));
     let starved = false;

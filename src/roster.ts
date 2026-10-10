@@ -67,12 +67,14 @@ export function cluster<T extends { id: number; x: number; y: number }>(units: r
   return groups;
 }
 
-/** All my army, grouped by activity then spatial cluster, ordered fighting, moving, holding, idle (field before base), biggest first. */
-export function armyRoster(units: readonly RosterUnit[], slot: number, hubs: readonly RosterHub[] = []): RosterRow[] {
+/** All my army (`missionActivity`: unit id to its mission's label), grouped by activity then spatial cluster, ordered fighting, moving, holding, idle (field before base), biggest first. */
+export function armyRoster(units: readonly RosterUnit[], slot: number, hubs: readonly RosterHub[] = [], missionActivity: ReadonlyMap<number, string> = new Map()): RosterRow[] {
   const mine = units.filter(unit => unit.owner === slot && isArmy(unit.kind));
   const byActivity = new Map<string, { rank: number; members: RosterUnit[] }>();
   for (const unit of mine) {
-    const [activity, rank] = activityOf(unit);
+    // A mission member is labelled by its mission ("Gather", "Strike", "Harass"), not by the preset the mission runs on it.
+    const [preset, rank] = activityOf(unit);
+    const activity = missionActivity.get(unit.id) ?? preset;
     const entry = byActivity.get(activity) ?? { rank, members: [] };
     entry.members.push(unit); byActivity.set(activity, entry);
   }

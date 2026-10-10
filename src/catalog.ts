@@ -35,6 +35,11 @@ export const price = (material: number, catalyst = 0, terrazine = 0): Cost => ({
 export const NO_COST: Cost = price(0);
 /** Every technology costs the same; the server has one price for all three. */
 export const RESEARCH_COST: Cost = price(150);
+/** Weapons and armour are bought in three levels: `rules::LEVELED_RESEARCH_COSTS`. */
+export const LEVELED_RESEARCH_COSTS: readonly number[] = [150, 400, 800];
+/** The technologies with levels (`rules::max_research_level`); logistics has one. */
+export const LEVELED_RESEARCH: readonly string[] = ["research_weapons", "research_armor"];
+export const MAX_RESEARCH_LEVEL = 3;
 
 export interface Definition { label: string; hp: number; radius: number; cost: Cost; seconds: number; building: boolean; icon: string; role: string }
 export const CATALOG: Record<string, Definition> = {
@@ -78,6 +83,8 @@ export const CATALOG: Record<string, Definition> = {
   spine: { label: "Spine", hp: 600, radius: 30, cost: price(0, 0, 125), seconds: 7.5, building: true, icon: "triangle", role: "Organic defense / 170 range / costs terrazine" },
   refinery: { label: "Refinery", hp: 400, radius: 28, cost: price(75), seconds: 6, building: true, icon: "fuel", role: "Extracts catalyst from the deposit it stands on, with no workers / build on a catalyst deposit" },
   outpost: { label: "Outpost", hp: 650, radius: 30, cost: price(300), seconds: 6, building: true, icon: "warehouse", role: "Resource drop-off / base expansion / an investment" },
+  // Late-game outlet for surplus material: converts it into whichever of catalyst and terrazine the owner holds less of.
+  synthesizer: { label: "Synthesizer", hp: 600, radius: 30, cost: price(300), seconds: 10, building: true, icon: "repeat", role: "Needs Tier 2 / turns 4 material a second into 1 catalyst or terrazine (whichever you hold less of) while material is above 300" },
   lab: { label: "Laboratory", hp: 650, radius: 32, cost: price(200), seconds: 10, building: true, icon: "flask-conical", role: "Tier 3 gate / requires barracks" },
   // Faction buildings: each projects its faction's zone and nobody else can
   // build it. `hp` is the listed total; a Network entity carries half of it as
@@ -92,8 +99,8 @@ export const CATALOG: Record<string, Definition> = {
   brute: { label: "Brute", hp: 70, radius: 11, cost: price(0), seconds: 0, building: false, icon: "bug", role: "Temporary / spawned by a 200+ cost death on your creep, lives 15s" },
 };
 export const TECHNOLOGIES = {
-  weapons: { label: "Weapons", description: "+4 attack damage", icon: "swords" },
-  armor: { label: "Armor", description: "-3 damage per hit", icon: "shield" },
+  weapons: { label: "Weapons", description: "+4 attack damage per level / levels 2 and 3 need Tier 2 and 3", icon: "swords" },
+  armor: { label: "Armor", description: "-3 damage per hit per level / levels 2 and 3 need Tier 2 and 3", icon: "shield" },
   logistics: { label: "Logistics", description: "40 cargo / 7 per extraction", icon: "warehouse" },
 };
 /**
@@ -141,6 +148,11 @@ export const TIER_UPGRADES: Readonly<Record<FactionName, readonly [{ name: strin
  * `kind` is the order kind (`research_armor`, `tier_2`).
  */
 export function researchReason(kind: string, research: readonly string[], owned: readonly { kind: string; owner: number; constructionRemaining: bigint }[], owner: number): string | undefined {
+  if (LEVELED_RESEARCH.includes(kind)) {
+    const next = researchLevel(research, kind) + 1;
+    if (next > MAX_RESEARCH_LEVEL) return "Already researched";
+    return next > 1 && tierOf(research) < next ? `Requires Tier ${next}` : undefined;
+  }
   if (research.includes(kind)) return "Already researched";
   const tier = /^tier_([123])$/.exec(kind)?.[1];
   if (!tier) return undefined;
@@ -151,7 +163,21 @@ export function researchReason(kind: string, research: readonly string[], owned:
   return undefined;
 }
 /** A research list entry as a short readable name ("armor", "Tier 2"). */
-export const researchName = (kind: string): string => /^tier_/.test(kind) ? `Tier ${kind.slice(5)}` : kind.replace(/^research_/, "");
+export const researchName = (kind: string): string => /^tier_/.test(kind) ? `Tier ${kind.slice(5)}` : kind.replace(/^research_/, "").replace(/_(\d)$/, " $1");
+/** The level of a leveled technology a research list holds (`rules::research_level`): `research_weapons`, `_2`, `_3`. */
+export function researchLevel(research: readonly string[], kind: string): number {
+  let level = 0;
+  while (level < MAX_RESEARCH_LEVEL && research.includes(level === 0 ? kind : `${kind}_${level + 1}`)) level++;
+  return level;
+}
+/** The research-list entry buying `kind` next would add (`rules::research_key`). */
+export const nextResearchKey = (kind: string, research: readonly string[]): string => {
+  const level = researchLevel(research, kind);
+  return level === 0 ? kind : `${kind}_${level + 1}`;
+};
+/** The research list for display: only the highest level of each leveled technology. */
+export const researchSummary = (research: readonly string[]): string[] =>
+  research.filter(item => !LEVELED_RESEARCH.some(kind => item.startsWith(kind) && researchLevel(research, kind) > (Number(item.slice(kind.length + 1)) || 1))).map(researchName);
 export const isBuilding = (kind: string): boolean => CATALOG[kind]?.building ?? false;
 /**
  * Each faction's army, in command-card order: fighter and raider or support
@@ -181,6 +207,51 @@ export const isArmy = (kind: string): boolean => !!armyFaction(kind);
 /** The factory trains each faction's heavy units; the barracks trains the rest. */
 export const armyBuilding = (kind: string): string | undefined =>
   !isArmy(kind) ? undefined : FACTORY_KINDS.includes(kind) ? "factory" : "barracks";
+// --- Combat stances ----------------------------------------------------------
+
+export type StanceName = "standard" | "charge" | "kite" | "hold_ground";
+/** Picker order, short label and one-line tooltip. Numbers mirror `rules::CHARGE_RANGE_PERCENT` and `KITE_TRIGGER_PERCENT`. */
+export const STANCES: readonly { id: StanceName; label: string; hint: string }[] = [
+  { id: "standard", label: "Standard", hint: "Close to 90% of weapon range and fire" },
+  { id: "charge", label: "Charge", hint: "Close to 40% of weapon range: push into the enemy and soak fire" },
+  { id: "kite", label: "Kite", hint: "While reloading, step away from an armed target closer than 80% of weapon range" },
+  { id: "hold_ground", label: "Hold", hint: "Fire at what is in range, never walk toward a target" },
+];
+/** The stance a kind fights in until chosen otherwise: `rules::default_stance`. */
+export const defaultStance = (kind: string): StanceName =>
+  ["marksman", "lancer", "spitter"].includes(kind) ? "kite" : ["bulwark", "behemoth", "crusher"].includes(kind) ? "charge" : "standard";
+/** The order that sets a stance: `stance_<kind>_<stance>`, free and instant like research. */
+export const stanceOrder = (kind: string, stance: StanceName): string => `stance_${kind}_${stance}`;
+
+// --- Production doctrine -----------------------------------------------------
+
+/** Numbers mirror `doctrine.rs`; every one is experimental. */
+export const DOCTRINE_DEFAULT_WEIGHT = 5;
+export const DOCTRINE_MAX_WEIGHT = 10;
+export const DOCTRINE_RESERVE_STEP = 50;
+export const DOCTRINE_MAX_RESERVE = 2000;
+/** The switch orders; `x` is 1 for on and 0 for off. */
+export const DOCTRINE_SWITCH = { train: "doctrine_train", tier: "doctrine_tier", research: "doctrine_research", build: "doctrine_build" } as const;
+export const DOCTRINE_RESERVE_ORDER = "doctrine_reserve";
+/** The order that sets a composition weight; `x` is 0 to 10. */
+export const doctrineWeightOrder = (kind: string): string => `doctrine_weight_${kind}`;
+export type DoctrinePreset = "even" | "basics" | "heavy";
+export const DOCTRINE_PRESETS: readonly { id: DoctrinePreset; label: string; hint: string }[] = [
+  { id: "even", label: "Even", hint: "Every unit kind at weight 5" },
+  { id: "basics", label: "Basics", hint: "Mostly the first barracks unit, some of the second, nothing else" },
+  { id: "heavy", label: "Heavy", hint: "Factory units first (8), barracks units behind them (3)" },
+];
+/** The weight each of a faction's army kinds takes under a preset. */
+export function presetWeights(faction: "industrial" | "network" | "organic", preset: DoctrinePreset): Record<string, number> {
+  const weights: Record<string, number> = {};
+  ROSTER[faction].forEach((kind, index) => {
+    weights[kind] = preset === "even" ? DOCTRINE_DEFAULT_WEIGHT
+      : preset === "basics" ? (index === 0 ? 10 : index === 1 ? 4 : 0)
+      : armyBuilding(kind) === "factory" ? 8 : 3;
+  });
+  return weights;
+}
+
 /** A building that shoots: `rules::is_static_defense`. */
 export const isStaticDefense = (kind: string): boolean => ["turret", "bunker", "bastion", "spine"].includes(kind);
 
@@ -350,7 +421,8 @@ export const canProduce = (kind: string, building: string, faction: FactionName)
 export const currencyOf = (kind: ResourceKind): Currency => (kind.tag === "Catalyst" ? "catalyst" : kind.tag === "Terrazine" ? "terrazine" : "material");
 
 /** The price of anything orderable, including the `research_*` orders. */
-export function costOf(kind: string): Cost {
+export function costOf(kind: string, research: readonly string[] = []): Cost {
+  if (LEVELED_RESEARCH.includes(kind)) return price(LEVELED_RESEARCH_COSTS[Math.min(researchLevel(research, kind), MAX_RESEARCH_LEVEL - 1)]);
   if (kind.startsWith("research_")) return RESEARCH_COST;
   const tier = /^tier_([123])$/.exec(kind)?.[1];
   if (tier) return TIERS[Number(tier) as 1 | 2 | 3].cost;
@@ -445,6 +517,12 @@ export function buildReachCircles(owned: Entity[]): { x: number; y: number; fini
 export function inBuildReach(x: number, y: number, owned: Entity[]): boolean {
   return buildReachCircles(owned).some(circle => Math.hypot(circle.x - x, circle.y - y) <= BUILD_RADIUS);
 }
+
+/** The tier a building needs before it can be placed (`rules::SYNTHESIZER_TIER`): 2 for the synthesizer, 0 for the rest. */
+export const buildTier = (kind: string): number => kind === "synthesizer" ? 2 : 0;
+/** The server's refusal when the owner's tier is too low for `kind`, or undefined. */
+export const buildTierError = (kind: string, research: readonly string[]): string | undefined =>
+  tierOf(research) < buildTier(kind) ? `Requires Tier ${buildTier(kind)}` : undefined;
 
 export function placementError(kind: string, aimX: number, aimY: number, owner: number, units: Entity[], nodes: Node[]): string | undefined {
   let x = aimX, y = aimY;

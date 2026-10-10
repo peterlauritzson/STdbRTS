@@ -6,12 +6,13 @@ import { isArmy } from "./catalog";
  * The client sends one ordinary `issue_order` with the goal in x,y and the
  * server runs the state machine from there; nothing here predicts its states.
  */
-export type BehaviorKind = "harass" | "guard" | "raid";
+export type BehaviorKind = "harass" | "guard" | "raid" | "assault";
 
 export const BEHAVIORS: Readonly<Record<BehaviorKind, { label: string; color: string; hint: string }>> = {
   harass: { label: "Harass", color: "#ffa94d", hint: "Harass: attack-move to the goal, preferring enemy labour; retreat home below 50% health or when outnumbered, recover to 80%, then go back" },
   guard: { label: "Guard", color: "#6ea8ff", hint: "Guard: hold the area around the goal and fight there; if chased more than 600 away, walk back without fighting" },
   raid: { label: "Raid", color: "#ff6b6b", hint: "Raid: push to the goal; retreat home below 35% health, recover to 90%, then push again" },
+  assault: { label: "Rush", color: "#ff9ec4", hint: "Rush: attack-move to the goal and never retreat" },
 };
 
 /** The preset a `rally_<preset>` order carries (a producer's behavior rally), if it is one. */

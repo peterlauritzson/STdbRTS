@@ -1,12 +1,12 @@
 import "../styles.css";
-import { createElement, createIcons, BookOpen, Keyboard, Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare, type IconNode } from "lucide";
+import { createElement, createIcons, BookOpen, Keyboard, Crosshair, Radio, RadioTower, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare, type IconNode } from "lucide";
 import { ABILITIES, castRefusal, scheduledCasts, type AbilityKind } from "./abilities";
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
 import { countdown, ownerColor, TICK_MS, VISUALS } from "./presentation";
 import { ALERT_BANNER_MS, alertText } from "./alerts";
 import { availableAfter, pendingLabel, pendingSpend, refusedCurrency } from "./spend";
-import { addCost, NO_COST, isCompletedHub, ROSTER, armyBuilding, armyFaction, describe, passiveLine, veteranStacks, isVeteran, CATALOG, costOf, CURRENCIES, currencyOf, formatCost, RESEARCH_COST, TIERS, TIER_UPGRADES, tierOrder, tierOf, requiredTier, researchReason, researchName, shortfall, shortfallReason, TECHNOLOGIES, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_BUILDINGS, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
+import { addCost, NO_COST, buildTierError, LEVELED_RESEARCH, MAX_RESEARCH_LEVEL, researchLevel, researchSummary, isCompletedHub, ROSTER, armyBuilding, armyFaction, describe, passiveLine, veteranStacks, isVeteran, CATALOG, costOf, CURRENCIES, currencyOf, formatCost, RESEARCH_COST, TIERS, TIER_UPGRADES, tierOrder, tierOf, requiredTier, researchReason, shortfall, shortfallReason, TECHNOLOGIES, STANCES, DOCTRINE_DEFAULT_WEIGHT, DOCTRINE_MAX_WEIGHT, DOCTRINE_RESERVE_STEP, DOCTRINE_MAX_RESERVE, DOCTRINE_SWITCH, DOCTRINE_RESERVE_ORDER, DOCTRINE_PRESETS, doctrineWeightOrder, presetWeights, defaultStance, stanceOrder, type StanceName, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_BUILDINGS, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
 import { Practice, type PracticeOpponent } from "./practice";
 import { Feedback } from "./feedback";
 import { ScoreScreen, type ScorePlayer } from "./scorescreen";
@@ -14,10 +14,10 @@ import { BUILDING_FACTION, powered, type Field } from "./zones";
 import { queueView, rallyText, scheduledTraining, trainingSite } from "./production";
 import { BUILD_KEYS, BUILD_MENU_KEY, keyLabel, OPERATION_KEYS, TRAIN_KEYS, UNIT_KEYS } from "./hotkeys";
 import { Operations } from "./operations";
-import { Missions, missionLabel, type Mission } from "./missions";
+import { Missions, MAX_SIZE, PERCENT_STEP, TACTICS, TACTIC_IDS, gatherRadius, memberActivities, missionGoals, missionLabel, type Mission, type Tactic } from "./missions";
 import type { Entity } from "./units";
 import { armyRoster, visibleRows, type RosterRow } from "./roster";
-import { BEHAVIORS, behaviorLine, type BehaviorKind } from "./behaviors";
+import { behaviorLine } from "./behaviors";
 import { ChatPanel } from "./chat";
 
 function element<Type extends HTMLElement = HTMLElement>(id: string): Type {
@@ -65,6 +65,14 @@ function catalogButton(id: string, label: string, cost: Cost, seconds: number | 
  * span for the short currency is marked, and the tooltip carries the same
  * refusal the server would return if the order were sent anyway.
  */
+/** Rewrites a button's caption in place (label, then the price line, or "max" with no price). Skipped when nothing changed. */
+function recaption(button: HTMLButtonElement, label: string, cost: Cost | undefined, seconds: number | string): void {
+  const signature = `${label}|${cost ? formatCost(cost) : "max"}`;
+  if (button.dataset.caption === signature) return;
+  button.dataset.caption = signature;
+  button.querySelector(":scope > span")?.replaceChildren(document.createTextNode(label), cost ? costLine(cost, seconds) : text("small", "max", "cost-line"));
+}
+
 function affordability(button: HTMLButtonElement, cost: Cost, balance: Cost, blocked: boolean, title: string): void {
   const missing = shortfall(balance, cost);
   button.disabled = blocked || !!missing;
@@ -98,8 +106,9 @@ for (const kind of TRAINABLE) {
 // The order is the build card's hotkey order (Q W E R T Y U I over the visible
 // buttons): faction buildings that are hidden leave no gap, and the refinery
 // lands on U for every faction because each has exactly one building before it
-// (sensor, relay or tumor) and the bunker, bastion or spine after it.
-const BUILDABLE = ["barracks", "outpost", "turret", "factory", "lab", "sensor", "relay", "tumor", "refinery", "bunker", "bastion", "spine"];
+// (sensor, relay or tumor) and the bunker, bastion or spine after it; the
+// synthesizer is last, on P.
+const BUILDABLE = ["barracks", "outpost", "turret", "factory", "lab", "sensor", "relay", "tumor", "refinery", "bunker", "bastion", "spine", "synthesizer"];
 for (const kind of BUILDABLE) {
   const definition = CATALOG[kind];
   const button = catalogButton(`build-${kind}`, definition.label, definition.cost, definition.seconds, definition.icon, describe(kind));
@@ -116,15 +125,20 @@ const RESEARCH_BUTTONS: readonly { id: string; order: string; label: string; ico
   ...Object.entries(TECHNOLOGIES).map(([id, definition]) => ({ id, order: `research_${id}`, label: definition.label, icon: definition.icon, cost: RESEARCH_COST, description: definition.description, tier: 0 })),
   ...([1, 2, 3] as const).map(tier => ({ id: `tier_${tier}`, order: tierOrder(tier), label: TIERS[tier].label, icon: ["tent", "factory", "flask-conical"][tier - 1], cost: TIERS[tier].cost, description: `Unlocks ${TIERS[tier].unlocks}`, tier })),
 ];
-for (const research of RESEARCH_BUTTONS) element("research-buttons").append(catalogButton(`research-${research.id}`, research.label, research.cost, "instant", research.icon, research.description));
-createIcons({ icons: { Crosshair, Radio, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, BookOpen, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare } });
+for (const research of RESEARCH_BUTTONS) {
+  const button = catalogButton(`research-${research.id}`, research.label, research.cost, "instant", research.icon, research.description);
+  // Weapons and armour have levels; a locked level names the tier it waits for.
+  if (LEVELED_RESEARCH.includes(research.order)) { const tag = text("em", "", "tier-tag"); tag.hidden = true; button.append(tag); }
+  element("research-buttons").append(button);
+}
+createIcons({ icons: { Crosshair, Radio, RadioTower, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, BookOpen, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare } });
 /** Catalogue icon names to icon nodes, for portraits built after `createIcons` has run. */
 const ICON_NODES: Record<string, IconNode> = {
   house: House, hammer: Hammer, radio: Radio, sprout: Sprout, swords: Swords, radar: Radar, crosshair: Crosshair,
   "shield-half": ShieldHalf, wind: Wind, zap: Zap, bug: Bug, droplets: Droplets, tent: Tent, factory: Factory,
   shield: Shield, warehouse: Warehouse, "flask-conical": FlaskConical, "satellite-dish": SatelliteDish, fuel: Fuel,
   target: Target, "heart-pulse": HeartPulse, "brick-wall": BrickWall, waypoints: Waypoints, ghost: Ghost, eye: Eye,
-  footprints: Footprints, flame: Flame, skull: Skull, castle: Castle, triangle: Triangle,
+  footprints: Footprints, flame: Flame, skull: Skull, castle: Castle, triangle: Triangle, repeat: Repeat,
 };
 function icon(name: string): SVGElement {
   return createElement(ICON_NODES[name] ?? Square);
@@ -142,7 +156,7 @@ function badge(button: HTMLElement, key: string | undefined): void {
   const label = keyLabel(key);
   if (node.textContent !== label) node.textContent = label;
 }
-for (const [id, key] of [["stop", UNIT_KEYS.stop], ["attack-move", UNIT_KEYS.attackMove], ["hold", UNIT_KEYS.hold], ["mission-harass", UNIT_KEYS.harass], ["mission-guard", UNIT_KEYS.guard], ["mission-raid", UNIT_KEYS.raid], ["repair", UNIT_KEYS.repair], ["return", UNIT_KEYS.returnCargo], ["teleport", UNIT_KEYS.teleport], ["recall", UNIT_KEYS.ability], ["bloom", UNIT_KEYS.ability], ["set-rally", UNIT_KEYS.rally], ["expand", OPERATION_KEYS.expand], ["territory", OPERATION_KEYS.territory], ["auto-labour", OPERATION_KEYS.autoLabour], ["idle-worker", "F1"], ["select-army", "F2"]] as const) {
+for (const [id, key] of [["stop", UNIT_KEYS.stop], ["attack-move", UNIT_KEYS.attackMove], ["hold", UNIT_KEYS.hold], ["mission-harass", UNIT_KEYS.harass], ["mission-guard", UNIT_KEYS.guard], ["mission-raid", UNIT_KEYS.raid], ["mission-rush", UNIT_KEYS.rush], ["mission-gather", UNIT_KEYS.gather], ["repair", UNIT_KEYS.repair], ["return", UNIT_KEYS.returnCargo], ["teleport", UNIT_KEYS.teleport], ["recall", UNIT_KEYS.ability], ["bloom", UNIT_KEYS.ability], ["set-rally", UNIT_KEYS.rally], ["expand", OPERATION_KEYS.expand], ["territory", OPERATION_KEYS.territory], ["auto-labour", OPERATION_KEYS.autoLabour], ["idle-worker", "F1"], ["select-army", "F2"]] as const) {
   const button = element(id);
   badge(button, key);
   button.title = `${button.title} (${keyLabel(key)})`;
@@ -159,9 +173,10 @@ element("sound").setAttribute("aria-pressed", String(feedback.enabled));
 element("sound").title = feedback.enabled ? "Sound on" : "Sound off";
 const battlefield = new Battlefield(element<HTMLCanvasElement>("battlefield"), element<HTMLCanvasElement>("minimap"), session);
 const operations = new Operations(session, () => battlefield.issuer());
-const missions = new Missions(session);
-battlefield.onMission = (kind, point, selected) => missions.add(kind, point, selected);
-battlefield.missions = () => missions.list.map(mission => ({ id: mission.id, kind: mission.kind, x: mission.x, y: mission.y, label: missionLabel(mission) }));
+const missions = new Missions(session, () => battlefield.issuer());
+battlefield.onMission = (tactic, point, selected) => missions.add(tactic, point, selected);
+battlefield.onMissionRally = (id, point) => missions.setRally(id, point);
+battlefield.missions = () => missions.list.map(mission => ({ id: mission.id, x: mission.x, y: mission.y, label: missionLabel(mission, gatheredCount(mission)), color: TACTICS[mission.tactic].color, leash: mission.tactic === "guard", goals: missionGoals(mission), ...(mission.tactic === "gather" ? { rally: mission.rally } : {}) }));
 battlefield.missionAt = point => missions.at(point)?.id;
 battlefield.onAssign = (id, selected) => missions.assign(id, selected);
 battlefield.onExpand = point => operations.begin(point);
@@ -379,10 +394,10 @@ element("return").addEventListener("click", () => battlefield.issue("return"));
 element("hold").addEventListener("click", () => battlefield.issue("hold"));
 element("attack-move").addEventListener("click", () => battlefield.arm("attack_move"));
 /** The Strategy panel's mission buttons: arm placement; the next map or minimap click puts the mission there. */
-for (const kind of Object.keys(BEHAVIORS) as BehaviorKind[]) {
+for (const kind of TACTIC_IDS) {
   const button = element(`mission-${kind}`);
-  button.title = `${BEHAVIORS[kind].hint}. Click, then click the map: a standing mission that idle and new army units fill, with any selected army joining it (${keyLabel(UNIT_KEYS[kind])})`;
-  button.querySelector<HTMLElement>(".swatch")!.style.background = BEHAVIORS[kind].color;
+  button.title = `${TACTICS[kind].hint}. Click, then click the map: a standing mission the server keeps staffed with idle and new army units, with any selected army joining it`;
+  button.querySelector<HTMLElement>(".swatch")!.style.background = TACTICS[kind].color;
   button.addEventListener("click", () => battlefield.arm(`mission_${kind}`));
 }
 element("repair").addEventListener("click", () => battlefield.arm("repair"));
@@ -531,6 +546,9 @@ function renderLobby(): void {
 function renderMatch(): void {
   const { room, me, units, players } = session.snapshot;
   if (!room || !me) return;
+  renderStances();
+  renderDoctrine();
+  renderStrategy();
   const owned = units.filter(unit => unit.owner === me.slot);
   // Primary-hub victory: a player acts while any completed hub survives.
   const alive = owned.some(isCompletedHub);
@@ -542,7 +560,7 @@ function renderMatch(): void {
   const balance: Cost = { material: me.material, catalyst: me.catalyst, terrazine: me.terrazine };
   // Orders sent but not yet executed have not been charged, yet the money is
   // spoken for: buttons and readouts work from what is actually left.
-  const committed = pendingSpend(session.snapshot.commands, session.pending.values(), me.slot);
+  const committed = pendingSpend(session.snapshot.commands, session.pending.values(), me.slot, me.research);
   const free = availableAfter(balance, committed);
   for (const currency of CURRENCIES) {
     const label = pendingLabel(committed, currency);
@@ -624,23 +642,35 @@ function renderMatch(): void {
     if (button.hidden) continue;
     // Construction is driven by any labour unit now, not only by a worker:
     // gating this on "worker" left Network and Organic unable to build at all.
-    const blocked = !canOrder || !battlefield.issuer() || buildings.length >= MAX_BUILDINGS || ((kind === "factory" || kind === "lab") && !buildings.some(unit => unit.kind === "barracks" && unit.constructionRemaining === 0n));
-    affordability(element<HTMLButtonElement>(`build-${kind}`), definition.cost, free, blocked, describe(kind));
+    const tierNeeded = buildTierError(kind, me.research);
+    const blocked = !canOrder || !battlefield.issuer() || buildings.length >= MAX_BUILDINGS || !!tierNeeded || ((kind === "factory" || kind === "lab") && !buildings.some(unit => unit.kind === "barracks" && unit.constructionRemaining === 0n));
+    affordability(element<HTMLButtonElement>(`build-${kind}`), definition.cost, free, blocked, tierNeeded ? `${describe(kind)} / ${tierNeeded}` : describe(kind));
+    element(`build-${kind}`).classList.toggle("locked", !!tierNeeded);
     element(`build-${kind}`).setAttribute("aria-pressed", String(battlefield.targeting === `build_${kind}`));
   }
   element("building-count").textContent = `${buildings.length} / ${MAX_BUILDINGS} structures`;
   for (const research of RESEARCH_BUTTONS) {
-    const bought = me.research.includes(research.order);
+    const leveled = LEVELED_RESEARCH.includes(research.order);
+    const level = leveled ? researchLevel(me.research, research.order) : 0;
+    const bought = leveled ? level >= MAX_RESEARCH_LEVEL : me.research.includes(research.order);
     const button = element<HTMLButtonElement>(`research-${research.id}`);
     const reason = researchReason(research.order, me.research, owned, me.slot);
+    // The next level's name and price ("Weapons 2", 400 material), or "max" once all three are in.
+    const cost = leveled ? costOf(research.order, me.research) : research.cost;
+    if (leveled) {
+      recaption(button, bought ? `${research.label} ${MAX_RESEARCH_LEVEL}` : `${research.label} ${level + 1}`, bought ? undefined : cost, "instant");
+      const tag = button.querySelector<HTMLElement>(":scope > .tier-tag");
+      if (tag) { tag.hidden = !reason?.startsWith("Requires Tier"); tag.textContent = reason?.replace("Requires ", "") ?? ""; }
+      button.classList.toggle("locked", !!reason?.startsWith("Requires Tier"));
+    }
     // Tiers carry the faction's own upgrade in their tooltip.
     const detail = research.tier ? `${TIER_UPGRADES[faction][research.tier - 1].name}: ${TIER_UPGRADES[faction][research.tier - 1].text} / ${research.description}` : research.description;
     // Bought research is never short of anything, so it is priced at nothing
     // and reads as complete rather than unaffordable.
-    affordability(button, bought ? NO_COST : research.cost, free, !canOrder || !battlefield.issuer() || !!reason, `${detail} / ${bought ? "Complete" : reason ?? "Instant"}`);
+    affordability(button, bought ? NO_COST : cost, free, !canOrder || !battlefield.issuer() || !!reason, `${detail} / ${bought ? (leveled ? "Max level" : "Complete") : reason ?? "Instant"}`);
     button.classList.toggle("completed", bought);
   }
-  element("research-status").textContent = me.research.length ? me.research.map(researchName).join(" / ") : "No upgrades";
+  element("research-status").textContent = me.research.length ? researchSummary(me.research).join(" / ") : "No upgrades";
   for (const tab of CARD_TABS) {
     const keys: readonly string[] = tab === "build" ? BUILD_KEYS : TRAIN_KEYS;
     cardButtons(tab).forEach((button, index) => badge(button, keys[index]));
@@ -676,7 +706,7 @@ function renderMatch(): void {
   // A harvester gathers only: the server refuses it hold and attack-move by name.
   for (const id of ["hold", "attack-move"]) show(id, mine.some(unit => fights(unit.kind)));
   // Missions are about places, not selections: always available while orders are open.
-  for (const kind of Object.keys(BEHAVIORS) as BehaviorKind[]) {
+  for (const kind of TACTIC_IDS) {
     element<HTMLButtonElement>(`mission-${kind}`).disabled = !canOrder;
     element(`mission-${kind}`).setAttribute("aria-pressed", String(battlefield.targeting === `mission_${kind}`));
   }
@@ -735,8 +765,11 @@ function renderMatch(): void {
   // Where a move rally points, in words: the building it sits on, if any.
   const rallyLandmark = producer?.order.kind === "rally_move" ? units.find(unit => isBuilding(unit.kind) && Math.hypot(unit.x - producer.order.x, unit.y - producer.order.y) <= CATALOG[unit.kind].radius + 15) : undefined;
   element("rally-status").textContent = producer ? rallyText(producer, rallyNode, rallyLandmark && { label: CATALOG[rallyLandmark.kind].label }) : "Rally unset";
-  element("selection-order").textContent = selection.length === 1 ? selection[0].constructionRemaining > 0n ? `Constructing / ${(Number(selection[0].constructionRemaining) / 20).toFixed(1)}s left` : selection[0].order.kind.split("_").join(" ") : "";
-  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : battlefield.targeting === "recall" ? "Recall area / your units near it return home" : battlefield.targeting === "bloom" ? "Bloom site / on your own creep" : battlefield.targeting === "rally" ? "Rally target" : battlefield.targeting === "expand" ? "Expand toward / click the map or minimap" : battlefield.targeting === "territory" ? "Extend territory toward / click the map or minimap" : battlefield.targeting?.startsWith("mission_") ? `${BEHAVIORS[battlefield.targeting.slice(8) as BehaviorKind].label} mission / click the map or minimap (selected army joins it)` : "";
+  // Mission members: the mission leads (their order is whatever the mission is running), else a lone unit's order.
+  const missionTags = [...new Set(memberActivities(missions.list, selection).values())];
+  const inMission = selection.length > 0 && selection.every(unit => missions.list.some(mission => mission.members.has(unit.id)));
+  element("selection-order").textContent = inMission && missionTags.length ? `Mission: ${missionTags.join(", ")}` : selection.length === 1 ? selection[0].constructionRemaining > 0n ? `Constructing / ${(Number(selection[0].constructionRemaining) / 20).toFixed(1)}s left` : selection[0].order.kind.split("_").join(" ") : "";
+  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : battlefield.targeting === "recall" ? "Recall area / your units near it return home" : battlefield.targeting === "bloom" ? "Bloom site / on your own creep" : battlefield.targeting === "rally" ? "Rally target" : battlefield.targeting === "expand" ? "Expand toward / click the map or minimap" : battlefield.targeting === "territory" ? "Extend territory toward / click the map or minimap" : battlefield.targeting === "set_mission_rally" ? "Gather point / click the map or minimap" : battlefield.targeting?.startsWith("mission_") ? `${TACTICS[battlefield.targeting.slice(8) as Tactic].label} mission / click the map or minimap (selected army joins it)` : "";
   element("targeting-state").hidden = !battlefield.targeting;
   element("targeting-state").textContent = targetLabel;
   for (const [id, kind] of [["attack-move", "attack_move"], ["repair", "repair"], ["set-rally", "rally"], ["teleport", "teleport"], ["recall", "recall"], ["bloom", "bloom"]]) element(id).setAttribute("aria-pressed", String(battlefield.targeting === kind));
@@ -793,7 +826,7 @@ try { armyCollapsed = localStorage.getItem("army-roster-collapsed") === "1"; } c
  */
 function renderArmyRoster(owned: Entity[], slot: number): void {
   const panel = element("army-roster");
-  const rows = armyRoster(owned, slot, owned);
+  const rows = armyRoster(owned, slot, owned, memberActivities(missions.list, owned));
   const { shown, more } = visibleRows(rows);
   const total = rows.reduce((sum, row) => sum + row.count, 0);
   const signature = JSON.stringify([armyCollapsed, total, more, shown.map(row => [row.activity, row.ids, row.composition, row.location])]);
@@ -834,12 +867,28 @@ function armyRow(row: RosterRow): HTMLElement {
   return button;
 }
 
+/** Members of a gather mission within the gathered radius of its rally (what the strike waits on); undefined for the other tactics. */
+function gatheredCount(mission: Mission): number | undefined {
+  if (mission.tactic !== "gather" || mission.state !== "gather") return undefined;
+  const radius = gatherRadius(mission.members.size);
+  return session.snapshot.units.filter(unit => mission.members.has(unit.id) && Math.hypot(unit.x - mission.rally.x, unit.y - mission.rally.y) <= radius).length;
+}
+
+let strategySignature = "";
 /**
  * The Strategy panel's list: every standing mission (size, members, cancel) and
  * every running operation (step, note, cancel), one row each. Rebuilt only when
  * missions or operations change, so a click never lands on a replaced button.
  */
 function renderStrategy(): void {
+  const mine = missions.list;
+  // Rebuilt only when something shown changed, so a click never lands on a replaced button.
+  const signature = JSON.stringify([
+    mine.map(mission => [mission.id, gatheredCount(mission), mission.tactic, mission.size, mission.state, mission.x, mission.y, mission.rally.x, mission.rally.y, mission.gatherPercent, mission.fallbackPercent, mission.members.size]),
+    operations.list.map(operation => [operation.id, operation.done, operation.total, operation.note]), operations.autoLabour,
+  ]);
+  if (signature === strategySignature) return;
+  strategySignature = signature;
   const rows: HTMLElement[] = [];
   const tool = (label: string, title: string, action: () => void, pressed?: boolean): HTMLButtonElement => {
     const button = text("button", label, "strategy-tool") as HTMLButtonElement;
@@ -854,23 +903,42 @@ function renderStrategy(): void {
     battlefield.centreOn(members.length ? { x: members.reduce((sum, unit) => sum + unit.x, 0) / members.length, y: members.reduce((sum, unit) => sum + unit.y, 0) / members.length } : mission);
     renderMatch();
   };
-  for (const mission of missions.list) {
+  for (const mission of mine) {
+    const info = TACTICS[mission.tactic];
     const row = text("div", "", "strategy-row mission-row");
     row.dataset.mission = String(mission.id);
-    const swatch = text("span", "", "swatch"); swatch.style.background = BEHAVIORS[mission.kind].color;
-    const name = text("button", BEHAVIORS[mission.kind].label, "strategy-name-btn") as HTMLButtonElement;
+    const swatch = text("span", "", "swatch"); swatch.style.background = info.color;
+    const name = text("button", missionLabel(mission, gatheredCount(mission)), "strategy-name-btn") as HTMLButtonElement;
     name.title = "Select its units and centre the camera on them"; name.addEventListener("click", () => goTo(mission));
+    const picker = document.createElement("select");
+    picker.className = "mission-tactic"; picker.title = "Change this mission's tactic"; picker.setAttribute("aria-label", "Mission tactic");
+    for (const id of TACTIC_IDS) picker.append(new Option(TACTICS[id].label, id, false, id === mission.tactic));
+    picker.addEventListener("change", () => missions.setTactic(mission.id, picker.value as Tactic));
     const rest = mission.size === "rest";
     const numeric = typeof mission.size === "number" ? mission.size : mission.members.size;
-    const count = text("span", rest ? `${mission.members.size} · all rest` : `${mission.members.size}/${mission.size}`, "strategy-count mono");
-    const bigger = tool("+", `Larger ${BEHAVIORS[mission.kind].label} mission`, () => missions.setSize(mission.id, numeric + 1));
+    const bigger = tool("+", `Larger ${info.label} mission`, () => missions.setSize(mission.id, Math.min(MAX_SIZE, numeric + 1)));
     bigger.disabled = rest;
-    row.append(swatch, name, count,
-      tool("\u2212", `Smaller ${BEHAVIORS[mission.kind].label} mission`, () => missions.setSize(mission.id, numeric - 1)),
+    row.append(swatch, name, picker,
+      tool("\u2212", `Smaller ${info.label} mission`, () => missions.setSize(mission.id, Math.max(1, numeric - 1))),
       bigger,
       tool("All", rest ? "Take a fixed number of units" : "Take every army unit not needed elsewhere", () => missions.setSize(mission.id, rest ? Math.max(1, mission.members.size) : "rest"), rest),
-      tool("\u00d7", `Cancel ${BEHAVIORS[mission.kind].label} mission`, () => missions.remove(mission.id)));
+      tool("\u00d7", `Cancel ${info.label} mission`, () => missions.remove(mission.id)));
     rows.push(row);
+    if (mission.tactic === "gather") {
+      const knobs = text("div", "", "strategy-row mission-knobs");
+      knobs.dataset.missionKnobs = String(mission.id);
+      knobs.append(
+        text("span", "strike at", "mono"),
+        tool("\u2212", "Strike with a smaller share gathered", () => missions.setGather(mission.id, mission.gatherPercent - PERCENT_STEP)),
+        text("span", `${mission.gatherPercent}%`, "mono"),
+        tool("+", "Strike with a larger share gathered", () => missions.setGather(mission.id, mission.gatherPercent + PERCENT_STEP)),
+        text("span", "fall back", "mono"),
+        tool("\u2212", "Fall back at a lower share of the strike strength", () => missions.setFallback(mission.id, mission.fallbackPercent - PERCENT_STEP)),
+        text("span", `${mission.fallbackPercent}%`, "mono"),
+        tool("+", "Fall back at a higher share of the strike strength", () => missions.setFallback(mission.id, mission.fallbackPercent + PERCENT_STEP)),
+        tool("Rally", "Move the rally point: click, then click the map or minimap", () => battlefield.armMissionRally(mission.id)));
+      rows.push(knobs);
+    }
   }
   for (const operation of operations.list) {
     const row = text("div", "", "strategy-row operation-row");
@@ -886,11 +954,120 @@ function renderStrategy(): void {
       tool("\u00d7", "Turn off Saturate workers", () => operations.toggleAutoLabour()));
     rows.push(row);
   }
-  if (!rows.length) rows.push(text("p", "No missions. Pick Harass, Guard or Raid, then click the map: idle and new army units fill it.", "strategy-empty"));
+  if (!rows.length) rows.push(text("p", "No missions. Pick a tactic, then click the map: idle army units fill it.", "strategy-empty"));
   element("strategy-list").replaceChildren(...rows);
 }
+/**
+ * The Strategy panel's Stances section: one row per army kind of the player's
+ * faction with a four-way picker. A kind with no `stance` row shows its default.
+ * Rebuilt only when the faction or a choice changes.
+ */
+let stanceSignature = "";
+function renderStances(): void {
+  const { me, stances } = session.snapshot;
+  if (!me) return;
+  const faction = myFaction();
+  const picked = new Map(stances.filter(row => row.slot === me.slot).map(row => [row.kind, row.stance as StanceName]));
+  const current = (kind: string): StanceName => picked.get(kind) ?? defaultStance(kind);
+  const signature = `${faction}|${ROSTER[faction].map(current).join(",")}`;
+  if (signature === stanceSignature) return;
+  stanceSignature = signature;
+  element("stance-list").replaceChildren(...ROSTER[faction].map(kind => {
+    const row = text("div", "", "stance-row");
+    row.append(text("span", CATALOG[kind].label, "stance-kind"));
+    for (const stance of STANCES) {
+      const button = text("button", stance.label, "strategy-tool stance-tool") as HTMLButtonElement;
+      button.title = `${CATALOG[kind].label}: ${stance.hint}`;
+      button.setAttribute("aria-pressed", String(current(kind) === stance.id));
+      button.addEventListener("click", () => {
+        const issuer = battlefield.issuer();
+        if (issuer) void session.order([issuer.id], { kind: stanceOrder(kind, stance.id), x: 0, y: 0, target: 0 });
+      });
+      row.append(button);
+    }
+    return row;
+  }));
+}
+/**
+ * The Strategy panel's Production section: this player's production doctrine,
+ * which the server carries out. Switches, a weight stepper per army kind of the
+ * faction (greyed with its tier while locked), the catalyst reserve and three
+ * presets. Every control only sends a `doctrine_*` order; the state comes back
+ * through the subscription. Rebuilt only when what it shows changes.
+ */
+let doctrineSignature = "";
+function renderDoctrine(): void {
+  const { me, doctrines, doctrineWeights } = session.snapshot;
+  if (!me) return;
+  const faction = myFaction();
+  const mine = doctrines.find(row => row.slot === me.slot);
+  const weights = new Map(doctrineWeights.filter(row => row.slot === me.slot).map(row => [row.kind, row.weight]));
+  const weightOf = (kind: string): number => weights.get(kind) ?? DOCTRINE_DEFAULT_WEIGHT;
+  const tier = tierOf(me.research);
+  const state = { train: !!mine?.enabled, tier: !!mine?.autoTier, research: !!mine?.autoResearch, build: !!mine?.autoBuild, reserve: mine?.catalystReserve ?? 0 };
+  const signature = `${faction}|${tier}|${JSON.stringify(state)}|${ROSTER[faction].map(weightOf).join(",")}`;
+  if (signature === doctrineSignature) return;
+  doctrineSignature = signature;
+  const send = (kind: string, x: number): void => {
+    const issuer = battlefield.issuer();
+    if (issuer) void session.order([issuer.id], { kind, x, y: 0, target: 0 });
+  };
+  const toggle = (label: string, title: string, on: boolean, kind: string): HTMLElement => {
+    const button = text("button", label, "strategy-tool") as HTMLButtonElement;
+    button.title = title;
+    button.setAttribute("aria-pressed", String(on));
+    button.addEventListener("click", () => send(kind, on ? 0 : 1));
+    return button;
+  };
+  const stepper = (name: string, value: number, min: number, max: number, step: number, kind: string): HTMLElement[] => {
+    const minus = text("button", "−", "strategy-tool") as HTMLButtonElement;
+    minus.setAttribute("aria-label", `Lower ${name}`);
+    minus.disabled = value <= min;
+    minus.addEventListener("click", () => send(kind, Math.max(min, value - step)));
+    const plus = text("button", "+", "strategy-tool") as HTMLButtonElement;
+    plus.setAttribute("aria-label", `Raise ${name}`);
+    plus.disabled = value >= max;
+    plus.addEventListener("click", () => send(kind, Math.min(max, value + step)));
+    return [minus, text("span", String(value), "weight-value mono"), plus];
+  };
+  const rows: HTMLElement[] = [];
+  const head = text("div", "", "doctrine-row");
+  head.append(toggle("Auto-train", "Idle barracks and factories train toward the weights below while catalyst allows", state.train, DOCTRINE_SWITCH.train));
+  rows.push(head);
+  const presets = text("div", "", "doctrine-row");
+  presets.append(text("span", "Presets", "stance-kind"));
+  for (const preset of DOCTRINE_PRESETS) {
+    const button = text("button", preset.label, "strategy-tool") as HTMLButtonElement;
+    button.title = preset.hint;
+    button.addEventListener("click", () => {
+      for (const [kind, weight] of Object.entries(presetWeights(faction, preset.id))) if (weightOf(kind) !== weight) send(doctrineWeightOrder(kind), weight);
+    });
+    presets.append(button);
+  }
+  rows.push(presets);
+  for (const kind of ROSTER[faction]) {
+    const needed = requiredTier(kind);
+    const locked = tier < needed;
+    const row = text("div", "", locked ? "doctrine-row locked" : "doctrine-row");
+    row.append(text("span", CATALOG[kind].label, "stance-kind"));
+    if (locked) row.append(text("span", `Tier ${needed}`, "tier-lock mono"));
+    row.append(...stepper(`${CATALOG[kind].label} weight`, weightOf(kind), 0, DOCTRINE_MAX_WEIGHT, 1, doctrineWeightOrder(kind)));
+    rows.push(row);
+  }
+  const reserve = text("div", "", "doctrine-row");
+  reserve.title = "Auto-train keeps this much catalyst unspent";
+  reserve.append(text("span", "Reserve", "stance-kind"), ...stepper("catalyst reserve", state.reserve, 0, DOCTRINE_MAX_RESERVE, DOCTRINE_RESERVE_STEP, DOCTRINE_RESERVE_ORDER));
+  rows.push(reserve);
+  const buying = text("div", "", "doctrine-row");
+  buying.append(
+    toggle("Auto-tier", "Buy the next tier as soon as it is allowed and affordable", state.tier, DOCTRINE_SWITCH.tier),
+    toggle("Auto-research", "Buy weapons, armour and logistics when affordable", state.research, DOCTRINE_SWITCH.research),
+    toggle("Auto-build", "Add barracks/factories when catalyst piles up (above reserve + 400), and synthesizers at tier 2 when material does (above 1500)", state.build, DOCTRINE_SWITCH.build),
+  );
+  rows.push(buying);
+  element("doctrine-body").replaceChildren(...rows);
+}
 operations.onChange = () => { renderStrategy(); if (session.snapshot.room) renderMatch(); };
-missions.onChange = renderStrategy;
 
 let selectionSignature = "";
 /**
@@ -991,7 +1168,7 @@ function renderTimers(): void {
   const seconds = Number(room.tick / 20n);
   element("match-clock").textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
   renderQueue();
-  element("research-status").textContent = me.research.map(researchName).join(" / ") || "No upgrades";
+  element("research-status").textContent = researchSummary(me.research).join(" / ") || "No upgrades";
   const ours = commands.filter(command => command.owner === me.slot).sort((left, right) => left.id > right.id ? -1 : 1);
   element("pending-count").textContent = String(ours.filter(command => command.status === "scheduled").length + session.pending.size);
   const rows = [...session.pending.values()].map(pending => {

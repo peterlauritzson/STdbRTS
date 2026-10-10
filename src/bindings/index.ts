@@ -50,10 +50,14 @@ import StartMatchReducer from "./start_match_reducer";
 import ChatMessageRow from "./chat_message_table";
 import CommandRow from "./command_table";
 import CreepPatchRow from "./creep_patch_table";
+import DoctrineRow from "./doctrine_table";
+import DoctrineWeightRow from "./doctrine_weight_table";
 import MatchSampleRow from "./match_sample_table";
+import MissionRow from "./mission_table";
 import PlayerRow from "./player_table";
 import ResourceNodeRow from "./resource_node_table";
 import RoomRow from "./room_table";
+import StanceRow from "./stance_table";
 import UnitRow from "./unit_table";
 import UnitMotionRow from "./unit_motion_table";
 import UnitVitalsRow from "./unit_vitals_table";
@@ -104,6 +108,34 @@ const tablesSchema = __schema({
       { name: 'creep_patch_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, CreepPatchRow),
+  doctrine: __table({
+    name: 'doctrine',
+    indexes: [
+      { accessor: 'id', name: 'doctrine_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'match_id', name: 'doctrine_match_id_idx_btree', algorithm: 'btree', columns: [
+        'matchId',
+      ] },
+    ],
+    constraints: [
+      { name: 'doctrine_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, DoctrineRow),
+  doctrine_weight: __table({
+    name: 'doctrine_weight',
+    indexes: [
+      { accessor: 'id', name: 'doctrine_weight_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'match_id', name: 'doctrine_weight_match_id_idx_btree', algorithm: 'btree', columns: [
+        'matchId',
+      ] },
+    ],
+    constraints: [
+      { name: 'doctrine_weight_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, DoctrineWeightRow),
   match_sample: __table({
     name: 'match_sample',
     indexes: [
@@ -118,6 +150,20 @@ const tablesSchema = __schema({
       { name: 'match_sample_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, MatchSampleRow),
+  mission: __table({
+    name: 'mission',
+    indexes: [
+      { accessor: 'key', name: 'mission_key_idx_btree', algorithm: 'btree', columns: [
+        'key',
+      ] },
+      { accessor: 'match_id', name: 'mission_match_id_idx_btree', algorithm: 'btree', columns: [
+        'matchId',
+      ] },
+    ],
+    constraints: [
+      { name: 'mission_key_key', constraint: 'unique', columns: ['key'] },
+    ],
+  }, MissionRow),
   player: __table({
     name: 'player',
     indexes: [
@@ -157,6 +203,20 @@ const tablesSchema = __schema({
       { name: 'room_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, RoomRow),
+  stance: __table({
+    name: 'stance',
+    indexes: [
+      { accessor: 'id', name: 'stance_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'match_id', name: 'stance_match_id_idx_btree', algorithm: 'btree', columns: [
+        'matchId',
+      ] },
+    ],
+    constraints: [
+      { name: 'stance_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, StanceRow),
   unit: __table({
     name: 'unit',
     indexes: [

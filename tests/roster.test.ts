@@ -50,3 +50,33 @@ test("visibleRows caps at six, never hiding forgotten units", () => {
   assert.equal(more, 1);
   assert.ok(shown.some(row => row.forgotten));
 });
+
+test("stance defaults and order names mirror the server", async () => {
+  const { defaultStance, stanceOrder, ROSTER } = await import("../src/catalog");
+  for (const kind of ["marksman", "lancer", "spitter"]) assert.equal(defaultStance(kind), "kite");
+  for (const kind of ["bulwark", "behemoth", "crusher"]) assert.equal(defaultStance(kind), "charge");
+  assert.equal(defaultStance("soldier"), "standard");
+  assert.equal(Object.values(ROSTER).flat().filter(kind => defaultStance(kind) !== "standard").length, 6);
+  assert.equal(stanceOrder("marksman", "hold_ground"), "stance_marksman_hold_ground");
+});
+
+test("doctrine presets follow the roster and the order names mirror the server", async () => {
+  const { presetWeights, doctrineWeightOrder, ROSTER, armyBuilding, DOCTRINE_SWITCH } = await import("../src/catalog");
+  assert.deepEqual({ ...DOCTRINE_SWITCH }, { train: "doctrine_train", tier: "doctrine_tier", research: "doctrine_research", build: "doctrine_build" });
+  assert.equal(doctrineWeightOrder("scout"), "doctrine_weight_scout");
+  for (const faction of ["industrial", "network", "organic"] as const) {
+    const kinds = ROSTER[faction];
+    assert.deepEqual(Object.keys(presetWeights(faction, "even")), [...kinds]);
+    assert.ok(Object.values(presetWeights(faction, "even")).every(weight => weight === 5));
+    const basics = presetWeights(faction, "basics");
+    assert.deepEqual(kinds.map(kind => basics[kind]), [10, 4, 0, 0, 0, 0]);
+    const heavy = presetWeights(faction, "heavy");
+    for (const kind of kinds) assert.equal(heavy[kind], armyBuilding(kind) === "factory" ? 8 : 3);
+  }
+});
+
+test("mission members are labelled by their mission, not by the preset it runs", () => {
+  const gatherer = unit("soldier", 1000, 1000, "move", { behavior: "guard" }), striker = unit("soldier", 3000, 3000, "attack_move", { behavior: "assault" }), free = unit("soldier", 2000, 100, "stop");
+  const rows = armyRoster([gatherer, striker, free], 0, [hub], new Map([[gatherer.id, "Gather"], [striker.id, "Strike"]]));
+  assert.deepEqual(rows.map(row => row.activity).sort(), ["Gather", "Idle", "Strike"]);
+});
