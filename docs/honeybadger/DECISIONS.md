@@ -933,6 +933,16 @@ than a goal.
 
 ---
 
+## 2026-10-13 - Player-authored behaviors
+
+**Decision.** Players can define up to 4 per-unit behaviors of their own (`custom_1` to `custom_4`) as small state machines over the existing interpreter, vocabulary and trial limits of `server/src/behavior.rs`: 8 states, 4 transitions per state, 2 conditions per transition, query radius at most 600, plus new bounds of dwell at most 12000 ticks and 2000 characters of text. A policy is one line of text (`label|labour|state|...`), sent by the free delayed command `policy_set_<n>:<text>` and removed by `policy_clear_<n>`; the presets are now written in the same text and parsed at start-up, so there is one parser and one interpreter. Stored in a new additive `policy` table. A custom behavior works as an order, a producer rally and a mission tactic (default size 6). Redefining restarts running units at state 0; clearing stops them and is refused while a mission uses the slot. `issue_order` now refuses order kinds over 2016 characters. `RULESET_VERSION` 24 -> 25. The editor is the Behaviors tab of the Strategy window.
+
+**Why.** The README names configurable automatic behavior through state machines as the way to keep manual micro from dominating, and STRATEGY-LAYERS deferred a "when→do" editor until the presets had proved the model. Reusing the exact model keeps per-unit cost bounded by the same limits whatever players write, and text keeps the change additive (no change to the persisted unit `Behavior`: its `preset` string simply names `custom_<n>`).
+
+**Would overturn it.** Players not using the editor (then offer more knobs on presets instead), authored policies that thrash or exploit the 0.25 s evaluation (raise the minimum dwell or cap transitions), or demand for vocabulary the contract does not yet allow (abilities, target categories), which would need its own decision.
+
+---
+
 ## 2026-10-10 - Strategy window
 
 **Decision.** Missions, stances, production doctrine and the order log move

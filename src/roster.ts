@@ -1,5 +1,5 @@
 import { CATALOG, isArmy, isCompletedHub } from "./catalog";
-import { BEHAVIORS, isBehavior } from "./behaviors";
+import { behaviorInfo, isBehavior } from "./behaviors";
 
 /** The fields of a unit row the roster reads; a full Entity satisfies it. */
 export interface RosterUnit {
@@ -33,7 +33,7 @@ const ORDER_ACTIVITY: Readonly<Record<string, [string, number]>> = {
 
 /** What a unit is doing, in words, and where that sorts. A running behavior preset wins over its raw order. */
 export function activityOf(unit: Pick<RosterUnit, "order" | "behavior" | "behaviorState">): [string, number] {
-  if (isBehavior(unit.behavior)) return [BEHAVIORS[unit.behavior].label, 0];
+  if (isBehavior(unit.behavior)) return [behaviorInfo(unit.behavior).label, 0];
   const known = ORDER_ACTIVITY[unit.order.kind];
   if (known) return known;
   const words = unit.order.kind.split("_").join(" ");

@@ -217,6 +217,20 @@ Behavior rally (`rally_harass`, `rally_guard`, `rally_raid`): still accepted by 
 
 Health is hit points plus shields.
 
+### Your own behaviors
+
+Strategy window (F3), **Behaviors** tab. Four slots; each is a behavior you build from states and transitions, using exactly what the presets above are made of. Saving sends `policy_set_<n>` (free, delayed like any order); Clear sends `policy_clear_<n>`. Every limit is **experimental**.
+
+| Part | Choices and limits |
+| --- | --- |
+| States | 1 to 8; the first is where a unit starts. Name up to 12 letters, digits, spaces, - or _ |
+| Action | Attack-move to goal, Attack-move home, Move to goal, Move home, Hold position |
+| Transitions | Up to 4 per state, tried in order; the first whose conditions all hold moves the unit to its target state. A state is still held at least 1 s |
+| Conditions | Up to 2 per transition, all must hold: health below P%, health at least P%, outnumbered within R, no enemy within R, within D of goal / home, farther than D from goal / home, in this state at least T seconds. R at most 600; T at most 10 minutes. No conditions: move on as soon as the 1 s has passed |
+| Prefer labour | While attack-moving, target enemy labour in reach first (as Harass does) |
+| Use | As a mission tactic (default size 6; its members just run your behavior at the mission point). Using an empty slot is refused |
+| Changing it | Saving a new version restarts every unit running it at its first state. Clearing it stops them, and is refused while a mission uses it |
+
 ## Stances
 
 Per player, per army kind; set by the order `stance_<kind>_<stance>` (free, delayed like any command, validated against your faction's army). Only non-default choices are stored (table `stance`). Applies only while a unit's order is `attack_move` (missions included); `move`, `hold`, `attack` and idle units are untouched. Every number is **experimental**.

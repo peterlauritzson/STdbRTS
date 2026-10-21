@@ -1,7 +1,8 @@
 import type { MissionRow, Order } from "./bindings/types";
 import type { Session } from "./network";
 import { isArmy } from "./catalog";
-import { BEHAVIORS, type BehaviorKind } from "./behaviors";
+import { BEHAVIORS, behaviorInfo, customName, type BehaviorName } from "./behaviors";
+import { customNumber } from "./policies";
 import { clampToMap } from "./presentation";
 
 /**
@@ -20,29 +21,40 @@ import { clampToMap } from "./presentation";
 
 export interface Point { x: number; y: number }
 export type MissionSize = number | "rest";
-export type Tactic = "harass" | "guard" | "raid" | "rush" | "gather";
+export type PresetTactic = "harass" | "guard" | "raid" | "rush" | "gather";
+/** A preset tactic, or one of the player's own behaviors (`custom_<n>`) as a tactic: its members simply run it. */
+export type Tactic = PresetTactic | `custom_${1 | 2 | 3 | 4}`;
 
 export interface TacticInfo {
   id: Tactic;
   /** Panel and button name. */
   label: string;
   /** The per-unit preset members run while the mission holds its point (a gather mission also gathers under guard). */
-  preset: BehaviorKind;
+  preset: BehaviorName;
   color: string;
   hint: string;
   defaultSize: MissionSize;
 }
 
 /** Every tactic, in the order the picker lists them. `raid` keeps its id (and order kinds) but reads "Hit & retreat". */
-export const TACTICS: Readonly<Record<Tactic, TacticInfo>> = {
+export const TACTICS: Readonly<Record<PresetTactic, TacticInfo>> = {
   harass: { id: "harass", label: "Harass", preset: "harass", color: BEHAVIORS.harass.color, defaultSize: 4, hint: BEHAVIORS.harass.hint },
   guard: { id: "guard", label: "Guard", preset: "guard", color: BEHAVIORS.guard.color, defaultSize: 6, hint: BEHAVIORS.guard.hint },
   raid: { id: "raid", label: "Hit & retreat", preset: "raid", color: BEHAVIORS.raid.color, defaultSize: "rest", hint: "Hit & retreat: push to the point; each unit retreats home below 35% health, recovers to 90%, then pushes again" },
   rush: { id: "rush", label: "Rush", preset: "assault", color: BEHAVIORS.assault.color, defaultSize: "rest", hint: "Rush: attack-move to the point and never retreat" },
   gather: { id: "gather", label: "Gather then strike", preset: "assault", color: "#c9b2ff", defaultSize: "rest", hint: "Gather then strike: gather at a rally point short of the point; once enough are there, attack-move to the point; fall back to the rally if the strike loses most of its strength, then gather again" },
 };
-export const TACTIC_IDS = Object.keys(TACTICS) as Tactic[];
-export const isTactic = (value: string | undefined): value is Tactic => !!value && value in TACTICS;
+/** The preset tactics; the player's custom ones are listed by `customTactics`. */
+export const TACTIC_IDS = Object.keys(TACTICS) as PresetTactic[];
+export const isTactic = (value: string | undefined): value is Tactic => !!value && (value in TACTICS || customNumber(value) !== undefined);
+/** A tactic's panel entry; a custom one is named for the player's behavior (default size 6, as on the server). */
+export function tacticInfo(tactic: Tactic): TacticInfo {
+  if (customNumber(tactic) === undefined) return TACTICS[tactic as PresetTactic];
+  const info = behaviorInfo(tactic);
+  return { id: tactic, label: info.label, preset: tactic as BehaviorName, color: info.color, defaultSize: 6, hint: info.hint };
+}
+/** The custom tactics for the slots in `numbers`, in slot order. */
+export const customTactics = (numbers: Iterable<number>): Tactic[] => [...numbers].sort((left, right) => left - right).map(n => `custom_${n}` as Tactic);
 
 export const MAX_MISSIONS = 16;
 export const MAX_SIZE = 99;
@@ -111,12 +123,13 @@ export function missionLabel(mission: Pick<Mission, "tactic" | "size" | "members
     if (gathered !== undefined && mission.gatherPercent !== undefined) return `GATHER ${gathered}/${gatherNeeded({ size: mission.size, members: mission.members, gatherPercent: mission.gatherPercent })}`;
     return `GATHER ${count}`;
   }
-  return `${mission.tactic.toUpperCase()} ${count}`;
+  const number = customNumber(mission.tactic);
+  return `${(number === undefined ? mission.tactic : customName(number)).toUpperCase()} ${count}`;
 }
 
 /** What the army roster calls a mission member: its mission's tactic, or for a gather mission its state. A strike's late joiners wait at the rally under "guard" and read "Gather". */
 export function missionActivity(mission: Pick<Mission, "tactic" | "state">, behavior?: string): string {
-  if (mission.tactic !== "gather") return TACTICS[mission.tactic].label;
+  if (mission.tactic !== "gather") return tacticInfo(mission.tactic).label;
   if (mission.state === "strike") return behavior === "guard" ? "Gather" : "Strike";
   if (mission.state === "defend") return "Defend";
   if (mission.state === "fallback") return "Fall back";
@@ -133,7 +146,7 @@ export function memberActivities(list: readonly Mission[], units: readonly { id:
 
 /** The preset-and-point pairs a mission's members run now, so a unit goal on one is labelled by the mission marker. During a strike, members recruited after it began wait at the rally until enough gather to go in as a wave. */
 export function missionGoals(mission: Pick<Mission, "tactic" | "state" | "x" | "y" | "rally">): { preset: string; x: number; y: number }[] {
-  if (mission.tactic !== "gather") return [{ preset: TACTICS[mission.tactic].preset, x: mission.x, y: mission.y }];
+  if (mission.tactic !== "gather") return [{ preset: tacticInfo(mission.tactic).preset, x: mission.x, y: mission.y }];
   // While defending, members run "assault" toward the threatened building, a point the client does not know.
   const rally = { preset: "guard", x: mission.rally.x, y: mission.rally.y };
   return mission.state === "strike" ? [{ preset: "assault", x: mission.x, y: mission.y }, rally] : [rally];

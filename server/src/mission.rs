@@ -70,7 +70,8 @@ pub const DEFEND_SETTLE_TICKS: u64 = 300;
 /// A fall back that has not regrouped by itself ends after this long.
 pub const FALLBACK_REGROUP_TICKS: u64 = 400;
 
-/// Every tactic, in the order a client lists them.
+/// Every built-in tactic, in the order a client lists them. A player's own
+/// behavior `custom_<n>` is a tactic too: its members simply run it.
 pub const TACTICS: [&str; 5] = ["harass", "guard", "raid", "rush", "gather"];
 
 pub const STATE_GATHER: &str = "gather";
@@ -84,7 +85,7 @@ pub fn gather_radius(members: usize) -> f32 {
 }
 
 pub fn is_tactic(name: &str) -> bool {
-    TACTICS.contains(&name)
+    TACTICS.contains(&name) || behavior::custom_number(name).is_some()
 }
 
 /// The size a new mission of `tactic` starts with.
@@ -92,16 +93,17 @@ pub fn default_size(tactic: &str) -> i32 {
     match tactic {
         "harass" => 4,
         "guard" => 6,
+        custom if behavior::custom_number(custom).is_some() => 6,
         _ => REST,
     }
 }
 
-/// The per-unit preset a plain (non-gather) tactic runs.
-fn plain_preset(tactic: &str) -> &'static str {
+/// The per-unit policy a plain (non-gather) tactic runs: a player's own runs
+/// itself.
+fn plain_preset(tactic: &str) -> &str {
     match tactic {
-        "harass" => "harass",
-        "guard" => "guard",
-        "raid" => "raid",
+        "harass" | "guard" | "raid" => tactic,
+        custom if behavior::custom_number(custom).is_some() => custom,
         _ => "assault",
     }
 }
@@ -133,7 +135,7 @@ pub struct Mission {
 
 impl Mission {
     /// The preset and goal every member should be running now.
-    pub fn wanted(&self) -> (&'static str, (f32, f32)) {
+    pub fn wanted(&self) -> (&str, (f32, f32)) {
         if self.tactic == "gather" {
             if self.state == STATE_STRIKE {
                 ("assault", (self.x, self.y))
@@ -287,7 +289,16 @@ impl World {
             }
             Ok(())
         };
-        if tactic_of(kind, "mission_new_").is_some() {
+        let defined = |tactic: &str| -> Result<(), String> {
+            if behavior::custom_number(tactic).is_some()
+                && behavior::lookup(&self.policies, command.owner, tactic).is_none()
+            {
+                return Err("That behavior slot is empty; define it first".into());
+            }
+            Ok(())
+        };
+        if let Some(tactic) = tactic_of(kind, "mission_new_") {
+            defined(tactic)?;
             if self
                 .missions
                 .iter()
@@ -299,7 +310,8 @@ impl World {
             }
             return place(order.x, order.y);
         }
-        if tactic_of(kind, "mission_tactic_").is_some() {
+        if let Some(tactic) = tactic_of(kind, "mission_tactic_") {
+            defined(tactic)?;
             return existing();
         }
         match kind {
@@ -637,7 +649,7 @@ impl World {
                 } else {
                     (preset, goal)
                 };
-                let Some(policy) = behavior::policy(preset) else {
+                let Some(policy) = behavior::lookup(&self.policies, mission.owner, preset) else {
                     continue;
                 };
                 let differs = match &self.units[at].behavior {

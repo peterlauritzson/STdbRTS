@@ -359,7 +359,13 @@ fn obeys(
 /// evaluated on a later pass. Its order is rewritten only on a transition, or
 /// when it no longer matches the state (an attack-move that completed into a
 /// stop), so a path is never reset just because a pass ran.
-fn run_behaviors(units: &mut [Entity], snapshot: &[Entity], nearby: &SpatialIndex, tick: u64) {
+fn run_behaviors(
+    units: &mut [Entity],
+    snapshot: &[Entity],
+    nearby: &SpatialIndex,
+    tick: u64,
+    customs: &behavior::Customs,
+) {
     for (at, unit) in units.iter_mut().enumerate() {
         let Some(running) = unit.behavior.as_mut() else {
             continue;
@@ -371,9 +377,10 @@ fn run_behaviors(units: &mut [Entity], snapshot: &[Entity], nearby: &SpatialInde
         {
             continue;
         }
-        // A preset this build no longer knows falls back to no behavior: the
-        // unit keeps its last order, which is an ordinary one.
-        let Some(policy) = behavior::policy(&running.preset) else {
+        // A preset this build no longer knows, or a player's own policy that
+        // no longer exists, falls back to no behavior: the unit keeps its last
+        // order, which is an ordinary one.
+        let Some(policy) = behavior::lookup(customs, unit.owner, &running.preset) else {
             unit.behavior = None;
             continue;
         };
@@ -439,10 +446,38 @@ pub struct Production {
 }
 
 /// An ability a caster has started and not yet resolved: today only a
-/// The behavior preset a `rally_<preset>` order names, if it is one.
+/// A `policy_*` order kind, split.
+enum PolicyOrder<'a> {
+    Set(u8, &'a str),
+    Clear(u8),
+}
+
+fn parse_policy_order(kind: &str) -> Result<PolicyOrder<'_>, String> {
+    let slot = |name: &str| {
+        behavior::custom_number(&format!("custom_{name}")).ok_or_else(|| {
+            format!(
+                "Behavior slots are numbered 1 to {}",
+                behavior::MAX_CUSTOM
+            )
+        })
+    };
+    if let Some(rest) = kind.strip_prefix("policy_set_") {
+        let (number, text) = rest
+            .split_once(':')
+            .ok_or("A behavior definition is policy_set_<n>:<text>")?;
+        return Ok(PolicyOrder::Set(slot(number)?, text));
+    }
+    if let Some(number) = kind.strip_prefix("policy_clear_") {
+        return Ok(PolicyOrder::Clear(slot(number)?));
+    }
+    Err("Unknown behavior command".into())
+}
+
+/// The behavior a `rally_<preset>` order names, if it is one: a preset or a
+/// `custom_<n>`, defined or not (validation asks the owner's policies).
 fn rally_preset(kind: &str) -> Option<&str> {
     kind.strip_prefix("rally_")
-        .filter(|preset| behavior::policy(preset).is_some())
+        .filter(|preset| behavior::is_behavior_name(preset))
 }
 
 /// Network recall channelling. Kept apart from `order` so a hub's rally
@@ -862,6 +897,9 @@ pub struct World {
     pub missions: Vec<crate::mission::Mission>,
     /// The id the next mission takes; one past the highest ever loaded.
     pub next_mission_id: u32,
+    /// Players' own behavior policies by `(owner, number)`, set by the
+    /// `policy_set_<n>` command. See `crate::behavior::parse_policy`.
+    pub policies: behavior::Customs,
     pub outcome: Option<i16>,
 }
 
@@ -909,6 +947,7 @@ impl World {
             doctrines: BTreeMap::new(),
             missions: vec![],
             next_mission_id: 1,
+            policies: behavior::Customs::new(),
             outcome: None,
         };
         let mut ordered = roster.to_vec();
@@ -1199,6 +1238,94 @@ impl World {
         Ok(())
     }
 
+    /// `policy_set_<n>:<text>` defines (or redefines) a player's own behavior
+    /// `custom_<n>`; `policy_clear_<n>` removes it. Free, set once like a
+    /// stance, through one owned unit, and refused while a mission uses it.
+    fn validate_policy_command(&self, command: &Command) -> Result<(), String> {
+        if command.units.len() != 1 || command.queued {
+            return Err(
+                "Behaviors are defined once, from the Strategy window, and cannot be queued"
+                    .into(),
+            );
+        }
+        if !self
+            .units
+            .iter()
+            .any(|unit| unit.id == command.units[0] && unit.owner == command.owner)
+        {
+            return Err("Unit is missing or belongs to another player".into());
+        }
+        match parse_policy_order(&command.order.kind)? {
+            PolicyOrder::Set(number, text) => {
+                behavior::parse_policy(&format!("custom_{number}"), text).map(|_| ())
+            }
+            PolicyOrder::Clear(number) => self.policy_in_use(command.owner, number),
+        }
+    }
+
+    /// Refuses to clear a policy a mission still runs: the mission would be
+    /// left with no behavior to hand its members.
+    fn policy_in_use(&self, owner: u8, number: u8) -> Result<(), String> {
+        let name = format!("custom_{number}");
+        if self
+            .missions
+            .iter()
+            .any(|mission| mission.owner == owner && mission.tactic == name)
+        {
+            return Err("A mission uses this behavior; change or cancel it first".into());
+        }
+        Ok(())
+    }
+
+    fn execute_policy_command(&mut self, command: &Command) -> Result<(), String> {
+        let owner = command.owner;
+        let tick = self.tick;
+        match parse_policy_order(&command.order.kind)? {
+            PolicyOrder::Set(number, text) => {
+                let name = format!("custom_{number}");
+                let policy = behavior::parse_policy(&name, text)?;
+                // Units already running it start the new definition from its
+                // first state: their old state index may not exist any more.
+                for unit in self.units.iter_mut().filter(|unit| unit.owner == owner) {
+                    let Some(running) = unit.behavior.as_mut() else {
+                        continue;
+                    };
+                    if running.preset != name {
+                        continue;
+                    }
+                    running.state = 0;
+                    running.entered_tick = tick;
+                    unit.order = running.order_for(policy.states[0].action);
+                    unit.queue.clear();
+                    unit.returning = false;
+                }
+                self.policies.insert(
+                    (owner, number),
+                    behavior::Custom {
+                        text: text.to_string(),
+                        policy,
+                    },
+                );
+            }
+            PolicyOrder::Clear(number) => {
+                let name = format!("custom_{number}");
+                self.policies.remove(&(owner, number));
+                for unit in self.units.iter_mut().filter(|unit| {
+                    unit.owner == owner
+                        && unit
+                            .behavior
+                            .as_ref()
+                            .is_some_and(|running| running.preset == name)
+                }) {
+                    unit.behavior = None;
+                    unit.order = Order::idle();
+                    unit.queue.clear();
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The stance `owner` has chosen for `kind` (the kind's default if none).
     pub fn stance_of(&self, owner: u8, kind: &str) -> Stance {
         self.stances
@@ -1361,7 +1488,7 @@ impl World {
         // A behavior replaces the unit's task and then writes its own orders,
         // so there is nothing for it to wait behind: queueing one has no
         // meaning, and is refused by name rather than as a full queue.
-        if command.queued && behavior::policy(&order.kind).is_some() {
+        if command.queued && behavior::is_behavior_name(&order.kind) {
             return Err("Behaviors replace the unit's current task and cannot be queued".into());
         }
         if let Some(kind) = order.kind.strip_prefix("build_") {
@@ -1462,6 +1589,9 @@ impl World {
         if order.kind.starts_with("stance_") {
             return self.validate_stance(command);
         }
+        if order.kind.starts_with("policy_") {
+            return self.validate_policy_command(command);
+        }
         if order.kind.starts_with("mission_") {
             return self.validate_mission(command, map);
         }
@@ -1539,6 +1669,11 @@ impl World {
                             "Production controls require an HQ or production building".into()
                         );
                     }
+                    if let Some(preset) = rally_preset(&order.kind) {
+                        if behavior::lookup(&self.policies, command.owner, preset).is_none() {
+                            return Err("Define this behavior before rallying to it".into());
+                        }
+                    }
                     if order.kind == "rally_move" || rally_preset(&order.kind).is_some() {
                         validate_position(order.x, order.y, map.size)?;
                         if !destination_free() {
@@ -1589,7 +1724,10 @@ impl World {
                 // when labour or a building is in it. The goal must be a
                 // place the unit could be attack-moved to, since that is the
                 // order the behavior will give.
-                kind if behavior::policy(kind).is_some() => {
+                kind if behavior::is_behavior_name(kind) => {
+                    if behavior::lookup(&self.policies, command.owner, kind).is_none() {
+                        return Err("That behavior slot is empty; define it first".into());
+                    }
                     if !is_army(&unit.kind) {
                         return Err(
                             "Only army units take a behavior; labour and buildings cannot".into(),
@@ -1807,13 +1945,13 @@ impl World {
     /// `rally_<preset>`, so both activate identically.
     pub(crate) fn activate_behavior(
         unit: &mut Entity,
-        policy: &'static behavior::Policy,
+        policy: &behavior::Policy,
         goal: (f32, f32),
         home: (f32, f32),
         tick: u64,
     ) {
         let running = Behavior {
-            preset: policy.name.into(),
+            preset: policy.name.clone(),
             goal_x: goal.0,
             goal_y: goal.1,
             home_x: home.0,
@@ -1882,6 +2020,9 @@ impl World {
             self.execute_mission(command, map);
             return Ok(());
         }
+        if command.order.kind.starts_with("policy_") {
+            return self.execute_policy_command(command);
+        }
         if command.order.kind.starts_with("doctrine_") {
             self.execute_doctrine(command);
             return Ok(());
@@ -1922,10 +2063,10 @@ impl World {
             return Ok(());
         }
         let lookup = self.id_lookup();
-        let preset = behavior::policy(&command.order.kind);
+        let preset = behavior::lookup(&self.policies, command.owner, &command.order.kind).cloned();
         // Built once per behavior command, for the home anchors, and never for
         // an ordinary order.
-        let navigation = preset.map(|_| Navigation::new(map, &self.units));
+        let navigation = preset.as_ref().map(|_| Navigation::new(map, &self.units));
         for id in &command.units {
             let at = lookup.get(*id).expect("validated unit");
             // A player's order takes the unit out of its mission, at this
@@ -1943,7 +2084,7 @@ impl World {
             if preset.is_none() && unit.behavior.take().is_some() && command.queued {
                 unit.order = Order::idle();
             }
-            if let (Some(policy), Some(home)) = (preset, home) {
+            if let (Some(policy), Some(home)) = (preset.as_ref(), home) {
                 Self::activate_behavior(
                     unit,
                     policy,
@@ -2144,7 +2285,7 @@ impl World {
         // Behaviors decide before anything moves, from the same snapshot, so a
         // unit told to retreat this tick starts walking this tick.
         if tick % behavior::BEHAVIOR_INTERVAL_TICKS == 0 {
-            run_behaviors(&mut self.units, &snapshot, &nearby, tick);
+            run_behaviors(&mut self.units, &snapshot, &nearby, tick, &self.policies);
         }
         // Every completed hub, the only things a carrier delivers to.
         let hubs: Vec<&Entity> = snapshot
@@ -2432,7 +2573,9 @@ impl World {
                         && unit
                             .behavior
                             .as_ref()
-                            .and_then(|running| behavior::policy(&running.preset))
+                            .and_then(|running| {
+                                behavior::lookup(&self.policies, unit.owner, &running.preset)
+                            })
                             .is_some_and(|policy| policy.prefers_labour)
                         && !current.is_some_and(|target| is_labour(&target.kind));
                     let labour = prefers_labour
@@ -3162,14 +3305,19 @@ impl World {
                 // A behavior rally: army starts the behavior now, anchored
                 // beside the nearest completed hub as of this tick. Labour
                 // takes the plain move like `rally_move` does.
-                if let Some(policy) = rally_preset(&rally.kind).and_then(behavior::policy) {
+                // A rally naming a policy its owner has since cleared falls
+                // through to the plain rally below.
+                if let Some(policy) = rally_preset(&rally.kind)
+                    .and_then(|preset| behavior::lookup(&self.policies, owner, preset))
+                    .cloned()
+                {
                     if is_army(&kind) {
                         let at = self.units.len() - 1;
                         let home = self.home_of(at, &navigation);
                         let tick = self.tick;
                         Self::activate_behavior(
                             &mut self.units[at],
-                            policy,
+                            &policy,
                             (rally.x, rally.y),
                             home,
                             tick,

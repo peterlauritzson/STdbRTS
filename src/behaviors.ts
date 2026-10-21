@@ -1,4 +1,5 @@
 import { isArmy } from "./catalog";
+import { CUSTOM_COLORS, customLabel, customNumber } from "./policies";
 
 /**
  * The server's behavior presets (server/src/behavior.rs) as the client presents
@@ -15,13 +16,31 @@ export const BEHAVIORS: Readonly<Record<BehaviorKind, { label: string; color: st
   assault: { label: "Rush", color: "#ff9ec4", hint: "Rush: attack-move to the goal and never retreat" },
 };
 
-/** The preset a `rally_<preset>` order carries (a producer's behavior rally), if it is one. */
-export const rallyBehavior = (kind: string | undefined): BehaviorKind | undefined => {
+/** A preset, or one of the player's own `custom_<n>` slots. */
+export type BehaviorName = BehaviorKind | `custom_${1 | 2 | 3 | 4}`;
+
+/** My own slots' names, from my `policy` rows; set from the snapshot (main.ts) so every label below can name a custom behavior. */
+let customLabels: ReadonlyMap<number, string> = new Map();
+export const setCustomLabels = (labels: ReadonlyMap<number, string>): void => { customLabels = labels; };
+export const customName = (n: number): string => customLabels.get(n) ?? `Custom ${n}`;
+
+export const isBehavior = (kind: string | undefined): kind is BehaviorName => !!kind && (kind in BEHAVIORS || customNumber(kind) !== undefined);
+
+/** Label, colour and tooltip of any behavior, preset or custom. */
+export function behaviorInfo(kind: BehaviorName | string): { label: string; color: string; hint: string } {
+  const number = customNumber(kind);
+  if (number !== undefined) {
+    const label = customLabel(kind, customLabels)!;
+    return { label, color: CUSTOM_COLORS[number - 1], hint: `${label}: your own behavior (Strategy window, Behaviors tab)` };
+  }
+  return BEHAVIORS[kind as BehaviorKind];
+}
+
+/** The behavior a `rally_<behavior>` order carries (a producer's behavior rally), if it is one. */
+export const rallyBehavior = (kind: string | undefined): BehaviorName | undefined => {
   const preset = kind?.startsWith("rally_") ? kind.slice(6) : undefined;
   return isBehavior(preset) ? preset : undefined;
 };
-
-export const isBehavior = (kind: string | undefined): kind is BehaviorKind => !!kind && kind in BEHAVIORS;
 
 /** What each state means, for the label and the tooltip over a unit's marker. */
 export const STATE_COLOR: Readonly<Record<string, string>> = { advance: "#ffa94d", watch: "#6ea8ff", return: "#c9b2ff", retreat: "#ff5f6d", recover: "#6fd3ff" };
@@ -30,7 +49,7 @@ export const stateColor = (state: string | undefined): string => (state && STATE
 /** The units a behavior can be given to: army only. A mixed selection is refused whole by the server, so only these are sent. */
 export const behaviorUnits = <T extends { kind: string }>(units: readonly T[]): T[] => units.filter(unit => isArmy(unit.kind));
 
-const title = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
+const title = (word: string): string => customNumber(word) !== undefined ? customName(customNumber(word)!) : word.charAt(0).toUpperCase() + word.slice(1);
 
 /**
  * The selection panel's line: "Harass · retreat" for one unit,

@@ -124,6 +124,10 @@ Because every order is delayed, a unit that must wait for you to tell it to run 
 - **Gather then strike** is a group tactic, not a single preset: see Missions below.
 - On screen, selected units draw a faint line to their goal and a marker labelled with the preset; each unit wears a coloured dot for its state, and a unit that is retreating or recovering is ringed and labelled, so you can see why it left the fight. Any ordinary order you give a unit ends its behavior and takes it out of its mission. Behaviors go to army units only and cannot be Shift-queued.
 
+### Your own behaviors
+
+If no preset fits, build one. The Strategy window's **Behaviors** tab has four slots; start from a preset or a blank one and edit it: a behavior is a short list of **states** (what to do: attack-move to the goal, go home, hold) and **transitions** (when to switch: hurt, outnumbered, back home, enough time passed). For example, "advance; when health is below 40% go home; once home and healed above 90%, advance again" is Hit & retreat with your own numbers. Save it, and it shows up as a mission tactic like the presets. It runs on the server under the same rules and limits as the presets, so it is no faster or smarter than they are, only shaped the way you want.
+
 ### Stances: how a kind fights
 
 A **stance** is set per army kind in the Strategy window (**F3**, Stances tab), and applies to every unit of that kind while it is on an attack-move, which includes missions. It never changes a plain move, a hold or an explicit attack, so you can still override it with a click.

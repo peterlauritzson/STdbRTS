@@ -690,3 +690,98 @@ fn after_a_defence_the_group_settles_before_it_strikes() {
     world.run_missions(default_map());
     assert_eq!(mission(&world, id).state, STATE_STRIKE);
 }
+
+// Players' own behaviors (`policy_set_<n>`): definition, use as an order and a
+// tactic, redefinition and clearing.
+
+/// Advance at the goal until hurt below 60%, then hold at home.
+const CAUTIOUS: &str =
+    "Cautious|0|push,attack_move:goal,1:health_below=60|home,move:home,0:near_home=100&dwell=40";
+
+fn define(world: &mut World, number: u8, text: &str) -> Result<(), String> {
+    let issuer = hq(world);
+    let kind = format!("policy_set_{number}:{text}");
+    world.validate_on(&command(0, vec![issuer], &kind, POINT, 0), default_map())?;
+    run(world, vec![issuer], &kind, POINT, 0)
+}
+
+#[test]
+fn a_defined_policy_runs_as_an_order_and_only_for_its_owner() {
+    let mut world = arena();
+    let id = soldier(&mut world, POINT);
+    let goal = (POINT.0 + 300.0, POINT.1);
+    let order = command(0, vec![id], "custom_1", goal, 0);
+    assert!(world.validate_on(&order, default_map()).is_err(), "empty slot");
+    define(&mut world, 1, CAUTIOUS).unwrap();
+    world.validate_on(&order, default_map()).unwrap();
+    run(&mut world, vec![id], "custom_1", goal, 0).unwrap();
+    let running = unit(&world, id).behavior.as_ref().unwrap();
+    assert_eq!(running.preset, "custom_1");
+    assert_eq!(unit(&world, id).order.kind, "attack_move");
+    assert_eq!(
+        crate::behavior::labels_in(&world.policies, 0, unit(&world, id).behavior.as_ref()),
+        (Some("custom_1".into()), Some("push".into()))
+    );
+    // Player 1 has no custom_1.
+    world.spawn(1, "soldier", POINT.0, POINT.1 + 100.0);
+    let theirs = world.units.last().unwrap().id;
+    assert!(world
+        .validate_on(&command(1, vec![theirs], "custom_1", goal, 0), default_map())
+        .is_err());
+}
+
+#[test]
+fn bad_definitions_and_slots_are_refused() {
+    let mut world = arena();
+    for (number, text) in [
+        (1, "Bad|0|"),
+        (1, "Bad|0|a,attack_move:goal,5:"),
+        (1, "Bad|0|a,teleport:goal"),
+        (1, "Bad|2|a,hold"),
+        (1, "B|a|d|0|a,hold"),
+        (1, "Bad|0|a,hold,0:outnumbered=900"),
+        (1, "Bad|0|a,hold,0:health_below=10&dwell=5&no_enemy=100"),
+        (5, CAUTIOUS),
+        (0, CAUTIOUS),
+    ] {
+        assert!(define(&mut world, number, text).is_err(), "{number} {text}");
+    }
+    assert!(world.policies.is_empty());
+}
+
+#[test]
+fn redefining_restarts_running_units_and_clearing_stops_them() {
+    let mut world = arena();
+    let id = soldier(&mut world, POINT);
+    define(&mut world, 2, CAUTIOUS).unwrap();
+    run(&mut world, vec![id], "custom_2", (POINT.0 + 300.0, POINT.1), 0).unwrap();
+    world.units.iter_mut().find(|u| u.id == id).unwrap().behavior.as_mut().unwrap().state = 1;
+    define(&mut world, 2, "Stay|0|stay,hold").unwrap();
+    let running = unit(&world, id).behavior.as_ref().unwrap();
+    assert_eq!((running.state, running.entered_tick), (0, world.tick));
+    assert_eq!(unit(&world, id).order.kind, "hold");
+    let issuer = hq(&world);
+    run(&mut world, vec![issuer], "policy_clear_2", POINT, 0).unwrap();
+    assert!(world.policies.is_empty());
+    assert!(is_idle(&world, id));
+}
+
+#[test]
+fn a_mission_runs_a_players_own_policy_and_keeps_it_from_being_cleared() {
+    let mut world = arena();
+    let id = soldier(&mut world, POINT);
+    let issuer = hq(&world);
+    assert!(run(&mut world, vec![issuer], "mission_new_custom_3", POINT, 0).is_err());
+    assert!(world.missions.is_empty(), "an empty slot makes no mission");
+    define(&mut world, 3, CAUTIOUS).unwrap();
+    let goal = (POINT.0 + 300.0, POINT.1);
+    let mission_id = create(&mut world, "custom_3", goal, vec![id]);
+    assert_eq!(mission(&world, mission_id).size, 6);
+    let running = unit(&world, id).behavior.as_ref().unwrap();
+    assert_eq!(running.preset, "custom_3");
+    assert_eq!((running.goal_x, running.goal_y), goal);
+    let clear = command(0, vec![issuer], "policy_clear_3", POINT, 0);
+    assert!(world.validate_on(&clear, default_map()).is_err());
+    assert!(world.execute_on(&clear, default_map()).is_err());
+    assert!(world.policies.contains_key(&(0, 3)));
+}

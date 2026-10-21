@@ -266,6 +266,15 @@ export const Player = __t.object("Player", {
 });
 export type Player = __Infer<typeof Player>;
 
+export const PolicyRow = __t.object("PolicyRow", {
+  id: __t.u64(),
+  matchId: __t.u64(),
+  slot: __t.u8(),
+  number: __t.u8(),
+  text: __t.string(),
+});
+export type PolicyRow = __Infer<typeof PolicyRow>;
+
 export const Production = __t.object("Production", {
   kind: __t.string(),
   finishTick: __t.u64(),

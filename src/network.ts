@@ -1,6 +1,6 @@
 import { BinaryWriter, ProductType, reducerSchema } from "spacetimedb";
 import { DbConnection, tables, type SubscriptionHandle } from "./bindings";
-import { Faction, type ChatMessage, type Command, type CreepPatch, type MatchSample, type Node, type Order, type Player, type Room, type MissionRow, type StanceRow, type DoctrineRow, type DoctrineWeightRow } from "./bindings/types";
+import { Faction, type ChatMessage, type Command, type CreepPatch, type MatchSample, type Node, type Order, type Player, type Room, type MissionRow, type StanceRow, type PolicyRow, type DoctrineRow, type DoctrineWeightRow } from "./bindings/types";
 import { UnitMerger, type Entity } from "./units";
 import { factionValue, type FactionName } from "./catalog";
 
@@ -48,6 +48,8 @@ export interface Snapshot {
   creep: CreepPatch[];
   /** Every player's non-default combat stances (`stance` rows); a kind with no row fights in its default. */
   stances: StanceRow[];
+  /** Every player's own behaviors (`policy` rows): up to four numbered slots each. */
+  policies: PolicyRow[];
   /** Every player's production doctrine switches (`doctrine` rows) and non-default weights (`doctrine_weight` rows). */
   doctrines: DoctrineRow[];
   doctrineWeights: DoctrineWeightRow[];
@@ -80,7 +82,7 @@ export class Session {
   pending = new Map<string, PendingOrder>();
   /** Ticks your newest order ran after its stamp: 0 means it was on time. */
   lateTicks = 0n;
-  snapshot: Snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [], stances: [], doctrines: [], doctrineWeights: [], missions: [], chat: [] };
+  snapshot: Snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [], stances: [], policies: [], doctrines: [], doctrineWeights: [], missions: [], chat: [] };
   onChange: () => void = () => {};
   onNotice: (message: string) => void = () => {};
   /** Called with the server's reason when one of your own commands is refused. */
@@ -106,7 +108,7 @@ export class Session {
     this.matchId = 0n;
     this.matchSubscription = undefined;
     this.pending.clear();
-    this.snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [], stances: [], doctrines: [], doctrineWeights: [], missions: [], chat: [] };
+    this.snapshot = { rooms: [], players: [], me: undefined, room: undefined, units: [], nodes: [], commands: [], samples: [], creep: [], stances: [], policies: [], doctrines: [], doctrineWeights: [], missions: [], chat: [] };
     this.status = "Connecting";
     this.onChange();
     const key = `stdbrts:v2:${this.identityScope}:${host}:${database}`;
@@ -191,6 +193,9 @@ export class Session {
       connection.db.stance.onInsert(refresh);
       connection.db.stance.onUpdate(refresh);
       connection.db.stance.onDelete(refresh);
+      connection.db.policy.onInsert(refresh);
+      connection.db.policy.onUpdate(refresh);
+      connection.db.policy.onDelete(refresh);
       for (const table of [connection.db.doctrine, connection.db.doctrine_weight]) {
         table.onInsert(refresh);
         table.onUpdate(refresh);
@@ -240,6 +245,7 @@ export class Session {
             tables.match_sample.where(row => row.matchId.eq(nextMatch)),
             tables.creep_patch.where(row => row.matchId.eq(nextMatch)),
             tables.stance.where(row => row.matchId.eq(nextMatch)),
+            tables.policy.where(row => row.matchId.eq(nextMatch)),
             tables.doctrine.where(row => row.matchId.eq(nextMatch)),
             tables.doctrine_weight.where(row => row.matchId.eq(nextMatch)),
             tables.mission.where(row => row.matchId.eq(nextMatch)),
@@ -255,6 +261,7 @@ export class Session {
       samples: [...connection.db.match_sample.iter()].filter(row => row.matchId === nextMatch),
       creep: [...connection.db.creep_patch.iter()].filter(row => row.matchId === nextMatch).map(row => row.data),
       stances: [...connection.db.stance.iter()].filter(row => row.matchId === nextMatch),
+      policies: [...connection.db.policy.iter()].filter(row => row.matchId === nextMatch),
       doctrines: [...connection.db.doctrine.iter()].filter(row => row.matchId === nextMatch),
       doctrineWeights: [...connection.db.doctrine_weight.iter()].filter(row => row.matchId === nextMatch),
       missions: [...connection.db.mission.iter()].filter(row => row.matchId === nextMatch).sort((left, right) => left.id - right.id),

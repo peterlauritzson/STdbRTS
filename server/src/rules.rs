@@ -12,7 +12,7 @@ pub mod spatial;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 24;
+pub const RULESET_VERSION: u32 = 25;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -3401,8 +3401,9 @@ mod tests {
         // 14: three currencies, one miner per patch, refineries, permanent
         // base income. 15: unit cap 400 and building cap 150, and routes from
         // shared breadth-first fields (equally short routes may tie-break
-        // differently from the old per-unit A*).
-        assert_eq!(RULESET_VERSION, 24);
+        // differently from the old per-unit A*). 25: players' own behavior
+        // policies (`policy_set_<n>`), usable as orders, rallies and tactics.
+        assert_eq!(RULESET_VERSION, 25);
         assert!(RULESET_VERSION > 0);
     }
 

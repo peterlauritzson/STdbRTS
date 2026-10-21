@@ -11,7 +11,7 @@ import { cycleSubgroup, subgroupKinds, validSubgroup } from "./selection";
 import { availableAfter, pendingSpend } from "./spend";
 import { assignPatches, baseOf, baseSaturation, hubPatches, ownHubs, snapSite, takenPatches } from "./macro";
 import type { OverlayPath } from "./operations";
-import { BEHAVIORS, behaviorUnits, isBehavior, rallyBehavior, stateColor, type BehaviorKind } from "./behaviors";
+import { behaviorInfo, behaviorUnits, isBehavior, rallyBehavior, stateColor, type BehaviorName } from "./behaviors";
 import type { Tactic } from "./missions";
 import { ABILITIES, abilityOf, castingHub, maxEnergy, onCreep, recallable, scheduledCasts, type AbilityKind } from "./abilities";
 import { arriving, canTeleport, channelFraction, fieldsOf, powered, POWER_FIELD_RADIUS, recharging, SENSOR_FIELD_RADIUS, shieldsRegenerating, type Field } from "./zones";
@@ -59,7 +59,7 @@ export function orderColor(kind: string): string {
   if (["gather", "rally_gather", "return", "repair"].includes(kind)) return "#f3d570";
   if (kind.startsWith("build_")) return "#8fd8ff";
   if (kind === "recall" || kind === "bloom") return "#c9b2ff";
-  if (kind in BEHAVIORS) return BEHAVIORS[kind as BehaviorKind].color;
+  if (isBehavior(kind)) return behaviorInfo(kind).color;
   return "#6ee7a8";
 }
 
@@ -730,7 +730,7 @@ export class Battlefield {
       // Missions are standing server rows (missions.ts); selected army units join this one.
       const tactic = this.targeting.slice(8) as Tactic;
       this.onMission(tactic, { x: clampToMap(point.x), y: clampToMap(point.y) }, behaviorUnits(owned).map(unit => unit.id));
-      this.acknowledge(tactic in BEHAVIORS ? tactic : "assault", point);
+      this.acknowledge(isBehavior(tactic) ? tactic : "assault", point);
       this.spend(queued);
       return;
     }
@@ -1008,11 +1008,11 @@ export class Battlefield {
         for (const order of [unit.order, ...unit.queue]) {
           const target = this.orderTarget(order);
           if (!target) continue;
-          const color = rallyBehavior(order.kind) ? BEHAVIORS[rallyBehavior(order.kind)!].color : orderColor(order.kind);
+          const color = rallyBehavior(order.kind) ? behaviorInfo(rallyBehavior(order.kind)!).color : orderColor(order.kind);
           context.strokeStyle = `${color}90`; context.lineWidth = 1.5 / this.camera.zoom; context.setLineDash([5 / this.camera.zoom, 5 / this.camera.zoom]);
           context.beginPath(); context.moveTo(point.x, point.y); context.lineTo(target.x, target.y); context.stroke(); context.setLineDash([]);
           context.fillStyle = color; context.beginPath(); context.arc(target.x, target.y, 3.5 / this.camera.zoom, 0, Math.PI * 2); context.fill();
-          if (order.kind.startsWith("rally_")) { const preset = rallyBehavior(order.kind); this.marker(target, this.colorOf(unit.owner), preset ? `${BEHAVIORS[preset].label.toUpperCase()} RALLY` : "RALLY"); }
+          if (order.kind.startsWith("rally_")) { const preset = rallyBehavior(order.kind); this.marker(target, this.colorOf(unit.owner), preset ? `${behaviorInfo(preset).label.toUpperCase()} RALLY` : "RALLY"); }
           point = target;
         }
       }
@@ -1455,7 +1455,7 @@ export class Battlefield {
 
   private orderTarget(order: Order): Point | undefined {
     if (order.kind.startsWith("build_")) return order;
-    if (["move", "attack_move", "rally_move", "rally_harass", "rally_guard", "rally_raid", "teleport", "recall", "bloom", "harass", "guard", "raid"].includes(order.kind)) return order;
+    if (["move", "attack_move", "rally_move", "teleport", "recall", "bloom"].includes(order.kind) || isBehavior(order.kind) || rallyBehavior(order.kind)) return order;
     if (["gather", "rally_gather"].includes(order.kind)) return this.nodesById().get(order.target);
     if (["attack", "repair"].includes(order.kind)) return this.unitsById().get(order.target);
     return undefined;
@@ -1935,13 +1935,13 @@ export class Battlefield {
   private drawBehaviors(now: number): void {
     const context = this.context;
     const zoom = this.camera.zoom;
-    const goals = new Map<string, { goal: Point; preset: BehaviorKind; count: number }>();
+    const goals = new Map<string, { goal: Point; preset: BehaviorName; count: number }>();
     for (const unit of this.session.snapshot.units) {
       if (!this.selected.has(unit.id) || !isBehavior(unit.behavior)) continue;
       const goal = this.behaviorGoal(unit);
       if (!goal) continue;
       const point = this.position(unit, now);
-      const color = BEHAVIORS[unit.behavior].color;
+      const color = behaviorInfo(unit.behavior).color;
       context.strokeStyle = `${color}60`; context.lineWidth = 1.25 / zoom; context.setLineDash([4 / zoom, 6 / zoom]);
       context.beginPath(); context.moveTo(point.x, point.y); context.lineTo(goal.x, goal.y); context.stroke(); context.setLineDash([]);
       const key = `${unit.behavior}:${goal.x},${goal.y}`;
@@ -1949,13 +1949,13 @@ export class Battlefield {
       entry.count++; goals.set(key, entry);
     }
     for (const { goal, preset, count } of goals.values()) {
-      const color = BEHAVIORS[preset].color;
+      const color = behaviorInfo(preset).color;
       if (preset === "guard") {
         context.strokeStyle = `${color}70`; context.lineWidth = 1.5 / zoom; context.setLineDash([10 / zoom, 8 / zoom]);
         context.beginPath(); context.arc(goal.x, goal.y, 600, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
       }
       // A goal that is a mission's point is labelled by the mission marker instead.
-      if (!this.missions().some(mission => mission.goals.some(own => own.preset === preset && Math.hypot(own.x - goal.x, own.y - goal.y) <= 1))) this.marker(goal, color, `${BEHAVIORS[preset].label.toUpperCase()} ×${count}`);
+      if (!this.missions().some(mission => mission.goals.some(own => own.preset === preset && Math.hypot(own.x - goal.x, own.y - goal.y) <= 1))) this.marker(goal, color, `${behaviorInfo(preset).label.toUpperCase()}×${count}`);
     }
   }
 

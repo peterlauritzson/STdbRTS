@@ -14,10 +14,11 @@ import { BUILDING_FACTION, powered, type Field } from "./zones";
 import { queueView, rallyText, scheduledTraining, trainingSite } from "./production";
 import { BUILD_KEYS, BUILD_MENU_KEY, keyLabel, OPERATION_KEYS, TRAIN_KEYS, UNIT_KEYS } from "./hotkeys";
 import { Operations } from "./operations";
-import { Missions, MAX_SIZE, PERCENT_STEP, TACTICS, TACTIC_IDS, gatherRadius, memberActivities, missionGoals, missionLabel, type Mission, type Tactic } from "./missions";
+import { Missions, MAX_SIZE, PERCENT_STEP, TACTICS, TACTIC_IDS, tacticInfo, customTactics, gatherRadius, memberActivities, missionGoals, missionLabel, type Mission, type PresetTactic, type Tactic } from "./missions";
 import type { Entity } from "./units";
 import { armyRoster, visibleRows, type RosterRow } from "./roster";
-import { behaviorLine } from "./behaviors";
+import { behaviorLine, setCustomLabels } from "./behaviors";
+import { ACTIONS, BLANK_TEXT, CONDITIONS, MAX_CONDITIONS, MAX_STATES, MAX_TRANSITIONS, PRESET_TEXTS, TICKS_PER_SECOND, cleanName, clonePolicy, describeState, parsePolicy, policyLabels, policyOrders, serializePolicy, type ActionId, type ConditionType, type Policy } from "./policies";
 import { ChatPanel } from "./chat";
 
 function element<Type extends HTMLElement = HTMLElement>(id: string): Type {
@@ -176,7 +177,7 @@ const operations = new Operations(session, () => battlefield.issuer());
 const missions = new Missions(session, () => battlefield.issuer());
 battlefield.onMission = (tactic, point, selected) => missions.add(tactic, point, selected);
 battlefield.onMissionRally = (id, point) => missions.setRally(id, point);
-battlefield.missions = () => missions.list.map(mission => ({ id: mission.id, x: mission.x, y: mission.y, label: missionLabel(mission, gatheredCount(mission)), color: TACTICS[mission.tactic].color, leash: mission.tactic === "guard", goals: missionGoals(mission), ...(mission.tactic === "gather" ? { rally: mission.rally } : {}) }));
+battlefield.missions = () => missions.list.map(mission => ({ id: mission.id, x: mission.x, y: mission.y, label: missionLabel(mission, gatheredCount(mission)), color: tacticInfo(mission.tactic).color, leash: mission.tactic === "guard", goals: missionGoals(mission), ...(mission.tactic === "gather" ? { rally: mission.rally } : {}) }));
 battlefield.missionAt = point => missions.at(point)?.id;
 battlefield.onAssign = (id, selected) => missions.assign(id, selected);
 battlefield.onExpand = point => operations.begin(point);
@@ -407,9 +408,11 @@ for (const kind of TACTIC_IDS) {
  * toggles it; Esc closes it once nothing is being aimed. The deck's Strategy
  * section keeps the launch buttons and a one-line-per-mission summary.
  */
-type StrategyTab = "missions" | "stances" | "production" | "orders";
-const STRATEGY_TABS: readonly StrategyTab[] = ["missions", "stances", "production", "orders"];
+type StrategyTab = "missions" | "behaviors" | "stances" | "production" | "orders";
+const STRATEGY_TABS: readonly StrategyTab[] = ["missions", "behaviors", "stances", "production", "orders"];
 const STRATEGY_TAB_KEY = "strategy-tab";
+/** My defined behavior slots (number to name), from the `policy` rows; refreshed with every match render. */
+let customLabels = new Map<number, string>();
 let strategyTab: StrategyTab = "missions";
 try { const saved = localStorage.getItem(STRATEGY_TAB_KEY); if (STRATEGY_TABS.includes(saved as StrategyTab)) strategyTab = saved as StrategyTab; } catch { /* storage blocked: start on Missions */ }
 function showStrategyTab(tab: StrategyTab): void {
@@ -446,7 +449,7 @@ for (const button of document.querySelectorAll<HTMLElement>("[data-strategy-tab]
 });
 // The window's launch cards press the deck button of the same name, so both share one handler and one state.
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-launch]")) {
-  button.querySelector<HTMLElement>(".swatch")?.style.setProperty("background", TACTICS[button.dataset.launch!.replace("mission-", "") as Tactic]?.color ?? "");
+  button.querySelector<HTMLElement>(".swatch")?.style.setProperty("background", TACTICS[button.dataset.launch!.replace("mission-", "") as PresetTactic]?.color ?? "");
   button.addEventListener("click", () => element<HTMLButtonElement>(button.dataset.launch!).click());
 }
 element("repair").addEventListener("click", () => battlefield.arm("repair"));
@@ -598,6 +601,10 @@ function renderLobby(): void {
 function renderMatch(): void {
   const { room, me, units, players } = session.snapshot;
   if (!room || !me) return;
+  customLabels = policyLabels(session.snapshot.policies, me.slot);
+  setCustomLabels(customLabels);
+  renderCustomLaunch();
+  renderBehaviors();
   renderStances();
   renderDoctrine();
   renderStrategy();
@@ -762,6 +769,10 @@ function renderMatch(): void {
     element<HTMLButtonElement>(`mission-${kind}`).disabled = !canOrder;
     element(`mission-${kind}`).setAttribute("aria-pressed", String(battlefield.targeting === `mission_${kind}`));
   }
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-custom-mission]")) {
+    button.disabled = !canOrder;
+    button.setAttribute("aria-pressed", String(battlefield.targeting === `mission_${button.dataset.customMission}`));
+  }
   element("selection-behavior").textContent = behaviorLine(selection);
   show("repair", mine.some(unit => isLabour(unit.kind)));
   // Teleport is Network's alone, and only for units already inside the field.
@@ -826,7 +837,7 @@ function renderMatch(): void {
   const missionTags = [...new Set(memberActivities(missions.list, selection).values())];
   const inMission = selection.length > 0 && selection.every(unit => missions.list.some(mission => mission.members.has(unit.id)));
   element("selection-order").textContent = inMission && missionTags.length ? `Mission: ${missionTags.join(", ")}` : selection.length === 1 ? selection[0].constructionRemaining > 0n ? `Constructing / ${(Number(selection[0].constructionRemaining) / 20).toFixed(1)}s left` : selection[0].order.kind.split("_").join(" ") : "";
-  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : battlefield.targeting === "recall" ? "Recall area / your units near it return home" : battlefield.targeting === "bloom" ? "Bloom site / on your own creep" : battlefield.targeting === "rally" ? "Rally target" : battlefield.targeting === "expand" ? "Expand toward / click the map or minimap" : battlefield.targeting === "territory" ? "Extend territory toward / click the map or minimap" : battlefield.targeting === "set_mission_rally" ? "Gather point / click the map or minimap" : battlefield.targeting?.startsWith("mission_") ? `${TACTICS[battlefield.targeting.slice(8) as Tactic].label} mission / click the map or minimap (selected army joins it)` : "";
+  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : battlefield.targeting === "recall" ? "Recall area / your units near it return home" : battlefield.targeting === "bloom" ? "Bloom site / on your own creep" : battlefield.targeting === "rally" ? "Rally target" : battlefield.targeting === "expand" ? "Expand toward / click the map or minimap" : battlefield.targeting === "territory" ? "Extend territory toward / click the map or minimap" : battlefield.targeting === "set_mission_rally" ? "Gather point / click the map or minimap" : battlefield.targeting?.startsWith("mission_") ? `${tacticInfo(battlefield.targeting.slice(8) as Tactic).label} mission / click the map or minimap (selected army joins it)` : "";
   element("targeting-state").hidden = !battlefield.targeting;
   element("targeting-state").textContent = targetLabel;
   for (const [id, kind] of [["attack-move", "attack_move"], ["repair", "repair"], ["set-rally", "rally"], ["teleport", "teleport"], ["recall", "recall"], ["bloom", "bloom"]]) element(id).setAttribute("aria-pressed", String(battlefield.targeting === kind));
@@ -942,7 +953,7 @@ function renderStrategy(): void {
   // Rebuilt only when something shown changed, so a click never lands on a replaced button.
   const signature = JSON.stringify([
     mine.map(mission => [mission.id, gatheredCount(mission), mission.tactic, mission.size, mission.state, mission.x, mission.y, mission.rally.x, mission.rally.y, mission.gatherPercent, mission.fallbackPercent, mission.members.size]),
-    operations.list.map(operation => [operation.id, operation.done, operation.total, operation.note]), operations.autoLabour,
+    operations.list.map(operation => [operation.id, operation.done, operation.total, operation.note]), operations.autoLabour, [...customLabels],
   ]);
   if (signature === strategySignature) return;
   strategySignature = signature;
@@ -961,7 +972,7 @@ function renderStrategy(): void {
     renderMatch();
   };
   for (const mission of mine) {
-    const info = TACTICS[mission.tactic];
+    const info = tacticInfo(mission.tactic);
     const row = text("div", "", "strategy-row mission-row");
     row.dataset.mission = String(mission.id);
     const swatch = text("span", "", "swatch"); swatch.style.background = info.color;
@@ -969,7 +980,7 @@ function renderStrategy(): void {
     name.title = "Select its units and centre the camera on them"; name.addEventListener("click", () => goTo(mission));
     const picker = document.createElement("select");
     picker.className = "mission-tactic"; picker.title = "Change this mission's tactic"; picker.setAttribute("aria-label", "Mission tactic");
-    for (const id of TACTIC_IDS) picker.append(new Option(TACTICS[id].label, id, false, id === mission.tactic));
+    for (const id of [...TACTIC_IDS, ...new Set([...customTactics(customLabels.keys()), ...(info.id.startsWith("custom_") ? [mission.tactic] : [])])]) picker.append(new Option(tacticInfo(id).label, id, false, id === mission.tactic));
     picker.addEventListener("change", () => missions.setTactic(mission.id, picker.value as Tactic));
     const rest = mission.size === "rest";
     const numeric = typeof mission.size === "number" ? mission.size : mission.members.size;
@@ -1017,10 +1028,10 @@ function renderStrategy(): void {
   // The deck's summary: one line each, a click on the name goes there; everything else is in the window.
   const summary: HTMLElement[] = mine.map(mission => {
     const row = text("div", "", "summary-row");
-    const swatch = text("span", "", "swatch"); swatch.style.background = TACTICS[mission.tactic].color;
+    const swatch = text("span", "", "swatch"); swatch.style.background = tacticInfo(mission.tactic).color;
     const name = text("button", missionLabel(mission, gatheredCount(mission)), "strategy-name-btn") as HTMLButtonElement;
     name.title = "Select its units and centre the camera on them"; name.addEventListener("click", () => goTo(mission));
-    row.append(swatch, name, text("span", TACTICS[mission.tactic].label, "summary-note"));
+    row.append(swatch, name, text("span", tacticInfo(mission.tactic).label, "summary-note"));
     return row;
   });
   for (const operation of operations.list) {
@@ -1038,6 +1049,230 @@ function renderStrategy(): void {
   if (!summary.length) summary.push(text("p", "No missions yet. Pick one above, then click the map.", "strategy-empty"));
   element("strategy-summary").replaceChildren(...summary);
 }
+/**
+ * Your own behaviors as mission launchers: one deck button and one Missions-tab
+ * card per defined slot, named for the behavior. Rebuilt only when a slot's
+ * name changes; renderMatch sets their disabled and pressed state each pass.
+ */
+let customLaunchSignature = "";
+function renderCustomLaunch(): void {
+  const signature = JSON.stringify([...customLabels]);
+  if (signature === customLaunchSignature) return;
+  customLaunchSignature = signature;
+  const slots = [...customLabels.keys()].sort((left, right) => left - right);
+  const arm = (kind: string): void => battlefield.arm(`mission_${kind}` as `mission_${Tactic}`);
+  const deck = element("strategy-custom");
+  const cards = element("sw-launch-custom");
+  deck.hidden = cards.hidden = !slots.length;
+  deck.replaceChildren(...slots.map(number => {
+    const kind = `custom_${number}`;
+    const info = tacticInfo(kind as Tactic);
+    const button = text("button", "", "strategy-button") as HTMLButtonElement;
+    button.dataset.customMission = kind; button.title = `${info.hint}. Click, then click the map: a standing mission`;
+    const swatch = text("span", "", "swatch"); swatch.style.background = info.color;
+    button.append(swatch, text("span", info.label, "strategy-name"));
+    button.addEventListener("click", () => arm(kind));
+    return button;
+  }));
+  cards.replaceChildren(...slots.map(number => {
+    const kind = `custom_${number}`;
+    const info = tacticInfo(kind as Tactic);
+    const button = text("button", "") as HTMLButtonElement;
+    button.dataset.customMission = kind; button.title = info.hint;
+    const swatch = text("span", "", "swatch"); swatch.style.background = info.color;
+    const body = text("span", ""); body.append(text("b", info.label), text("small", "Your behavior as a standing mission"));
+    button.append(swatch, body);
+    button.addEventListener("click", () => arm(kind));
+    return button;
+  }));
+}
+
+/**
+ * The Strategy window's Behaviors tab: four slots, each a small state machine
+ * the server runs on army units (server/src/behavior.rs). A slot is empty (pick a
+ * starting point), or an editor over a local draft. Drafts live here, not on the
+ * server, until Save sends `policy_set_<n>:<text>`; the live message is the same
+ * parse the server does (policies.ts). Snapshots never rebuild the cards while
+ * an input in the pane has focus, and never touch a draft.
+ */
+const behaviorDrafts = new Map<number, Policy>();
+let behaviorSignature = "";
+function renderBehaviors(force = false): void {
+  const { me, policies } = session.snapshot;
+  if (!me) return;
+  const pane = element("behavior-list");
+  const rows = new Map(policies.filter(row => row.slot === me.slot).map(row => [row.number, row.text]));
+  const signature = JSON.stringify([...rows].sort(([left], [right]) => left - right));
+  if (!force) {
+    if (signature === behaviorSignature) return;
+    const active = document.activeElement;
+    if (pane.contains(active) && (active instanceof HTMLInputElement || active instanceof HTMLSelectElement)) return;
+  }
+  behaviorSignature = signature;
+  // A saved draft is the row now: drop it so the card follows the server again.
+  for (const [number, draft] of [...behaviorDrafts]) if (rows.get(number) === serializePolicy(draft)) behaviorDrafts.delete(number);
+  pane.replaceChildren(...[1, 2, 3, 4].map(number => behaviorCard(number, rows.get(number))));
+}
+
+function behaviorCard(number: number, rowText: string | undefined): HTMLElement {
+  const card = text("div", "", "behavior-card");
+  card.dataset.slot = String(number);
+  const saved = rowText === undefined ? undefined : parsePolicy(rowText);
+  const draft = behaviorDrafts.get(number) ?? (saved?.ok ? clonePolicy(saved.policy) : undefined);
+  const head = text("div", "", "behavior-head");
+  const swatch = text("span", "", "swatch"); swatch.style.background = tacticInfo(`custom_${number}` as Tactic).color;
+  head.append(swatch, text("strong", `Slot ${number}`, "strategy-label"));
+  card.append(head);
+  if (!draft) {
+    const starts = text("div", "", "behavior-starts");
+    starts.append(text("span", "Start from", "behavior-ok"));
+    for (const [label, source] of [["Harass", PRESET_TEXTS.harass], ["Guard", PRESET_TEXTS.guard], ["Raid", PRESET_TEXTS.raid], ["Rush", PRESET_TEXTS.assault], ["Blank", BLANK_TEXT]] as const) {
+      const button = text("button", label, "strategy-tool") as HTMLButtonElement;
+      button.title = label === "Blank" ? "One state that attack-moves to the goal" : `A copy of the ${label} preset to change`;
+      button.addEventListener("click", () => {
+        const parsed = parsePolicy(source);
+        if (parsed.ok) { behaviorDrafts.set(number, parsed.policy); renderBehaviors(true); }
+      });
+      starts.append(button);
+    }
+    card.append(starts);
+    return card;
+  }
+
+  const rebuild = (): void => renderBehaviors(true);
+  const mark = text("span", "", "behavior-dirty");
+  const name = document.createElement("input");
+  name.type = "text"; name.maxLength = 20; name.value = draft.label; name.title = "Behavior name"; name.setAttribute("aria-label", `Slot ${number} name`);
+  name.addEventListener("input", () => { const clean = cleanName(name.value); if (clean !== name.value) name.value = clean; draft.label = clean; touch(); });
+  const labour = document.createElement("input");
+  labour.type = "checkbox"; labour.checked = draft.labour;
+  labour.addEventListener("change", () => { draft.labour = labour.checked; touch(); });
+  const labourLabel = text("label", "", "behavior-ok");
+  labourLabel.title = "While attack-moving, units go for enemy labour first";
+  labourLabel.append(labour, document.createTextNode(" Prefer enemy labour"));
+  head.append(name, labourLabel, mark);
+
+  const list = text("div", "", "behavior-states");
+  const touch = (): void => { behaviorDrafts.set(number, draft); refresh(); };
+  const structural = (change: () => void): void => { change(); behaviorDrafts.set(number, draft); rebuild(); };
+  const summaries: HTMLElement[] = [];
+  const targets: HTMLSelectElement[] = [];
+  const add = (parent: HTMLElement, label: string, title: string, action: () => void, disabled = false): HTMLButtonElement => {
+    const button = text("button", label, "strategy-tool") as HTMLButtonElement;
+    button.title = title; button.setAttribute("aria-label", title); button.disabled = disabled;
+    button.addEventListener("click", action);
+    parent.append(button);
+    return button;
+  };
+
+  draft.states.forEach((state, index) => {
+    const box = text("div", "", "behavior-state");
+    const line = text("div", "", "behavior-line");
+    const stateName = document.createElement("input");
+    stateName.type = "text"; stateName.maxLength = 12; stateName.value = state.name; stateName.setAttribute("aria-label", `State ${index} name`);
+    stateName.addEventListener("input", () => { const clean = cleanName(stateName.value); if (clean !== stateName.value) stateName.value = clean; state.name = clean; touch(); });
+    const action = document.createElement("select");
+    action.setAttribute("aria-label", `State ${index} action`);
+    for (const entry of ACTIONS) action.append(new Option(entry.label, entry.id, false, entry.id === state.action));
+    action.addEventListener("change", () => { state.action = action.value as ActionId; touch(); });
+    line.append(text("span", index === 0 ? "#0 start" : `#${index}`, "index mono"), stateName, action);
+    add(line, "×", `Remove state ${index}`, () => structural(() => {
+      draft.states.splice(index, 1);
+      for (const other of draft.states) other.transitions = other.transitions.filter(transition => transition.to !== index).map(transition => ({ ...transition, to: transition.to > index ? transition.to - 1 : transition.to }));
+    }), draft.states.length <= 1);
+    box.append(line);
+
+    state.transitions.forEach((transition, at) => {
+      const row = text("div", "", "behavior-line behavior-transition");
+      row.append(text("span", "go to", "behavior-ok"));
+      const target = document.createElement("select");
+      target.className = "behavior-target"; target.setAttribute("aria-label", `State ${index} transition ${at + 1} target`);
+      draft.states.forEach((other, to) => target.append(new Option(`#${to} ${other.name}`, String(to), false, to === transition.to)));
+      target.addEventListener("change", () => { transition.to = Number(target.value); touch(); });
+      targets.push(target);
+      row.append(target);
+      if (!transition.when.length) row.append(text("span", "after 1 s", "behavior-ok"));
+      transition.when.forEach((condition, which) => {
+        row.append(text("span", which ? "and" : "when", "behavior-ok"));
+        const kind = document.createElement("select");
+        kind.setAttribute("aria-label", `Condition ${which + 1} type`);
+        for (const entry of CONDITIONS) kind.append(new Option(entry.label, entry.id, false, entry.id === condition.type));
+        const info = (): (typeof CONDITIONS)[number] => CONDITIONS.find(entry => entry.id === condition.type)!;
+        const amount = document.createElement("input");
+        amount.type = "number"; amount.setAttribute("aria-label", `Condition ${which + 1} value`);
+        const sync = (): void => {
+          const { unit } = info();
+          amount.min = unit === "radius" ? "1" : "0";
+          amount.max = unit === "percent" ? "100" : unit === "radius" ? "600" : unit === "ticks" ? "600" : "";
+          amount.step = unit === "ticks" ? "0.5" : "1";
+          amount.value = String(unit === "ticks" ? condition.value / TICKS_PER_SECOND : condition.value);
+        };
+        sync();
+        kind.addEventListener("change", () => {
+          const before = info().unit;
+          condition.type = kind.value as ConditionType;
+          if (info().unit !== before) condition.value = info().fallback;
+          sync(); touch();
+        });
+        amount.addEventListener("input", () => {
+          const entered = amount.valueAsNumber;
+          condition.value = Number.isFinite(entered) ? (info().unit === "ticks" ? Math.round(entered * TICKS_PER_SECOND) : entered) : NaN;
+          touch();
+        });
+        row.append(kind, amount);
+        add(row, "−", `Remove condition ${which + 1}`, () => structural(() => { transition.when.splice(which, 1); }));
+      });
+      add(row, "+ when", "Add a condition (up to 2; all must hold)", () => structural(() => { transition.when.push({ type: CONDITIONS[0].id, value: CONDITIONS[0].fallback }); }), transition.when.length >= MAX_CONDITIONS);
+      add(row, "×", `Remove transition ${at + 1}`, () => structural(() => { state.transitions.splice(at, 1); }));
+      box.append(row);
+    });
+    const tools = text("div", "", "behavior-line behavior-transition");
+    add(tools, "+ transition", "Add a transition (up to 4; the first that holds wins)", () => structural(() => { state.transitions.push({ to: (index + 1) % draft.states.length, when: [{ type: CONDITIONS[0].id, value: CONDITIONS[0].fallback }] }); }), state.transitions.length >= MAX_TRANSITIONS);
+    box.append(tools);
+    const summary = text("p", "", "behavior-summary");
+    summaries.push(summary);
+    box.append(summary);
+    list.append(box);
+  });
+  card.append(list);
+
+  const foot = text("div", "", "behavior-line");
+  add(foot, "+ state", `Add a state (up to ${MAX_STATES})`, () => structural(() => {
+    draft.states.push({ name: cleanName(`state${draft.states.length}`), action: "attack_move:goal", transitions: [] });
+  }), draft.states.length >= MAX_STATES);
+  const message = text("span", "", "behavior-ok");
+  message.setAttribute("role", "status");
+  const save = add(foot, "Save", "Send this behavior to the server (free; units already running it restart at state 0)", () => {
+    const issuer = battlefield.issuer();
+    if (issuer) void session.order([issuer.id], policyOrders.set(number, serializePolicy(draft)));
+  });
+  const revert = add(foot, "Revert", rowText === undefined ? "Discard this draft" : "Throw away unsaved edits", () => { behaviorDrafts.delete(number); rebuild(); });
+  add(foot, "Clear", "Remove this behavior; units running it go idle. Refused while a mission uses it.", () => {
+    const issuer = battlefield.issuer();
+    behaviorDrafts.delete(number);
+    if (issuer) void session.order([issuer.id], policyOrders.clear(number));
+    rebuild();
+  }, rowText === undefined);
+  foot.append(message);
+  card.append(foot);
+
+  const refresh = (): void => {
+    const serialized = serializePolicy(draft);
+    const check = parsePolicy(serialized);
+    const dirty = rowText === undefined || serialized !== rowText;
+    mark.textContent = rowText === undefined ? "Not saved yet" : dirty ? "Unsaved changes" : "";
+    card.classList.toggle("dirty", dirty);
+    message.className = check.ok ? "behavior-ok" : "behavior-error";
+    message.textContent = check.ok ? `OK: ${draft.states.length} state${draft.states.length === 1 ? "" : "s"}` : check.error;
+    save.disabled = !check.ok || !dirty;
+    revert.disabled = !dirty && rowText !== undefined;
+    for (const select of targets) [...select.options].forEach((option, to) => { option.textContent = `#${to} ${draft.states[to]?.name ?? ""}`; });
+    draft.states.forEach((state, index) => { summaries[index].textContent = describeState(draft, state); });
+  };
+  refresh();
+  return card;
+}
+
 /**
  * The Strategy panel's Stances section: one row per army kind of the player's
  * faction with a four-way picker. A kind with no `stance` row shows its default.

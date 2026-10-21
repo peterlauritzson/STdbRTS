@@ -573,3 +573,22 @@ dialog p { margin-top: 14px; color: var(--muted); font-size: 14px; }
   .production-buttons button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .production-buttons small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
+/* Behaviors: four slot cards, each an editor for a small state machine. */
+.sw-launch[hidden], .strategy-buttons[hidden] { display: none; }
+.behavior-list { display: flex; flex-direction: column; gap: 10px; }
+.behavior-card { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid #3b4a3f; border-radius: 4px; background: #101b17; }
+.behavior-card.dirty { border-color: #d9b86a; }
+.behavior-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.behavior-head .swatch { width: 10px; height: 20px; border-radius: 2px; flex: none; }
+.behavior-head input[type="text"] { flex: 1; min-width: 100px; }
+.behavior-dirty { color: #d9b86a; font-size: 12px; }
+.behavior-error { color: #f6c3c6; font-size: 12px; line-height: 1.35; }
+.behavior-ok { color: var(--muted); font-size: 12px; }
+.behavior-starts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.behavior-state { display: flex; flex-direction: column; gap: 4px; padding: 6px; border-left: 2px solid #56684f; background: #14211c; }
+.behavior-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.behavior-line .index { color: var(--muted); min-width: 16px; }
+.behavior-line input[type="text"] { width: 110px; }
+.behavior-line input[type="number"] { width: 72px; }
+.behavior-transition { margin-left: 16px; }
+.behavior-summary { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.35; }

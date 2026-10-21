@@ -117,7 +117,7 @@
       <aside id="strategy-window" class="strategy-window" aria-label="Strategy" hidden>
         <header class="sw-head">
           <h2>Strategy</h2>
-          <div class="sw-tabs" role="tablist" aria-label="Strategy sections"><button role="tab" id="sw-tab-missions" data-strategy-tab="missions" aria-controls="sw-missions" aria-selected="true">Missions</button><button role="tab" id="sw-tab-stances" data-strategy-tab="stances" aria-controls="sw-stances" aria-selected="false">Stances</button><button role="tab" id="sw-tab-production" data-strategy-tab="production" aria-controls="sw-production" aria-selected="false">Production</button><button role="tab" id="sw-tab-orders" data-strategy-tab="orders" aria-controls="sw-orders" aria-selected="false">Orders</button></div>
+          <div class="sw-tabs" role="tablist" aria-label="Strategy sections"><button role="tab" id="sw-tab-missions" data-strategy-tab="missions" aria-controls="sw-missions" aria-selected="true">Missions</button><button role="tab" id="sw-tab-behaviors" data-strategy-tab="behaviors" aria-controls="sw-behaviors" aria-selected="false">Behaviors</button><button role="tab" id="sw-tab-stances" data-strategy-tab="stances" aria-controls="sw-stances" aria-selected="false">Stances</button><button role="tab" id="sw-tab-production" data-strategy-tab="production" aria-controls="sw-production" aria-selected="false">Production</button><button role="tab" id="sw-tab-orders" data-strategy-tab="orders" aria-controls="sw-orders" aria-selected="false">Orders</button></div>
           <button id="strategy-close" class="icon-button" title="Close (F3 or Esc)" aria-label="Close strategy window"><i data-lucide="x"></i></button>
         </header>
         <div class="sw-body">
@@ -133,8 +133,13 @@
               <button data-launch="territory"><i data-lucide="radio-tower"></i><span><b>Territory</b><small>Sensor towers toward a point</small></span><kbd>O</kbd></button>
               <button data-launch="auto-labour"><i data-lucide="repeat"></i><span><b>Saturate workers</b><small>Labour at idle hubs, one per patch</small></span><kbd>L</kbd></button>
             </div>
+            <div id="sw-launch-custom" class="sw-launch" role="group" aria-label="Your own behaviors as missions" hidden></div>
             <h3 class="sw-subhead">Active</h3>
             <div id="strategy-list" class="strategy-list" aria-label="Active missions and operations"></div>
+          </section>
+          <section id="sw-behaviors" class="sw-pane" role="tabpanel" aria-labelledby="sw-tab-behaviors" hidden>
+            <p class="sw-intro">Your own behaviors: up to four state machines for army units. A unit starts in the first state and does its action; each state lists transitions, and the first one whose conditions all hold moves it on (after at least 1 s in the state). Goal is where you click or the mission is; home is beside your nearest hub when it started. Once saved, a slot is also a mission tactic and a Missions launch card.</p>
+            <div id="behavior-list" class="behavior-list"></div>
           </section>
           <section id="sw-stances" class="sw-pane" role="tabpanel" aria-labelledby="sw-tab-stances" hidden>
             <p class="sw-intro">How each army kind fights on an attack-move or a mission. A plain move, a hold or an attack you give yourself is never overridden.</p>
@@ -189,6 +194,7 @@
           <button id="territory" class="strategy-button" aria-label="Expand territory" aria-pressed="false" title="Extend your territory toward a point with sensor towers"><i data-lucide="radio-tower"></i><span class="strategy-name">Territory</span></button>
           <button id="auto-labour" class="strategy-button" aria-label="Saturate workers" aria-pressed="false" title="Saturate workers: train labour at idle hubs until there is one per patch"><i data-lucide="repeat"></i><span class="strategy-name">Saturate</span></button>
         </div>
+        <div id="strategy-custom" class="strategy-buttons" role="group" aria-label="Your own behaviors as missions" hidden></div>
         <div id="strategy-summary" class="strategy-summary" aria-label="Active missions and operations"></div>
         <p id="last-reject" class="last-reject mono" hidden></p>
         </div>

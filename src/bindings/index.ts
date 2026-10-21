@@ -55,6 +55,7 @@ import DoctrineWeightRow from "./doctrine_weight_table";
 import MatchSampleRow from "./match_sample_table";
 import MissionRow from "./mission_table";
 import PlayerRow from "./player_table";
+import PolicyRow from "./policy_table";
 import ResourceNodeRow from "./resource_node_table";
 import RoomRow from "./room_table";
 import StanceRow from "./stance_table";
@@ -178,6 +179,20 @@ const tablesSchema = __schema({
       { name: 'player_identity_key', constraint: 'unique', columns: ['identity'] },
     ],
   }, PlayerRow),
+  policy: __table({
+    name: 'policy',
+    indexes: [
+      { accessor: 'id', name: 'policy_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'match_id', name: 'policy_match_id_idx_btree', algorithm: 'btree', columns: [
+        'matchId',
+      ] },
+    ],
+    constraints: [
+      { name: 'policy_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, PolicyRow),
   resource_node: __table({
     name: 'resource_node',
     indexes: [

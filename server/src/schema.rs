@@ -290,6 +290,24 @@ pub struct StanceRow {
     pub stance: String,
 }
 
+/// One player's own behavior policy `custom_<number>`, as the text it was
+/// defined with (`rts_core::behavior::parse_policy`). Additive and public so a
+/// client lists and edits its own. Round-trips `World::policies` through
+/// `game::load_world` / `game::save_world` and is dropped with the match in
+/// `game::delete_room`.
+#[spacetimedb::table(public, accessor = policy)]
+pub struct PolicyRow {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    #[index(btree)]
+    pub match_id: u64,
+    pub slot: u8,
+    /// 1 to `rts_core::behavior::MAX_CUSTOM`.
+    pub number: u8,
+    pub text: String,
+}
+
 /// One standing mission (`rts_core::mission::Mission`): a tactic at a point
 /// with a size and its member units. Additive and public so a client draws its
 /// own missions from the subscription. Round-trips `World::missions` through

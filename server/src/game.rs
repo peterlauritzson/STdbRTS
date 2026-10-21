@@ -1,6 +1,6 @@
 use crate::{lobby::current_player, schema::*};
 use rts_core::{
-    is_army, is_building, is_labour, is_sample_tick, maps, scheduled_tick,
+    behavior, is_army, is_building, is_labour, is_sample_tick, maps, scheduled_tick,
     simulation::{Command as CoreCommand, Order, World},
     doctrine::Doctrine, mission::Mission, stats, Balance, Cost, Stance,
 };
@@ -269,6 +269,25 @@ pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
             doctrines
         },
         next_mission_id: missions.iter().map(|mission| mission.id).max().unwrap_or(0) + 1,
+        // A row that no longer parses (the format tightened) is dropped, and
+        // units running it fall back to their last ordinary order.
+        policies: ctx
+            .db
+            .policy()
+            .match_id()
+            .filter(room.id)
+            .filter_map(|row| {
+                let policy =
+                    behavior::parse_policy(&format!("custom_{}", row.number), &row.text).ok()?;
+                Some((
+                    (row.slot, row.number),
+                    behavior::Custom {
+                        text: row.text,
+                        policy,
+                    },
+                ))
+            })
+            .collect(),
         missions,
         outcome: if room.state == "finished" {
             Some(room.winner)
@@ -323,7 +342,8 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
     for entity in &world.units {
         let id = (room.id << 32) | entity.id as u64;
         let (cold, motion, vitals, state, behavior) = entity.split();
-        let (preset, preset_state) = rts_core::behavior::labels(behavior.as_ref());
+        let (preset, preset_state) =
+            behavior::labels_in(&world.policies, entity.owner, behavior.as_ref());
         let unit_row = |data| Unit {
             id,
             match_id: room.id,
@@ -517,6 +537,35 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
             stance: stance.as_str().into(),
         });
     }
+    // Policy rows, diffed the same way by `(slot, number)` and text.
+    let mut pending: std::collections::BTreeMap<(u8, u8), &str> = world
+        .policies
+        .iter()
+        .map(|(key, custom)| (*key, custom.text.as_str()))
+        .collect();
+    for old in ctx.db.policy().match_id().filter(room.id).collect::<Vec<_>>() {
+        match pending.remove(&(old.slot, old.number)) {
+            None => {
+                ctx.db.policy().id().delete(old.id);
+            }
+            Some(text) if text != old.text => {
+                ctx.db.policy().id().update(PolicyRow {
+                    text: text.into(),
+                    ..old
+                });
+            }
+            Some(_) => {}
+        }
+    }
+    for ((slot, number), text) in pending {
+        ctx.db.policy().insert(PolicyRow {
+            id: 0,
+            match_id: room.id,
+            slot,
+            number,
+            text: text.into(),
+        });
+    }
     // Doctrine rows: one per player, plus one per non-default weight.
     let mut pending = world.doctrines.clone();
     for old in ctx.db.doctrine().match_id().filter(room.id).collect::<Vec<_>>() {
@@ -701,6 +750,7 @@ pub fn delete_room(ctx: &ReducerContext, match_id: u64) {
     ctx.db.unit_state().match_id().delete(match_id);
     ctx.db.creep_patch().match_id().delete(match_id);
     ctx.db.stance().match_id().delete(match_id);
+    ctx.db.policy().match_id().delete(match_id);
     ctx.db.mission().match_id().delete(match_id);
     ctx.db.doctrine().match_id().delete(match_id);
     ctx.db.doctrine_weight().match_id().delete(match_id);
@@ -745,6 +795,10 @@ pub fn issue_order(
     }
     if request_id.is_empty() || request_id.len() > 64 {
         return Err("Invalid request ID".into());
+    }
+    // The longest order is a behavior definition (`policy_set_<n>:<text>`).
+    if kind.len() > behavior::MAX_POLICY_TEXT + 16 {
+        return Err("Order is too long".into());
     }
     if !x.is_finite() || !y.is_finite() {
         return Err("Invalid coordinates".into());

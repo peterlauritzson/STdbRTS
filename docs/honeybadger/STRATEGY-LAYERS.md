@@ -5,7 +5,7 @@ Status: design accepted by the author 2026-10-09; implementation in increments. 
 ## Summary
 
 - Players set strategy at four layers, each a small finite-state policy: **combat stance** (how a unit fights), **mission tactic** (what a group does at a place), **production doctrine** (what to train), **economy doctrine** (expanding and holding ground).
-- Every layer ships presets with a few tunable knobs. A full when→do rule editor comes later, over the same model and limits as `server/src/behavior.rs`.
+- Every layer ships presets with a few tunable knobs. Players can also write their own per-unit behaviors (up to 4, as states with when→go-to transitions) over the same model and limits as `server/src/behavior.rs`, and use them as orders, rallies and mission tactics (implemented 2026-10-13, see "Authored behaviors").
 - Everything runs **on the server**. Missions leave the browser tab: they keep staffing when the tab closes, the practice bot can use the same code, and they are not bound by the client's order-rate limits.
 - Schema rule: add new tables, do not change columns of existing ones (the live server deploys with `--delete-data=never`).
 
@@ -49,6 +49,17 @@ During a strike, units recruited after it began wait at the rally and go in as a
 Gather then strike knobs: rally point (default 65% of the way from the owner's nearest hub to the goal), strike when at least *G*% of the mission's size is at the rally (default 80%; for "rest", at least 8 units), fall back when strength drops below *F*% of what struck (default 40%).
 
 Mission knobs common to all: size, retreat health % for the presets that retreat.
+
+### Authored behaviors (player-built unit FSMs)
+
+Status: **implemented** 2026-10-13 (`policy` table, `policy_set_<n>:<text>` / `policy_clear_<n>` commands, Behaviors tab in the Strategy window). All limits are the behavior contract's trial limits.
+
+- A player has 4 slots, `custom_1` to `custom_4`. Each holds a policy written in the same one-line text the presets are now written in (`PRESET_TEXTS` in `server/src/behavior.rs`), so presets and authored policies share one parser and one interpreter: `label|labour|state|...`, each state `name,action[,to:cond&cond]...`.
+- Vocabulary is the existing one, nothing new: actions attack-move/move to goal or home, hold; conditions health below / at least, outnumbered within R, no enemy within R, near / farther than goal or home, time in state. Limits: 8 states, 4 transitions per state, 2 conditions per transition, radius at most 600, dwell at most 10 minutes, 2000 characters.
+- `custom_<n>` is then usable wherever a preset is: as an order on army units, as a producer rally `rally_custom_<n>`, and as a plain mission tactic (default size 6; its members just run it). Using an empty slot is refused.
+- Redefining a slot restarts units running it at state 0 (their old state index may not exist). Clearing it stops them; clearing is refused while one of the player's missions uses it.
+- Unit rows carry `behavior = custom_<n>` and the authored state name, so a client labels the unit from its own `policy` rows.
+- Deferred: group-level (mission) state machines authored by players; ability actions; a "commit" stance.
 
 ## Layer 3: production doctrine
 

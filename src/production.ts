@@ -1,5 +1,5 @@
 import type { Entity } from "./units";
-import { BEHAVIORS, rallyBehavior } from "./behaviors";
+import { behaviorInfo, rallyBehavior } from "./behaviors";
 import { isBuilding, type FactionName } from "./catalog";
 import { canTrainAt, type Field } from "./zones";
 
@@ -106,7 +106,7 @@ export function queueView(units: readonly Entity[], commands: readonly TrainComm
 export function rallyText(producer: Pick<Entity, "x" | "y" | "order">, rallyNode: { kind: { tag: string }; x: number; y: number } | undefined, landmark: { label: string } | undefined): string {
   const order = producer.order;
   const preset = rallyBehavior(order.kind);
-  if (preset) return `Rally: ${BEHAVIORS[preset].label} at ${Math.round(order.x)}, ${Math.round(order.y)} / ${Math.round(Math.hypot(order.x - producer.x, order.y - producer.y))} away`;
+  if (preset) return `Rally: ${behaviorInfo(preset).label} at ${Math.round(order.x)}, ${Math.round(order.y)} / ${Math.round(Math.hypot(order.x - producer.x, order.y - producer.y))} away`;
   if (order.kind !== "rally_move" && order.kind !== "rally_gather") return "Rally unset";
   const target = order.kind === "rally_gather" && rallyNode ? rallyNode : order;
   const away = `${Math.round(Math.hypot(target.x - producer.x, target.y - producer.y))} away`;
