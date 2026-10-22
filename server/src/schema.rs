@@ -116,6 +116,10 @@ pub struct Unit {
     /// The running state's name ("advance", "retreat", ...), or `None`.
     #[default(None::<String>)]
     pub behavior_state: Option<String>,
+    /// Organic burrow (`Entity::burrowed`). A column of its own for the same
+    /// reason as the two above: the migration only adds columns.
+    #[default(false)]
+    pub burrowed: bool,
 }
 
 /// A unit's position, keyed like `unit`: the only row a merely-walking unit

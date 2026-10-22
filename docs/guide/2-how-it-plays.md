@@ -75,16 +75,16 @@ Before tiers, every unit was available the moment its building stood, so there w
 Each faction has a way of making ground "yours". These areas only help their owner, are rebuilt every tick from their source, and vanish when the source dies.
 
 - **Sensor towers (Industrial)**: your units move 30% faster inside a radius of 450 around each tower. One tower beside your main covers the whole mineral line and the first stretch of any attack. To cover more of the map you build more towers, forward, where they can be killed.
-- **Power field (Network)**: a radius of 320 around each relay and each of your hubs. Inside it your shields recharge three times as fast, a dying unit restores a share of its health to friends nearby, drifters can be trained at any structure, and units can teleport. A teleport takes a second of channelling (damage cancels it), leaves the unit helpless for two seconds on arrival, and has a 30 second cooldown. A Network hub can also **Recall** nearby units back to itself.
+- **Power field (Network)**: a radius of 320 around each relay and each of your hubs. Inside it your shields recharge three times as fast, your units and buildings slowly mend hit points (outside it Network hit points never come back), hubs regain energy half again as fast, a dying unit restores a share of its health to friends nearby, drifters can be trained at any structure, and units can teleport. A teleport takes a second of channelling (damage cancels it), leaves the unit helpless for two seconds on arrival, and has a 30 second cooldown. A Network hub can also **Recall** nearby units back to itself.
 - **Creep (Organic)**: your HQ spreads creep out to 360, an outpost to 300, and a cheap **creep tumor** (75 material) to 250, so Organic can reach out like the others. It spreads slowly (10 a second) and recedes after the hub dies. Harvesters move at full speed on it, and whenever one of your units dies on it, a temporary free fighter spawns: a brood for a mid-priced unit, a brute for an expensive one. A hub can also cast **Bloom** to grow a temporary patch anywhere on your creep.
 
 The common idea: an advantage tied to a building is also a target. Raid the source, and the advantage goes.
 
 ## Faction identities and play styles
 
-- **Industrial** plays the long game: steady economy, tough units, good defense. It has the only real anti-raider unit in the soldier (double damage to raiders) and the best long-range gun. Win by keeping your army together inside your sensor field and pushing forward tower by tower.
-- **Network** plays few, strong units. Everything has shields, so skirmishes where you retreat and recharge are a Network strength. It teleports and recalls to hold more map than its numbers should allow. Defend your relays and drifters; skimmers will punish an undefended mining line.
-- **Organic** plays numbers and speed. Swarmers are very cheap, and anything that dies on creep leaves something behind. It is at its best near its own hubs and at its worst far from them, so it wants to expand constantly and fight on or near its creep.
+- **Industrial** plays the long game: steady economy, tough units, good defense, and a repair drone that keeps the front line alive. It has the only real anti-raider unit in the soldier (double damage to raiders) and the best long-range gun. Win by keeping your army together inside your sensor field and pushing forward tower by tower.
+- **Network** plays few, strong units. Everything has shields, and shields recharge even while you fight, so skirmishes where you retreat and recharge are a Network strength; inside your own field you also mend hit points, so the field is the place to hold. It teleports and recalls to hold more map than its numbers should allow. Defend your relays and drifters; skimmers will punish an undefended mining line.
+- **Organic** plays numbers and speed. Swarmers are very cheap, and anything that dies on creep leaves something behind. It is at its best near its own hubs and at its worst far from them, so it wants to expand constantly and fight on or near its creep. Burrow lets a unit sit out a fight and recover.
 
 ## How passive abilities shape fights
 
@@ -98,6 +98,14 @@ Every army unit has one passive that triggers without being asked (the full list
 - **Phase Shift, Battle Blink and Death Burst** change the shape of a fight in one moment: an assassin walks into the first hit for free, a sentinel escapes at 30% health, and a dying behemoth takes everything near it for 80 damage.
 
 Since your orders are delayed, these automatic triggers are what keep a unit useful in the second between your thought and your order taking effect.
+
+## Faction mechanics that set the factions apart
+
+Each faction has one mechanic the others lack. All the numbers are experimental.
+
+- **Network regenerates in combat.** Shields used to wait 10 seconds after a hit; now they recharge on every tick except one where the unit is hit (2 a second, 6 inside your power field). The field also mends hit points, 2 a second, the only way Network hit points come back. So a Network army that pulls back into its field recovers fast, and one that fights far from it does not. The warden's aura adds to normal regeneration and keeps working on hit ticks.
+- **Industrial repair drone.** Industrial hubs now have energy like the others. **C** (or the button), then click a point: a drone leaves a hub (75 energy, 5 s cooldown, instant), flies straight over terrain and buildings, finds your most damaged unit near that point and mends it 20 hit points a second until 300 are spent or 40 seconds pass. It is fast but only 60 hit points, can be shot, and takes no orders. It heals units before buildings, so it is not wasted on a big hub pool; two drones never mend the same unit, so a second drone takes the next most hurt one. It is point-cast: you decide where the fight is, and the drone does not follow the unit.
+- **Organic burrow.** **U** (tier 1) sinks Organic army units into the ground. A burrowed unit moves at 70% speed, cannot fire, does not push or get pushed (it slips through a crowd or a blocking line), and recovers 4% of its maximum health a second even under fire. It is still visible and can be shot; nothing in this game is hidden. Use it to pull a hurt unit out of a fight, or to park units on purpose. Any attack order brings it up first, and missions never recruit an idle burrowed unit, because it was parked on purpose.
 
 ## Static defense
 
@@ -191,7 +199,7 @@ All three start with a headquarters, two labour units, one basic fighter, 250 ma
 1. Train workers at the HQ without stopping and send them to your material patches, one per patch.
 2. Early on, build a **refinery** on your main's catalyst deposit (75 material) and a **barracks** (150).
 3. Fill all eight patches, then build an **outpost** near your natural expansion.
-4. Add a **sensor tower** near the front of your base, then a **factory** for siege.
+4. Add a **sensor tower** near the front of your base, then a **factory** for siege. Your hubs fill with energy while you build; spend it on **Repair drone** (C) at the front.
 5. Keep your catalyst spent: soldiers and a marksman or two. Buy **tier 1** once the barracks stands (that unlocks the marksman), then weapons, armor and logistics from the Research tab as material allows; a **factory**, **tier 2** and a **lab** come later.
 
 ### Network
@@ -200,7 +208,7 @@ All three start with a headquarters, two labour units, one basic fighter, 250 ma
 2. Build a **refinery**, then a **barracks**. Your units regenerate shields three times faster in the field, so fight near it.
 3. Put a **second relay** where you want to expand, then fill it with drifters trained right there.
 4. Keep a few **skimmers** to harass the enemy's labour, and add **lancers** from a factory when you want to break buildings.
-5. Use your hub's **Recall** to save a trapped army, and teleport units back into the field rather than walking them.
+5. Use your hub's **Recall** to save a trapped army, and teleport units back into the field rather than walking them. Retreat hurt units into the field: shields and hit points both come back there.
 
 ### Organic
 
@@ -208,4 +216,4 @@ All three start with a headquarters, two labour units, one basic fighter, 250 ma
 2. Build a **refinery** and a **barracks**. Swarmers are 50 catalyst each, so catalyst goes a long way.
 3. Take an **outpost** early: it doubles your stock income and extends your creep.
 4. Fight on your creep when you can. Swarmers and spitters in numbers, with a crusher or behemoth later for buildings and crowds.
-5. Use **Bloom** to extend creep for a key fight, and keep harvesters near creep.
+5. Use **Bloom** to extend creep for a key fight, and keep harvesters near creep. After tier 1, **burrow** (U) hurt units to heal them away from the fight.

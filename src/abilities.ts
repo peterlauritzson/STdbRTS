@@ -5,10 +5,10 @@ import { isCompletedHub, type FactionName } from "./catalog";
 /**
  * Hub abilities, mirroring `server/src/rules.rs` ("Abilities"): Network and
  * Organic hubs carry energy that regenerates on its own, and each ability
- * spends some and then recharges on a cooldown. Industrial has none yet.
+ * spends some and then recharges on a cooldown. Industrial's hubs launch a repair drone.
  */
 
-export type AbilityKind = "recall" | "bloom";
+export type AbilityKind = "recall" | "bloom" | "repair_drone";
 
 export interface AbilityRule {
   kind: AbilityKind;
@@ -28,15 +28,17 @@ export const HUB_MAX_ENERGY = 200;
 export const ABILITIES: Readonly<Record<AbilityKind, AbilityRule>> = {
   recall: { kind: "recall", label: "Recall", faction: "network", energy: 50, cooldownTicks: 1200n, channelTicks: 60n, radius: 200 },
   bloom: { kind: "bloom", label: "Bloom", faction: "organic", energy: 25, cooldownTicks: 200n, channelTicks: 0n, radius: 200 },
+  // `rules::REPAIR_DRONE`; the radius is the drone's leash (`DRONE_LEASH`).
+  repair_drone: { kind: "repair_drone", label: "Repair drone", faction: "industrial", energy: 75, cooldownTicks: 100n, channelTicks: 0n, radius: 220 },
 };
 
 /** The one ability each faction casts, if any. */
 export const abilityOf = (faction: FactionName | undefined): AbilityRule | undefined =>
   Object.values(ABILITIES).find(rule => rule.faction === faction);
 
-/** `rules::max_energy`: hubs of a faction that has an ability. */
-export const maxEnergy = (kind: string, faction: FactionName | undefined): number =>
-  (kind === "hq" || kind === "outpost") && !!abilityOf(faction) ? HUB_MAX_ENERGY : 0;
+/** `rules::max_energy`: every faction's hubs carry energy. */
+export const maxEnergy = (kind: string, _faction?: FactionName): number =>
+  kind === "hq" || kind === "outpost" ? HUB_MAX_ENERGY : 0;
 
 type Caster = Pick<Entity, "id" | "owner" | "kind" | "constructionRemaining" | "energy" | "abilityReadyTick" | "cast">;
 
@@ -61,11 +63,14 @@ export function scheduledCasts(commands: readonly { owner: number; status: strin
 /**
  * Which hub casts, C&C style like training: a selected hub that can cast
  * wins; otherwise the ready hub with the most energy, ties to the lowest id.
+ * With a target point (the repair drone), the ready hub nearest it instead.
  */
-export function castingHub<T extends Caster>(units: readonly T[], owner: number, rule: AbilityRule, tick: bigint, selected: ReadonlySet<number>, scheduled: ReadonlySet<number> = new Set()): T | undefined {
+export function castingHub<T extends Caster & Pick<Entity, "x" | "y">>(units: readonly T[], owner: number, rule: AbilityRule, tick: bigint, selected: ReadonlySet<number>, scheduled: ReadonlySet<number> = new Set(), point?: { x: number; y: number }): T | undefined {
   const ready = units
     .filter(unit => unit.owner === owner && castRefusal(unit, rule, tick, scheduled) === undefined)
-    .sort((left, right) => right.energy - left.energy || left.id - right.id);
+    .sort((left, right) => point
+      ? Math.hypot(left.x - point.x, left.y - point.y) - Math.hypot(right.x - point.x, right.y - point.y) || left.id - right.id
+      : right.energy - left.energy || left.id - right.id);
   return ready.find(unit => selected.has(unit.id)) ?? ready[0];
 }
 

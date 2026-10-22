@@ -337,7 +337,7 @@ territory. Either would change values or representation, not ownership.
 - **Shields take damage first.** Armour and weapon upgrades apply to the hit
   before the split, exactly as before. Hit points never regenerate; repair
   still restores them only.
-- **Regeneration waits 200 ticks (10s) after the last hit**, then restores 1
+- **Regeneration waits 200 ticks (10s) after the last hit** (superseded 2026-10-21: shields now regenerate in combat), then restores 1
   shield every 10 ticks (2/s). Inside the owner's power field it is 3x (6/s).
   Construction raises shields from 0 to full alongside hit points, so a
   finished building is at full health.
@@ -940,6 +940,16 @@ than a goal.
 **Why.** The README names configurable automatic behavior through state machines as the way to keep manual micro from dominating, and STRATEGY-LAYERS deferred a "when→do" editor until the presets had proved the model. Reusing the exact model keeps per-unit cost bounded by the same limits whatever players write, and text keeps the change additive (no change to the persisted unit `Behavior`: its `preset` string simply names `custom_<n>`).
 
 **Would overturn it.** Players not using the editor (then offer more knobs on presets instead), authored policies that thrash or exploit the 0.25 s evaluation (raise the minimum dwell or cap transitions), or demand for vocabulary the contract does not yet allow (abilities, target categories), which would need its own decision.
+
+---
+
+## 2026-10-21 - Faction mechanics: repair drone, burrow, Network regeneration
+
+**Decision.** Increment N4 is built (experimental values, `RULESET_VERSION` 25 -> 26). Network: shields regenerate in combat; the 10 s wait after a hit is gone and only a tick on which the unit is actually hit skips the pulse (1 point every 10 ticks, 2/s, 6/s inside your own power field). The power field gains two zone effects, `LifeRegen` (+1 hit point every 10 ticks, 2/s, for your units and finished buildings in it, on ticks they are not hit; outside a field Network hit points still never regenerate) and `EnergyRegen` (one extra energy every 50 ticks, 0.8/s to 1.2/s, in practice Network hubs). The warden's Shield Aura (2/s, 4/s at tier 3) now stacks on ordinary regeneration and works on hit ticks. Industrial: hubs carry energy (max 200, start 50, 0.8/s) and have the ability Repair drone, key C: 75 energy, 5 s cooldown per hub, instant, point-cast. The drone has 60 HP and speed 240, flies straight over terrain and buildings, is never pushed, can be shot, takes no orders, cannot be selected, lives up to 40 s and leaves once its repair is spent. It is stored as a temporary entity whose `energy` is the repair left and whose last-shot fields mark the patient, and it is never a death (no refund, not lost or killed). It mends the most damaged unit within 220 of its point (a finished building only if no unit is hurt), flying to within 45; within 60 it restores 4 HP every 4 ticks (20 HP/s), 300 HP in all. Two drones never mend the same unit at once. Organic: Burrow/Unburrow, key U, one toggle, tier 1, army units only (swarmer, crusher, spitter, prowler, devourer, behemoth). Free, delayed, not queueable, stops the unit. Burrowed units move at 70% speed, never fire, are never pushed by or push units, regain 4% of maximum HP per second even under fire (never from a killing blow), and stay visible and targetable. Any attack or attack-move order brings the unit up; missions never recruit an idle burrowed unit. New additive `burrowed` column on the public `unit` table.
+
+**Why.** The author answered yes to all of these on 2026-09-29 (entry "Three currencies, base income, instant research, build rules"). They make the three factions play differently, which the author ranks above everything else. Choices made where the sheet was silent: burrow is gated at Tier 1 as on H0's tier list; burrowed units cannot fire and do not collide, as in SC2; the drone heals units before buildings so it is not wasted on a big hub pool; the drone is point-cast and stays leashed to its point rather than following a unit.
+
+**Would overturn it.** Network becoming unkillable inside its field; burrow being useless because burrowed units are still shot; the drone becoming a free decoy, or overshadowing the medic.
 
 ---
 

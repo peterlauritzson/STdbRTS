@@ -90,12 +90,14 @@ export const CATALOG: Record<string, Definition> = {
   // build it. `hp` is the listed total; a Network entity carries half of it as
   // shields, and the row's own `maxHp`/`maxShields` are what to draw against.
   sensor: { label: "Sensor tower", hp: 450, radius: 26, cost: price(100), seconds: 7, building: true, icon: "satellite-dish", role: "Industrial / your units move 30% faster within 450" },
-  relay: { label: "Relay", hp: 300, radius: 22, cost: price(75), seconds: 5, building: true, icon: "zap", role: "Network / power field 320: drifters train at any structure in it, shields regenerate 3x, units teleport within it" },
+  relay: { label: "Relay", hp: 300, radius: 22, cost: price(75), seconds: 5, building: true, icon: "zap", role: "Network / power field 320: drifters train at any structure in it, shields regenerate 6 a second (2 elsewhere), +2 HP a second, +50% energy regeneration, units teleport within it" },
   tumor: { label: "Creep tumor", hp: 250, radius: 20, cost: price(75), seconds: 5, building: true, icon: "sprout", role: "Organic / spreads creep out to 250; cannot shoot, produce or take cargo" },
   // Temporary units creep spawns where one of its owner's units dies on it —
   // mirrors `rules::stats` and `rules::temporary_lifetime`. Never trained (so
   // no training time and no button), free, not army, and take no supply.
   brood: { label: "Brood", hp: 30, radius: 7, cost: price(0), seconds: 0, building: false, icon: "bug", role: "Temporary / spawned by a 50-199 cost death on your creep, lives 10s" },
+  // Launched by the Industrial hub ability (src/abilities.ts). A flying, unarmed, temporary unit that takes no orders.
+  repair_drone: { label: "Repair drone", hp: 60, radius: 9, cost: price(0), seconds: 0, building: false, icon: "wrench", role: "Flies to a point and mends your most damaged unit near it: 20 HP/s, 300 in all, then leaves. Takes no orders." },
   brute: { label: "Brute", hp: 70, radius: 11, cost: price(0), seconds: 0, building: false, icon: "bug", role: "Temporary / spawned by a 200+ cost death on your creep, lives 15s" },
 };
 export const TECHNOLOGIES = {
@@ -118,6 +120,10 @@ export const tierOrder = (tier: number): string => `tier_${tier}`;
 /** The units a tier unlocks: `rules::required_tier`. 0 for the first-tier units, labour and buildings. */
 export const requiredTier = (kind: string): 0 | 1 | 2 =>
   ["marksman", "medic", "arcer", "phantom", "prowler", "devourer"].includes(kind) ? 1 : ["bulwark", "warden", "behemoth"].includes(kind) ? 2 : 0;
+/** The tier an Organic unit needs to burrow: mirrors `BURROW_TIER` in server/src/rules.rs. */
+export const BURROW_TIER = 1;
+/** Mirrors `can_burrow` in server/src/rules.rs: the Organic army, tier 1 permitting. */
+export const canBurrow = (kind: string): boolean => ["swarmer", "crusher", "spitter", "prowler", "devourer", "behemoth"].includes(kind);
 /** The highest tier in a research list: `rules::tier_of`. */
 export const tierOf = (research: readonly string[]): number =>
   Math.max(0, ...research.map(item => /^tier_([123])$/.exec(item)?.[1]).filter((n): n is string => !!n).map(Number));
@@ -274,7 +280,7 @@ export const PASSIVES: Readonly<Record<string, { name: string; text: string }>> 
   ricochet: { name: "Ricochet", text: "hits jump to 2 more enemies within 70, at 50% then 25%" },
   ricochet_one: { name: "Ricochet", text: "each hit jumps to 1 more enemy within 70, at 50%" },
   phase_shift: { name: "Phase Shift", text: "the first hit it takes every 8s is fully absorbed" },
-  shield_aura: { name: "Shield Aura", text: "friendly shields within 110 regenerate even under fire" },
+  shield_aura: { name: "Shield Aura", text: "friendly shields within 110 regenerate 2 a second more, on top of the base rate" },
   predator: { name: "Predator", text: "heals 30% of the damage it deals" },
   regrowth: { name: "Regrowth", text: "after 5s unhurt, regenerates 2% of its health every second" },
   death_burst: { name: "Death Burst", text: "when it dies, deals 80 to every enemy unit within 70" },
@@ -312,14 +318,17 @@ export const isVeteran = (kind: string): boolean => PASSIVE_OF[kind] === "vetera
  * row carries its own `expiresTick`, so this is only the denominator of the
  * lifetime bar.
  */
-export const TEMPORARY_LIFETIME: Readonly<Record<string, number>> = { brood: 200, brute: 300 };
+export const TEMPORARY_LIFETIME: Readonly<Record<string, number>> = { brood: 200, brute: 300, repair_drone: 800 };
 export const isTemporary = (kind: string): boolean => kind in TEMPORARY_LIFETIME;
 /**
  * Takes attack, attack-move and hold — `rules::fights`. The army plus the
  * temporary units creep spawns, which fight but are not army: they must not
  * move an army count or an army-value graph, so `isArmy` stays false for them.
  */
-export const fights = (kind: string): boolean => isArmy(kind) || isTemporary(kind);
+export const fights = (kind: string): boolean => isArmy(kind) || (isTemporary(kind) && !isDrone(kind));
+/** The repair drone: `rules::DRONE_REPAIR_TOTAL` is the repair it carries (its `energy` field), `DRONE_LEASH` how far it strays. It is unarmed and the server refuses any order naming it. */
+export const isDrone = (kind: string): boolean => kind === "repair_drone";
+export const DRONE_REPAIR_TOTAL = 300;
 /**
  * Counts against the 60-unit limit. Buildings do not, and neither do the
  * temporary units creep spawns: the server leaves them out of that count, so a

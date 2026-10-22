@@ -5,7 +5,7 @@ import { behaviorInfo, isBehavior } from "./behaviors";
 export interface RosterUnit {
   id: number; owner: number; kind: string; x: number; y: number;
   order: { kind: string };
-  behavior?: string | undefined; behaviorState?: string | undefined;
+  behavior?: string | undefined; behaviorState?: string | undefined; burrowed?: boolean | undefined;
 }
 export interface RosterHub { kind: string; x: number; y: number; owner?: number; constructionRemaining: bigint }
 
@@ -32,7 +32,9 @@ const ORDER_ACTIVITY: Readonly<Record<string, [string, number]>> = {
 };
 
 /** What a unit is doing, in words, and where that sorts. A running behavior preset wins over its raw order. */
-export function activityOf(unit: Pick<RosterUnit, "order" | "behavior" | "behaviorState">): [string, number] {
+export function activityOf(unit: Pick<RosterUnit, "order" | "behavior" | "behaviorState" | "burrowed">): [string, number] {
+  // Burrowed is its own state: the unit is dug in whatever it was last told.
+  if (unit.burrowed) return ["Burrowed", 2];
   if (isBehavior(unit.behavior)) return [behaviorInfo(unit.behavior).label, 0];
   const known = ORDER_ACTIVITY[unit.order.kind];
   if (known) return known;

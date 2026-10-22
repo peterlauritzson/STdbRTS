@@ -18,13 +18,17 @@ not built here. The author adopted the first two on 2026-09-29 (see
   field, creep, or sensor-tower radius). That would give every zone an
   eligibility role.
 - **Power field:** regenerates shields +0.5/s, **life** +0.5/s and energy
-  +0.25/s (Normal-speed seconds), and shields also regenerate in combat. Here,
-  shields wait 10s after a hit and hit points never regenerate. H0 does not
+  +0.25/s (Normal-speed seconds), and shields also regenerate in combat. Built
+  2026-10-21 (ruleset 26, experimental values): shields regenerate in combat
+  (only a tick on which the unit is hit skips the pulse), the field mends hit
+  points at 2/s and gives energy one extra point every 50 ticks. (Until then
+  shields waited 10s after a hit and hit points never regenerated.) H0 does not
   describe teleporting between points in the field; that is this project's
   mechanic.
 - **Creep:** H0 splits death spawns into broodlings, infested terrans and (for
   air) mosquitolisks, and counts creep near tumors, bases and overseers.
-  Burrowed Zerg units move and regenerate faster.
+  Burrowed Zerg units move and regenerate faster. (Burrow was built
+  2026-10-21 as an Organic order, not a creep effect; see DECISIONS.md.)
 - **Sensor tower:** H0 says "large speed boost to friendly army units", which
   fits the 30% experimental value or a higher one.
 
@@ -109,7 +113,14 @@ Pairs with mining that needs no return trip.
 - **Workers can be created at any structure inside the field and start mining
   immediately**, so the economy expands by projecting infrastructure rather than
   by walking labour across the map.
-- **Shields regenerate faster** inside the field.
+- **Shields regenerate faster** inside the field (6/s instead of 2/s), also
+  in combat.
+- **Hit points regenerate** inside the field: +1 every 10 ticks (2/s) for the
+  owner's units and finished buildings on ticks they are not hit. Outside a
+  field Network hit points never regenerate. (Zone effect `LifeRegen`.)
+- **Energy regenerates faster** inside the field: one extra point every 50
+  ticks (0.8/s becomes 1.2/s), which in practice means Network hubs. (Zone
+  effect `EnergyRegen`.)
 - **A unit dying in the field restores shields to nearby friendly units**,
   scaling with the dead unit's total health, hit points plus shields.
 - **Any unit can teleport from anywhere in the field to anywhere else in the

@@ -11,9 +11,9 @@
 
 ## The three factions
 
-- **Industrial**: the conventional one. Workers carry ore home; sensor towers speed up your army; strong, simple defenses.
-- **Network**: fewer, tougher units that are half shield. Drifters mine in place, and relays project a power field where shields recharge fast and units can teleport.
-- **Organic**: cheap fast swarms. Harvesters are free but limited by hub stock, and your hubs and creep tumors spread creep that makes dying units leave temporary fighters behind.
+- **Industrial**: the conventional one. Workers carry ore home; sensor towers speed up your army; strong, simple defenses. Hubs can send a **repair drone** to mend your most hurt unit.
+- **Network**: fewer, tougher units that are half shield. Drifters mine in place, and relays project a power field where shields recharge fast (in combat too), hit points mend and units can teleport.
+- **Organic**: cheap fast swarms. Harvesters are free but limited by hub stock, and your hubs and creep tumors spread creep that makes dying units leave temporary fighters behind. Army units can **burrow** to sit out a fight and heal.
 
 ## Money: three currencies, one job each
 
@@ -46,6 +46,7 @@
 - **Left click / drag** selects (a drag takes your units; it takes buildings only when there are no units in the box); **Shift + click** adds a building or a unit; **double-click** or **Ctrl + click** takes every one of that kind on screen. **Right click** moves, attacks, mines or rallies; with only production buildings selected it sets their rally point. Hold **Shift** to queue.
 - **Tab** switches between the kinds in a mixed selection (the highlighted kind is the one train, rally and production act on).
 - **A** then click: attack-move. **S** stops, **H** holds position.
+- **C** is your faction's hub ability, then click the map (a ready hub casts it; no need to select one): Industrial **Repair drone**, Network **Recall**, Organic **Bloom**. **U** burrows or unburrows selected Organic army units (tier 1). Network units teleport with **T**.
 - **J** Harass, **K** Guard, **N** Hit & retreat, **M** Rush, **,** (comma) Gather then strike (or the buttons in the **Strategy** panel), then click a place on the map or minimap: that places a **mission**. Idle and newly trained army units fill missions on their own and follow a behavior there (retreat when hurt, recover, return); army you had selected joins it at once. Giving a unit an order yourself takes it out of its mission until it is idle again. The selection panel shows each unit's state, e.g. "Harass: 6 advance, 2 retreat".
 - **Your own behaviors** (Strategy window, **Behaviors** tab): build up to four behaviors from states (attack-move, go home, hold) and transitions (hurt, outnumbered, near home, time passed), starting from a preset if you like, then use them as a mission tactic.
 - **Stances** (Strategy window, **Stances** tab): per army kind, pick Standard / Charge / Kite / Hold. It changes how units fight on an attack-move (and missions), never a plain move, hold or explicit attack. Marksman, lancer and spitter kite by default; bulwark, behemoth and crusher charge.

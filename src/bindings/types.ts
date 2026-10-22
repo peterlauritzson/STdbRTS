@@ -340,6 +340,7 @@ export const Unit = __t.object("Unit", {
   },
   behavior: __t.option(__t.string()),
   behaviorState: __t.option(__t.string()),
+  burrowed: __t.bool(),
 });
 export type Unit = __Infer<typeof Unit>;
 

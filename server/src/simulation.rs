@@ -4,9 +4,10 @@ use crate::navigation::Navigation;
 use crate::spatial::SpatialIndex;
 use crate::{
     ability, advance_patch, attack_damage, aura_per_interval, blink_cooldown, building_faction,
-    can_teleport, cargo_capacity, carries_cargo, creep_max_radius, creep_zone, death_refund,
+    can_burrow, can_teleport, cargo_capacity, carries_cargo, creep_max_radius, creep_zone, death_refund,
     death_spawn, default_stance, distance, drifter_pulse, entrench_hold_ticks, fights,
-    fortified_armour, gathers_in_place, is_army, is_building, is_hub, is_labour, is_research,
+    fortified_armour, gathers_in_place, is_army, is_building, is_drone, is_hub, is_labour,
+    is_research,
     is_static_defense, is_temporary, labour_faction, max_energy, max_research_level, mining_yield,
     parse_stance_order, passive, phase_cooldown, power_field, producer, projects_power,
     required_tier, research_cost_at, research_key, research_level_tier, ricochet_bounces,
@@ -15,14 +16,16 @@ use crate::{
     tier_range_bonus, tier_speed_percent, trains_in_field, validate_position, veteran_cooldown,
     veteran_percent, vitals, zone_template, Ability, Balance, Cost, CreepPatch, Faction, Passive,
     ResourceKind, Stance, Zone, ZoneField, ARMOUR_PER_LEVEL, BLINK_DISTANCE,
-    BLINK_THRESHOLD_PERCENT, BLOOM, BLOOM_LIFETIME_TICKS, BUILD_RADIUS, CHARGE_RANGE_PERCENT,
+    BLINK_THRESHOLD_PERCENT, BLOOM, BLOOM_LIFETIME_TICKS, BUILD_RADIUS, BURROW_REGEN_PERCENT_PER_SECOND,
+    BURROW_SPEED_PERCENT, BURROW_TIER, CHARGE_RANGE_PERCENT, DRONE_BEAM_RANGE, DRONE_HEAL_PER_PULSE,
+    DRONE_KIND, DRONE_LAUNCH_OFFSET, DRONE_LEASH, DRONE_PULSE_TICKS, DRONE_REPAIR_TOTAL,
     DEATH_BURST_DAMAGE, DEATH_BURST_RADIUS, ENERGY_REGEN_INTERVAL_TICKS, ENTRENCH_ARMOUR,
     ENTRENCH_LINGER_TICKS, ENTRENCH_RADIUS, ENTRENCH_RANGE, FORCED_MARCH_IDLE_TICKS,
     FORCED_MARCH_SPEED_PERCENT, GUARDIAN_PERCENT, GUARDIAN_RADIUS, HUB_START_ENERGY, HUB_STOCK_CAP,
     HUB_STOCK_INTERVAL_TICKS, KITE_TRIGGER_PERCENT, MAX_BUILDINGS, MAX_QUEUE, MAX_UNITS,
     MEDIC_HEAL, MEDIC_INTERVAL_TICKS, MEDIC_RANGE, MINER_RETARGET_RADIUS, MINING_PULSE_TICKS,
     OVERWATCH_IDLE_TICKS, OVERWATCH_PERCENT, OVERWATCH_WINDOW_TICKS, POWER_RESTORE_RADIUS,
-    PREDATOR_PERCENT, RECALL, RECALL_RADIUS, REFINERY_INTERVAL_TICKS, REFINERY_SNAP_DISTANCE,
+    PREDATOR_PERCENT, RECALL, RECALL_RADIUS, REPAIR_DRONE, REFINERY_INTERVAL_TICKS, REFINERY_SNAP_DISTANCE,
     REFINERY_YIELD, REGROWTH_DELAY_TICKS, REGROWTH_PERCENT_PER_SECOND, REPAIR_COST,
     RICOCHET_PERCENTS, RICOCHET_RADIUS, SHIELD_AURA_RADIUS, SHIELD_REGEN_DELAY_TICKS,
     SHIELD_REGEN_INTERVAL_TICKS, SPLASH_PERCENT, STARTING_BALANCE, SYNTHESIZER_TIER,
@@ -262,9 +265,15 @@ pub fn movement_speed(unit: &Entity, zones: &ZoneField, tier: u8, tick: u64) -> 
         }
         _ => 100,
     };
+    let burrowed_percent = if unit.burrowed {
+        BURROW_SPEED_PERCENT
+    } else {
+        100
+    };
     base * zones.movement_multiplier(unit.owner, &unit.kind, unit.x, unit.y)
         * (passive_percent as f32 / 100.0)
         * (tier_speed_percent(&unit.kind, tier) as f32 / 100.0)
+        * (burrowed_percent as f32 / 100.0)
 }
 
 /// How far an attack-moving unit looks for a target when its weapon reaches
@@ -276,10 +285,18 @@ const KITE_STEP: f32 = 40.0;
 /// not rewritten just because the walk there completed.
 const ARRIVED_RADIUS: f32 = 8.0;
 
+/// Does this entity push and get pushed by other units in `separate_units`?
+/// Every mobile unit except a burrowed one (it moves underneath) and a repair
+/// drone (it flies over).
+fn jostles(unit: &Entity) -> bool {
+    !is_building(&unit.kind) && !unit.burrowed && !is_drone(&unit.kind)
+}
+
 /// Does this entity count as armed for [`Senses::outnumbered`]? A fighter with
 /// a weapon, or a finished static defense with one.
 fn armed(unit: &Entity) -> bool {
     unit.construction_remaining == 0
+        && !unit.burrowed
         && (fights(&unit.kind) || is_static_defense(&unit.kind))
         && stats(&unit.kind).is_some_and(|definition| definition.damage > 0)
 }
@@ -571,6 +588,11 @@ pub struct Entity {
     /// writes `order` itself between player commands; any explicit order
     /// clears it. See `crate::behavior`.
     pub behavior: Option<Behavior>,
+    /// Organic burrow: moving slower, never firing, never pushed by or pushing
+    /// other units, regenerating fast, still visible and targetable. Set and
+    /// cleared by the `burrow` / `unburrow` orders; an attack order or a
+    /// behavior unburrows the unit first.
+    pub burrowed: bool,
 }
 
 /// The part of an [`Entity`] a client needs that changes rarely: stored in the
@@ -643,6 +665,7 @@ impl Entity {
     /// The behavior is its own part rather than a field of `EntityState`: it
     /// is stored as a separate column, so adding it did not change the type of
     /// a column a running database already holds.
+    /// `burrowed` is likewise a column of its own on the public `unit` row.
     pub fn split(
         &self,
     ) -> (
@@ -651,6 +674,7 @@ impl Entity {
         EntityVitals,
         EntityState,
         Option<Behavior>,
+        bool,
     ) {
         let e = self.clone();
         (
@@ -695,6 +719,7 @@ impl Entity {
                 anchor_tick: e.anchor_tick,
             },
             e.behavior,
+            e.burrowed,
         )
     }
 
@@ -704,6 +729,7 @@ impl Entity {
         vitals: EntityVitals,
         state: EntityState,
         behavior: Option<Behavior>,
+        burrowed: bool,
     ) -> Entity {
         Entity {
             id: cold.id,
@@ -742,6 +768,7 @@ impl Entity {
             anchor_y: state.anchor_y,
             anchor_tick: state.anchor_tick,
             behavior,
+            burrowed,
         }
     }
 }
@@ -1055,6 +1082,7 @@ impl World {
             anchor_y: y,
             anchor_tick: self.tick,
             behavior: None,
+            burrowed: false,
         });
         self.next_id += 1;
     }
@@ -1630,6 +1658,9 @@ impl World {
             if unit.construction_remaining > 0 {
                 return Err("Building is still under construction".into());
             }
+            if is_drone(&unit.kind) {
+                return Err("A repair drone flies on its own and takes no orders".into());
+            }
             // The Organic harvester is labour and nothing else. Refused here,
             // server-side and by name, rather than merely left off a command
             // card: a client that asks anyway is told exactly why.
@@ -1645,7 +1676,10 @@ impl World {
                 && (unit.queue.len() >= MAX_QUEUE
                     || training.is_some()
                     || ability(&order.kind).is_some()
-                    || matches!(order.kind.as_str(), "stop" | "hold" | "teleport"))
+                    || matches!(
+                        order.kind.as_str(),
+                        "stop" | "hold" | "teleport" | "burrow" | "unburrow"
+                    ))
             {
                 return Err("Order queue is full or action cannot be queued".into());
             }
@@ -1773,6 +1807,17 @@ impl World {
                         return Err(format!("{} is cast by one hub", spell.label));
                     }
                     self.validate_cast(unit, &spell, order, map)?;
+                }
+                // Organic burrow: army units only, from the owner's first
+                // tier. Burrowing a burrowed unit (or the reverse) is allowed
+                // and simply stops it, so a mixed selection is never refused.
+                "burrow" | "unburrow" => {
+                    if !can_burrow(&unit.kind) {
+                        return Err("Only Organic army units can burrow".into());
+                    }
+                    if self.tier(command.owner) < BURROW_TIER {
+                        return Err(format!("Burrow requires Tier {BURROW_TIER}"));
+                    }
                 }
                 "hold" => {
                     if !fights(&unit.kind) {
@@ -2139,6 +2184,12 @@ impl World {
                 unit.production.clear();
             } else if command.order.kind == "clear_rally" {
                 unit.order = Order::idle();
+            } else if matches!(command.order.kind.as_str(), "burrow" | "unburrow") {
+                // Burrowing or surfacing stops the unit where it stands.
+                unit.burrowed = command.order.kind == "burrow";
+                unit.order = Order::idle();
+                unit.queue.clear();
+                unit.returning = false;
             } else if command.queued && unit.order.kind != "stop" {
                 unit.queue.push(command.order.clone());
             } else {
@@ -2353,6 +2404,8 @@ impl World {
             .collect();
         let researched_armour = |owner: u8| armoured.get(&owner).copied().unwrap_or(0);
         let mut repairs = BTreeMap::<u32, i32>::new();
+        // Patients a repair drone has already taken this tick.
+        let mut drone_claims = BTreeSet::<u32>::new();
         let mut births = Vec::new();
         let mut construction = BTreeMap::<u32, u64>::new();
         let mut discoveries = Vec::new();
@@ -2363,12 +2416,85 @@ impl World {
                 construction.insert(unit.id, 1);
                 continue;
             }
-            if self.tick % ENERGY_REGEN_INTERVAL_TICKS == 0 {
-                let faction = factions
-                    .get(&unit.owner)
-                    .copied()
-                    .unwrap_or(Faction::Industrial);
-                unit.energy = (unit.energy + 1).min(max_energy(&unit.kind, faction));
+            // Casters regain energy on their own, half again as fast inside
+            // their owner's power field. Nothing else's energy is touched: a
+            // repair drone's energy is the repair it has left.
+            let energy_cap = max_energy(&unit.kind, faction_of_owner(unit.owner));
+            if energy_cap > 0 {
+                let bonus = zones
+                    .energy_bonus_interval(unit.owner, unit.x, unit.y)
+                    .is_some_and(|interval| self.tick % interval == 0);
+                let gained =
+                    i32::from(self.tick % ENERGY_REGEN_INTERVAL_TICKS == 0) + i32::from(bonus);
+                unit.energy = (unit.energy + gained).min(energy_cap);
+            }
+            // Industrial repair drone: flies straight at the most damaged of
+            // its owner's units within `DRONE_LEASH` of the point it was sent
+            // to (a finished structure only when no unit there is hurt) and
+            // mends it in pulses, out of its `energy`. Spent, it expires on
+            // the next tick. Drones claim patients in id order, so two never
+            // mend one unit on the same tick. A pulse records the patient as
+            // the drone's last shot, which is what a client draws the beam to.
+            if is_drone(&unit.kind) {
+                let (post_x, post_y) = (unit.order.x, unit.order.y);
+                let patient = nearby
+                    .within(post_x, post_y, DRONE_LEASH)
+                    .into_iter()
+                    .map(|at| &snapshot[at])
+                    .filter(|other| {
+                        other.owner == unit.owner
+                            && !is_drone(&other.kind)
+                            && other.construction_remaining == 0
+                            && other.hp > 0
+                            && other.hp < other.max_hp
+                            && !drone_claims.contains(&other.id)
+                    })
+                    .max_by_key(|other| {
+                        (
+                            !is_building(&other.kind),
+                            other.max_hp - other.hp,
+                            std::cmp::Reverse(other.id),
+                        )
+                    });
+                let speed = movement_speed(unit, &zones, tier_of_owner(unit.owner), tick);
+                match patient {
+                    Some(patient) => {
+                        drone_claims.insert(patient.id);
+                        // Straight-line flight: not the walking `advance`.
+                        crate::advance(
+                            &mut unit.x,
+                            &mut unit.y,
+                            patient.x,
+                            patient.y,
+                            speed,
+                            DRONE_BEAM_RANGE * 0.75,
+                        );
+                        if self.tick % DRONE_PULSE_TICKS == 0
+                            && distance(unit.x, unit.y, patient.x, patient.y) <= DRONE_BEAM_RANGE
+                        {
+                            let heal = DRONE_HEAL_PER_PULSE
+                                .min(patient.max_hp - patient.hp)
+                                .min(unit.energy);
+                            *hits.medic.entry(patient.id).or_default() += heal;
+                            unit.energy -= heal;
+                            unit.shot_tick = self.tick;
+                            unit.shot_x = patient.x;
+                            unit.shot_y = patient.y;
+                            if unit.energy <= 0 {
+                                unit.expires_tick = self.tick + 1;
+                            }
+                        }
+                    }
+                    None => {
+                        crate::advance(&mut unit.x, &mut unit.y, post_x, post_y, speed, 0.0);
+                    }
+                }
+                continue;
+            }
+            // An attack order, whether the player's, a queued one or one a
+            // behavior wrote, brings a burrowed unit up to fight.
+            if unit.burrowed && matches!(unit.order.kind.as_str(), "attack" | "attack_move") {
+                unit.burrowed = false;
             }
             // Just arrived from a teleport: inactive until `arrive_tick`. It
             // does nothing at all this tick, but it is still in the snapshot,
@@ -2840,6 +2966,7 @@ impl World {
             if definition.damage > 0
                 && unit.next_attack <= self.tick
                 && unit.order.kind != "teleport"
+                && !unit.burrowed
             {
                 let target = if matches!(unit.order.kind.as_str(), "attack" | "attack_move") {
                     by_id(&snapshot, unit.order.target)
@@ -3079,7 +3206,6 @@ impl World {
                 && hits.aura.contains(&unit.id)
                 && unit.shields < unit.max_shields
                 && unit.construction_remaining == 0;
-            let mut natural_regen = false;
             if incoming > 0 {
                 // Shields take the hit first; hit points only take what the
                 // shields could not.
@@ -3108,13 +3234,34 @@ impl World {
                 // position against the start-of-tick field.
                 let rate = shield_regen(zones.shield_regen_percent(unit.owner, unit.x, unit.y));
                 unit.shields = (unit.shields + rate).min(unit.max_shields);
-                natural_regen = true;
             }
-            // Shield Aura: a regeneration step with no damage delay, unless the
-            // ordinary one already ran on this tick (they do not stack).
-            if aura && !natural_regen {
+            // Shield Aura: a regeneration step of its own, on top of the
+            // ordinary one, and even on a tick the unit is hit.
+            if aura {
                 unit.shields = (unit.shields + aura_per_interval(tier_of_owner(unit.owner)))
                     .min(unit.max_shields);
+            }
+            // The power field mends hit points too, on any tick the entity is
+            // not hit, read like shields at the end-of-tick position.
+            if incoming == 0
+                && unit.hp > 0
+                && unit.hp < unit.max_hp
+                && unit.construction_remaining == 0
+                && self.tick % SHIELD_REGEN_INTERVAL_TICKS == 0
+            {
+                let life = zones.life_regen(unit.owner, unit.x, unit.y);
+                unit.hp = (unit.hp + life).min(unit.max_hp);
+            }
+            // Burrowed: a share of maximum hit points every second, under fire
+            // too, but never back from a killing blow.
+            if unit.burrowed
+                && unit.hp > 0
+                && unit.hp < unit.max_hp
+                && self.tick % TICKS_PER_SECOND == 0
+            {
+                unit.hp = (unit.hp
+                    + (unit.max_hp * BURROW_REGEN_PERCENT_PER_SECOND / 100).max(1))
+                .min(unit.max_hp);
             }
             // Regrowth: after a spell without damage, a share of maximum hit
             // points every second.
@@ -3399,7 +3546,8 @@ impl World {
         // only the last resort: step back if that spot is legal, otherwise walk
         // out to the nearest legal ground.
         for unit in &mut self.units {
-            if is_building(&unit.kind) || navigation.free(unit.x, unit.y) {
+            // A repair drone flies, so terrain and buildings never hold it.
+            if is_building(&unit.kind) || is_drone(&unit.kind) || navigation.free(unit.x, unit.y) {
                 continue;
             }
             let previous = by_id(&snapshot, unit.id).map(|old| (old.x, old.y));
@@ -3517,6 +3665,8 @@ impl World {
                     return Err("Bloom must be placed on your own creep".into());
                 }
             }
+            // Anywhere on the map: the drone flies over everything.
+            "repair_drone" => {}
             _ => unreachable!("every ability is validated"),
         }
         Ok(())
@@ -3548,6 +3698,28 @@ impl World {
             return;
         }
         let owner = unit.owner;
+        let (hub_x, hub_y) = (unit.x, unit.y);
+        if spell.kind == REPAIR_DRONE.kind {
+            // It lifts off the side of the hub facing where it is sent.
+            let gap = distance(hub_x, hub_y, order.x, order.y);
+            let (x, y) = if gap > 1.0 {
+                (
+                    hub_x + (order.x - hub_x) / gap * DRONE_LAUNCH_OFFSET,
+                    hub_y + (order.y - hub_y) / gap * DRONE_LAUNCH_OFFSET,
+                )
+            } else {
+                (hub_x, hub_y)
+            };
+            self.spawn_temporary(owner, DRONE_KIND, x, y);
+            let drone = self.units.last_mut().unwrap();
+            drone.energy = DRONE_REPAIR_TOTAL;
+            drone.order = Order {
+                kind: "move".into(),
+                x: order.x,
+                y: order.y,
+                target: 0,
+            };
+        }
         if spell.kind == BLOOM.kind {
             // The id is taken from the entity counter so it sorts and never
             // collides, but no entity is ever spawned with it.
@@ -3698,7 +3870,7 @@ impl World {
         let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); (side * side) as usize];
         let mut home = vec![usize::MAX; self.units.len()];
         for (at, unit) in self.units.iter().enumerate() {
-            if !is_building(&unit.kind) {
+            if jostles(unit) {
                 home[at] = bucket_of(unit.x, unit.y);
                 buckets[home[at]].push(at as u32);
             }
@@ -3723,7 +3895,7 @@ impl World {
             };
         let mut candidates = Vec::new();
         for left_index in 0..self.units.len() {
-            if is_building(&self.units[left_index].kind) {
+            if !jostles(&self.units[left_index]) {
                 continue;
             }
             let mut origin = (self.units[left_index].x, self.units[left_index].y);
@@ -3855,9 +4027,10 @@ mod tests {
                 state: 1,
                 entered_tick: 111,
             }),
+            burrowed: true,
         };
-        let (cold, motion, vitals, state, behavior) = e.split();
-        assert_eq!(Entity::join(cold, motion, vitals, state, behavior), e);
+        let (cold, motion, vitals, state, behavior, burrowed) = e.split();
+        assert_eq!(Entity::join(cold, motion, vitals, state, behavior, burrowed), e);
     }
     use super::*;
 
@@ -5663,11 +5836,11 @@ mod tests {
         for left_index in 0..units.len() {
             let (left_slice, right_slice) = units.split_at_mut(left_index + 1);
             let left = &mut left_slice[left_index];
-            if is_building(&left.kind) {
+            if !jostles(left) {
                 continue;
             }
             for right in right_slice {
-                if is_building(&right.kind) {
+                if !jostles(right) {
                     continue;
                 }
                 let gap = distance(left.x, left.y, right.x, right.y);
@@ -7002,45 +7175,54 @@ mod tests {
     }
 
     #[test]
-    fn shields_wait_ten_seconds_then_regenerate_three_times_faster_in_a_field() {
+    fn shields_regenerate_in_combat_faster_in_a_field_which_also_mends_hit_points() {
         let mut world = power_arena();
         world.tick = 1000;
         let inside = spawned(&mut world, 0, "soldier", POWERED);
         let outside = spawned(&mut world, 0, "soldier", UNPOWERED);
         for unit in world.units.iter_mut().filter(|unit| unit.kind == "soldier") {
             unit.shields = 10;
+            unit.hp = 50;
+            // Hit on this very tick: there is no waiting any more.
             unit.damaged_tick = 1000;
         }
-        for _ in 0..199 {
+        for _ in 0..100 {
             world.step();
         }
-        assert_eq!(world.tick, 1199);
+        assert_eq!(world.tick, 1100);
+        // Regeneration pulses on 1010, 1020, ... 1100: ten of them.
+        assert_eq!(unit_of(&world, outside).shields, 10 + 10, "2 per second");
+        assert_eq!(unit_of(&world, inside).shields, 10 + 30, "6 per second");
+        assert_eq!(unit_of(&world, inside).hp, 50 + 10, "2 hit points per second");
         assert_eq!(
-            unit_of(&world, inside).shields,
-            10,
-            "still inside the delay"
+            unit_of(&world, outside).hp,
+            50,
+            "outside a field hit points never regenerate"
         );
-        assert_eq!(
-            unit_of(&world, outside).shields,
-            10,
-            "still inside the delay"
-        );
-        for _ in 0..101 {
+        for _ in 0..300 {
             world.step();
         }
-        // Regeneration pulses on 1200, 1210, ... 1300: eleven of them.
-        assert_eq!(unit_of(&world, outside).shields, 10 + 11, "2 per second");
-        assert_eq!(unit_of(&world, inside).shields, 10 + 33, "6 per second");
-        for _ in 0..200 {
+        let healed = unit_of(&world, inside);
+        assert_eq!((healed.shields, healed.hp), (70, 70), "never past the maximum");
+        assert_eq!(unit_of(&world, outside).hp, 50);
+    }
+
+    #[test]
+    fn a_tick_with_a_hit_skips_that_ticks_regeneration_only() {
+        let mut world = power_arena();
+        world.tick = 1009;
+        let target = spawned(&mut world, 0, "soldier", UNPOWERED);
+        world.units.last_mut().unwrap().shields = 10;
+        let shooter = spawned(&mut world, 1, "soldier", (UNPOWERED.0 + 60.0, UNPOWERED.1));
+        world.step();
+        assert_eq!(world.tick, 1010);
+        assert_eq!(unit_of(&world, target).shields, 0, "the 18 hit took them all");
+        // The shooter leaves; the next pulse regenerates as usual.
+        world.units.retain(|unit| unit.id != shooter);
+        for _ in 0..10 {
             world.step();
         }
-        assert_eq!(
-            unit_of(&world, inside).shields,
-            70,
-            "never past the maximum"
-        );
-        // Hit points never regenerate: that is what repair is for.
-        assert_eq!(unit_of(&world, inside).hp, 70);
+        assert_eq!(unit_of(&world, target).shields, 1);
     }
 
     #[test]
@@ -7349,17 +7531,19 @@ mod tests {
     // --- abilities: energy, recall and bloom -----------------------------------
 
     #[test]
-    fn network_and_organic_hubs_carry_energy_and_industrial_ones_do_not() {
+    fn every_factions_hubs_carry_energy_faster_in_a_power_field() {
         let mut world = power_arena();
         let hq = world.units[0].id;
         let industrial = world.units[1].id;
         assert_eq!(unit_of(&world, hq).energy, crate::HUB_START_ENERGY);
-        assert_eq!(unit_of(&world, industrial).energy, 0);
+        assert_eq!(unit_of(&world, industrial).energy, crate::HUB_START_ENERGY);
         for _ in 0..crate::ENERGY_REGEN_INTERVAL_TICKS * 10 {
             world.step();
         }
-        assert_eq!(unit_of(&world, hq).energy, crate::HUB_START_ENERGY + 10);
-        assert_eq!(unit_of(&world, industrial).energy, 0);
+        // 250 ticks: ten ordinary points each, and the Network hub, standing
+        // in its own field, five extra (one every 50 ticks).
+        assert_eq!(unit_of(&world, hq).energy, crate::HUB_START_ENERGY + 15);
+        assert_eq!(unit_of(&world, industrial).energy, crate::HUB_START_ENERGY + 10);
         world.units[0].energy = crate::HUB_MAX_ENERGY;
         for _ in 0..crate::ENERGY_REGEN_INTERVAL_TICKS * 2 {
             world.step();
@@ -7409,7 +7593,10 @@ mod tests {
                 distance(unit.x, unit.y, NETWORK_HQ.0, NETWORK_HQ.1) < 120.0,
                 "recalled next to the hub"
             );
-            assert_eq!(unit.shields, 0, "recall is paid in shields");
+            assert!(
+                unit.shields <= crate::shield_regen(crate::POWER_FIELD_REGEN_PERCENT),
+                "recall is paid in shields: at most one regeneration step back"
+            );
             assert_eq!(unit.arrive_tick, world.tick + crate::TELEPORT_ARRIVAL_TICKS);
         }
         let (near_unit, also_unit) = (unit_of(&world, near), unit_of(&world, also));
@@ -7547,6 +7734,234 @@ mod tests {
             patch_of(&world, bloom.source).is_none(),
             "receded to nothing"
         );
+    }
+
+    // --- Industrial repair drone ---------------------------------------------
+
+    /// The Industrial HQ of `power_arena`, topped up with energy.
+    fn industrial_hq(world: &mut World) -> u32 {
+        world.units[1].energy = crate::HUB_MAX_ENERGY;
+        world.units[1].id
+    }
+
+    fn cast_drone(hq: u32, at: (f32, f32)) -> Command {
+        Command {
+            owner: 1,
+            ..order_at(hq, "repair_drone", at)
+        }
+    }
+
+    #[test]
+    fn a_repair_drone_flies_out_and_mends_the_most_damaged_unit_near_its_point() {
+        let mut world = power_arena();
+        let hq = industrial_hq(&mut world);
+        let badly = spawned(&mut world, 1, "siege", UNPOWERED);
+        world.units.last_mut().unwrap().hp = 20;
+        let lightly = spawned(&mut world, 1, "soldier", (UNPOWERED.0 + 80.0, UNPOWERED.1));
+        let soldier_max = world.units.last().unwrap().max_hp;
+        world.units.last_mut().unwrap().hp = soldier_max - 8;
+        world.execute(&cast_drone(hq, UNPOWERED)).unwrap();
+        assert_eq!(
+            unit_of(&world, hq).energy,
+            crate::HUB_MAX_ENERGY - crate::REPAIR_DRONE.energy
+        );
+        let drone = world.units.last().unwrap().clone();
+        assert_eq!(drone.kind, crate::DRONE_KIND);
+        assert_eq!((drone.owner, drone.energy), (1, crate::DRONE_REPAIR_TOTAL));
+        assert_eq!(drone.expires_tick, world.tick + 800);
+        assert!(distance(drone.x, drone.y, 1400.0, 200.0) <= crate::DRONE_LAUNCH_OFFSET + 0.01);
+        // About 1075 to fly at 12 a tick, over whatever lies in between.
+        for _ in 0..85 {
+            world.step();
+        }
+        assert_eq!(unit_of(&world, badly).hp, 20, "still in flight");
+        for _ in 0..30 {
+            world.step();
+        }
+        assert!(unit_of(&world, badly).hp > 20, "the most damaged unit first");
+        assert_eq!(unit_of(&world, lightly).hp, soldier_max - 8);
+        // 200 missing at 20 a second is 10 s, then the soldier's 8.
+        for _ in 0..240 {
+            world.step();
+        }
+        let siege = unit_of(&world, badly);
+        assert_eq!(siege.hp, siege.max_hp, "never past the maximum");
+        assert_eq!(unit_of(&world, lightly).hp, soldier_max);
+        assert_eq!(
+            unit_of(&world, drone.id).energy,
+            crate::DRONE_REPAIR_TOTAL - 208,
+            "only what was missing is spent"
+        );
+        // Its time up, it leaves without dying.
+        let lost = world.lost(1);
+        while world.tick < drone.expires_tick {
+            world.step();
+        }
+        assert!(world.units.iter().all(|unit| unit.id != drone.id));
+        assert_eq!(world.lost(1), lost);
+    }
+
+    #[test]
+    fn two_drones_never_mend_one_unit_and_a_spent_drone_leaves() {
+        let mut world = power_arena();
+        let hq = industrial_hq(&mut world);
+        let patient = spawned(&mut world, 1, "siege", UNPOWERED);
+        world.units.last_mut().unwrap().hp = 20;
+        world.execute(&cast_drone(hq, UNPOWERED)).unwrap();
+        let first = world.units.last().unwrap().id;
+        world.units[1].ability_ready_tick = 0;
+        world.execute(&cast_drone(hq, UNPOWERED)).unwrap();
+        let second = world.units.last().unwrap().id;
+        assert!(first < second);
+        for _ in 0..120 {
+            world.step();
+        }
+        let before = unit_of(&world, patient).hp;
+        assert!(before > 20);
+        for _ in 0..40 {
+            world.step();
+        }
+        assert_eq!(
+            unit_of(&world, patient).hp,
+            before + 40,
+            "one drone at a time: 4 every 4 ticks"
+        );
+        assert_eq!(unit_of(&world, second).energy, crate::DRONE_REPAIR_TOTAL);
+        // The working drone (the lower id) runs dry and leaves; the other
+        // takes the patient over.
+        unit_mut(&mut world, first).energy = 4;
+        for _ in 0..12 {
+            world.step();
+        }
+        assert!(world.units.iter().all(|unit| unit.id != first), "spent, it expires");
+        assert!(unit_of(&world, second).energy < crate::DRONE_REPAIR_TOTAL);
+    }
+
+    #[test]
+    fn a_repair_drone_is_industrial_and_takes_no_orders() {
+        let mut world = power_arena();
+        let network_hq = world.units[0].id;
+        world.units[0].energy = crate::HUB_MAX_ENERGY;
+        assert!(world
+            .validate(&order_at(network_hq, "repair_drone", UNPOWERED))
+            .unwrap_err()
+            .contains("faction can cast"));
+        let hq = industrial_hq(&mut world);
+        world.units[1].energy = 50;
+        assert!(world
+            .validate(&cast_drone(hq, UNPOWERED))
+            .unwrap_err()
+            .contains("Not enough energy"));
+        world.units[1].energy = crate::HUB_MAX_ENERGY;
+        world.execute(&cast_drone(hq, UNPOWERED)).unwrap();
+        assert!(world
+            .validate(&cast_drone(hq, UNPOWERED))
+            .unwrap_err()
+            .contains("recharging"));
+        let drone = world.units.last().unwrap().id;
+        let move_it = Command {
+            owner: 1,
+            ..order_at(drone, "move", POWERED)
+        };
+        assert!(world
+            .validate(&move_it)
+            .unwrap_err()
+            .contains("takes no orders"));
+    }
+
+    // --- Organic burrow ------------------------------------------------------
+
+    /// `power_arena`'s layout with an Organic slot 0 that owns tier 1.
+    fn burrow_arena() -> World {
+        let mut world = World::new_on_with_factions(
+            crate::maps::default_map(),
+            &[(0, Faction::Organic), (1, Faction::Industrial)],
+        );
+        world.units.clear();
+        world.spawn(0, "hq", NETWORK_HQ.0, NETWORK_HQ.1);
+        world.spawn(1, "hq", 1400.0, 200.0);
+        world.research.insert(0, vec!["tier_1".into()]);
+        world
+    }
+
+    #[test]
+    fn burrow_needs_tier_one_and_an_organic_army_unit_and_stops_the_unit() {
+        let mut world = burrow_arena();
+        world.research.clear();
+        let swarmer = spawned(&mut world, 0, "swarmer", UNPOWERED);
+        let harvester = spawned(&mut world, 0, "harvester", (UNPOWERED.0, UNPOWERED.1 + 60.0));
+        assert!(world
+            .validate(&command(1, 0, swarmer, "burrow", 0))
+            .unwrap_err()
+            .contains("Tier 1"));
+        world.research.insert(0, vec!["tier_1".into()]);
+        assert!(world
+            .validate(&command(1, 0, harvester, "burrow", 0))
+            .unwrap_err()
+            .contains("Only Organic army"));
+        let mut queued = command(1, 0, swarmer, "burrow", 0);
+        queued.queued = true;
+        assert!(world.validate(&queued).is_err());
+        world
+            .execute(&order_at(swarmer, "move", (UNPOWERED.0 + 300.0, UNPOWERED.1)))
+            .unwrap();
+        world.execute(&command(1, 0, swarmer, "burrow", 0)).unwrap();
+        let unit = unit_of(&world, swarmer);
+        assert!(unit.burrowed);
+        assert_eq!(unit.order.kind, "stop", "burrowing stops it");
+        world.execute(&command(1, 0, swarmer, "unburrow", 0)).unwrap();
+        assert!(!unit_of(&world, swarmer).burrowed);
+    }
+
+    #[test]
+    fn a_burrowed_unit_holds_its_fire_and_regenerates_until_told_to_attack() {
+        let mut world = burrow_arena();
+        let swarmer = spawned(&mut world, 0, "swarmer", UNPOWERED);
+        let max = world.units.last().unwrap().max_hp;
+        world.units.last_mut().unwrap().hp = 10;
+        // Unarmed, so the only damage that could happen is the swarmer's.
+        let medic = spawned(&mut world, 1, "medic", (UNPOWERED.0 + 15.0, UNPOWERED.1));
+        let medic_hp = unit_of(&world, medic).hp;
+        world.execute(&command(1, 0, swarmer, "burrow", 0)).unwrap();
+        for _ in 0..40 {
+            world.step();
+        }
+        assert_eq!(unit_of(&world, medic).hp, medic_hp, "a burrowed unit never fires");
+        let regen = (max * crate::BURROW_REGEN_PERCENT_PER_SECOND / 100).max(1);
+        assert_eq!(unit_of(&world, swarmer).hp, 10 + 2 * regen, "two seconds of it");
+        // An attack order brings it up, and it fights.
+        world
+            .execute(&order_at(swarmer, "attack_move", (UNPOWERED.0 + 15.0, UNPOWERED.1)))
+            .unwrap();
+        world.step();
+        assert!(!unit_of(&world, swarmer).burrowed);
+        for _ in 0..20 {
+            world.step();
+        }
+        assert!(unit_of(&world, medic).hp < medic_hp);
+    }
+
+    #[test]
+    fn a_burrowed_unit_moves_at_seventy_percent_and_slips_through_others() {
+        let mut world = burrow_arena();
+        let under = spawned(&mut world, 0, "swarmer", UNPOWERED);
+        let over = spawned(&mut world, 0, "swarmer", UNPOWERED);
+        world.execute(&command(1, 0, under, "burrow", 0)).unwrap();
+        let zones = zones_of(&world.units, &world.creep, &world.factions);
+        let speed = |id: u32| movement_speed(unit_of(&world, id), &zones, 1, world.tick);
+        assert_eq!(
+            speed(under),
+            speed(over) * (crate::BURROW_SPEED_PERCENT as f32 / 100.0)
+        );
+        // Stacked on one point: nobody pushes anybody while one is burrowed.
+        world.step();
+        assert_eq!((unit_of(&world, under).x, unit_of(&world, under).y), UNPOWERED);
+        assert_eq!((unit_of(&world, over).x, unit_of(&world, over).y), UNPOWERED);
+        // Above ground they push apart again.
+        world.execute(&command(1, 0, under, "unburrow", 0)).unwrap();
+        world.step();
+        let (a, b) = (unit_of(&world, under), unit_of(&world, over));
+        assert!(distance(a.x, a.y, b.x, b.y) > 0.0);
     }
 
     // --- one miner per patch, refineries and terrazine ----------------------
@@ -10083,8 +10498,11 @@ mod behavior_tests {
                 world.step();
                 // What the database stores, read back, is the same unit.
                 for unit in &world.units {
-                    let (cold, motion, vitals, state, running) = unit.split();
-                    assert_eq!(&Entity::join(cold, motion, vitals, state, running), unit);
+                    let (cold, motion, vitals, state, running, burrowed) = unit.split();
+                    assert_eq!(
+                        &Entity::join(cold, motion, vitals, state, running, burrowed),
+                        unit
+                    );
                     if let (Some(preset), Some(state)) = behavior::labels(unit.behavior.as_ref()) {
                         seen.insert(format!("{preset} · {state}"));
                     }

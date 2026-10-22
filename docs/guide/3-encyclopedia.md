@@ -76,6 +76,14 @@ Spawned free, one at a time, when one of your units dies on your own creep. They
 | **Brood** | a unit costing 50 to 199 dies | 30 | 120 | 20 | 6 | 0.5 | 10 |
 | **Brute** | a unit costing 200 or more dies | 70 | 90 | 30 | 14 | 0.6 | 15 |
 
+The repair drone is a different kind of temporary unit: it is not spawned by deaths, cannot be selected and takes no orders.
+
+| Unit | Made by | HP | Speed | Lives | Repair |
+| --- | --- | ---: | ---: | --- | --- |
+| **Repair drone** | Industrial hub ability | 60 | 240 | up to 40 s; leaves early once its repair is spent | Mends your most damaged unit within 220 of the target point (a finished building only if no unit there is hurt). Flies to within 45 of it; within 60 it restores 4 HP every 4 ticks (20 HP/s), 300 HP in all. |
+
+It flies in a straight line over terrain and buildings, is never pushed by units, and can be shot. Two drones never mend the same unit at once. It is never a death: no refund, not counted as lost or killed. Shown as a teal heal beam; a thin bar under the drone shows repair left.
+
 ## Structures
 
 Every structure is built by placing it on the map; it then raises itself and needs no worker. A site starts at 10% of its hit points and gains them as it builds. Network structures and the HQ split hit points half and half into shields (for example a Network barracks is 350 + 350).
@@ -116,7 +124,7 @@ Every army unit and the bunker, bastion and spine has exactly one. They fire aut
 | **Overwatch** | Lancer | After 10 s without attacking, the next attack opens a 1 s window in which all its attacks deal 150% damage. |
 | **Ricochet** | Arcer, Bastion | After hitting, jumps to the nearest other enemy unit within 70 of the last target that has not been struck yet. The arcer jumps twice (50% then 25% of the hit); the bastion once (50%). |
 | **Phase Shift** | Phantom | The first hit it takes is absorbed completely. It recharges 8 s later. |
-| **Shield Aura** | Warden | Friendly units within 110 that have shields regain 1 shield every 0.5 s (2 per second), even while being shot. Several wardens do not stack. |
+| **Shield Aura** | Warden | Friendly units within 110 that have shields regain 2 shields per second (4 at tier 3) on top of ordinary regeneration, also on a tick they are hit. Several wardens do not stack. |
 | **Predator** | Swarmer, Spine | Heals itself for 30% of the damage it deals: hit points first, any overflow into shields if it has them. |
 | **Regrowth** | Crusher | After 5 s without taking damage, regenerates 2% of maximum hit points every second. |
 | **Death Burst** | Behemoth | When it dies, deals 80 damage to every enemy non-building unit within 70, before armour. |
@@ -131,23 +139,27 @@ Zones belong to their owner only: an enemy standing in your zone gets nothing fr
 | Zone | Faction | Source | Radius | Effects |
 | --- | --- | --- | --- | --- |
 | **Sensor field** | Industrial | Finished sensor tower | 450 | +30% movement speed for your units. Overlapping fields do not add up; the strongest applies. |
-| **Power field** | Network | Finished relay, HQ or outpost | 320 | Shield regeneration at 300% (6 shields per second instead of 2). When a unit of yours dies in it, each friendly unit within 180 of the death point regains 20% of the dead unit's total health. Drifters can be trained at any finished structure in it. Units can teleport inside it. |
+| **Power field** | Network | Finished relay, HQ or outpost | 320 | Shield regeneration at 300% (6 shields per second instead of 2). Your units and finished buildings in it regain 1 hit point every 0.5 s (2 per second) on ticks they are not hit. Energy: one extra point every 2.5 s (hubs 1.2 per second instead of 0.8). When a unit of yours dies in it, each friendly unit within 180 of the death point regains 20% of the dead unit's total health. Drifters can be trained at any finished structure in it. Units can teleport inside it. |
 | **Creep** | Organic | Finished HQ, outpost or creep tumor | 360 (HQ), 300 (outpost), 250 (tumor) | Starts at radius 60 and grows 10 per second to its full size. When its source dies it holds for 5 s, then recedes 20 per second. Harvesters move at full speed on it, and only 60% speed off it. When one of your own units dies on it, a brood or brute spawns (see [temporary units](#temporary-units)). |
 
 Only hubs and creep tumors make creep. A Bloom also makes creep for its duration.
 
 ### Shields
 
-Network units and structures carry a second pool of health. Shields take damage together with hit points as one total. When a Network unit goes 10 seconds (200 ticks) without being damaged, its shields regenerate 1 point every 0.5 s (2 per second), or 3x that inside a power field. Hit points never regenerate by themselves. The share that is shields: 33% for the sentinel, lancer and warden; 50% for everything else (drifter, skimmer, arcer, phantom and every Network structure).
+Network units and structures carry a second pool of health. Shields take damage together with hit points as one total. Shields regenerate 1 point every 0.5 s (10 ticks), 2 per second, or 3x that (6 per second) inside your own power field, including in combat: only a tick on which the unit is actually hit skips that pulse. Inside your own power field, units and finished buildings also regain 1 hit point every 10 ticks (2 per second) on ticks they are not hit. Outside a field Network hit points never regenerate by themselves. The share that is shields: 33% for the sentinel, lancer and warden; 50% for everything else (drifter, skimmer, arcer, phantom and every Network structure).
 
 ## Faction abilities
 
-Network and Organic hubs (HQ and outposts) carry energy: up to 200, starting at 50, regenerating 1 point every 1.25 seconds (0.8 per second). Industrial hubs carry none.
+Every number in this section is **experimental**.
+
+All hubs (HQ and outposts) carry energy: up to 200, starting at 50, regenerating 1 point every 1.25 seconds (0.8 per second); Network hubs regenerate 1.2 per second inside their own power field.
 
 | Ability | Faction | Key | Energy | Cooldown (s) | Effect |
 | --- | --- | --- | ---: | ---: | --- |
 | **Recall** | Network | C (select a hub) | 50 | 60 | After a 3 s channel, every mobile unit of yours within 200 of the target point is pulled back to the casting hub. |
 | **Bloom** | Organic | C (select a hub) | 25 | 10 | Grows a temporary creep patch of radius 200 anywhere on your own creep. Lasts 60 s, then recedes like a lost hub's creep. |
+| **Repair drone** | Industrial | C (select a hub) | 75 | 5 per hub | Instant. Click any point on the map: a drone is sent there (see [Temporary units](#temporary-units)). Cast from the selected hub if it can, otherwise from the ready hub nearest the point. |
+| **Burrow / Unburrow** | Organic | U (select units) | none | none | One toggle. Needs tier 1. Only swarmer, crusher, spitter, prowler, devourer and behemoth (not harvesters, brood or brute). Free, delayed like any order, cannot be queued; stops the unit where it is. Burrowed: 70% speed, never fires, never pushes or is pushed by units, regains 4% of maximum hit points per second even under fire (never from a killing blow). Still visible and targetable. Any attack or attack-move order, however given (player, queue, behavior or mission), unburrows it first. Missions never recruit an idle burrowed unit. Drawn sunk and faded; the roster and selection panel say "Burrowed". |
 | **Teleport** | Network | T (select units) | none | 30 per unit | A unit inside your power field channels for 1 s (damage cancels it), moves to another point in the field, and is inactive for 2 s after arriving (it cannot move, shoot or gather, but can be shot). |
 
 ## Research
@@ -317,7 +329,8 @@ Client-side helpers that send ordinary orders for you, once a second. They exist
 | S / H | Stop / hold position |
 | F / G | Repair (then click a target) / return cargo |
 | Y | Set a rally point (with a production building selected) |
-| T / C | Teleport / faction ability (Recall, Bloom) |
+| T / C | Teleport / faction ability (Repair drone, Recall, Bloom) |
+| U | Burrow / Unburrow selected Organic army units (one toggle; tier 1) |
 | Q W E R D Z X | Train: labour, then your six army units in card order. With the Research tab open: Weapons, Armor, Logistics, Tier 1, Tier 2, Tier 3 |
 | B, then Q W E R T Y U I P | Build menu: barracks, outpost, turret, factory, laboratory, then your faction structure, refinery, faction defense, synthesizer |
 | V | Expand (operation, see above) |

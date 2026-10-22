@@ -54,9 +54,9 @@ const title = (word: string): string => customNumber(word) !== undefined ? custo
 /**
  * The selection panel's line: "Harass · retreat" for one unit,
  * "Harass: 6 advance, 2 retreat" for a group, groups of different presets joined with " / ".
- * Empty when nothing selected runs a behavior.
+ * A burrowed unit adds "Burrowed" ("3 burrowed" for a group). Empty when nothing selected runs a behavior or is burrowed.
  */
-export function behaviorLine(units: readonly { behavior?: string | undefined; behaviorState?: string | undefined }[]): string {
+export function behaviorLine(units: readonly { behavior?: string | undefined; behaviorState?: string | undefined; burrowed?: boolean | undefined }[]): string {
   const presets = new Map<string, Map<string, number>>();
   for (const unit of units) {
     if (!unit.behavior) continue;
@@ -66,7 +66,10 @@ export function behaviorLine(units: readonly { behavior?: string | undefined; be
     presets.set(unit.behavior, states);
   }
   const single = units.length === 1 && presets.size === 1;
-  return [...presets].map(([preset, states]) => single
+  const lines = [...presets].map(([preset, states]) => single
     ? `${title(preset)} · ${[...states.keys()][0]}`
-    : `${title(preset)}: ${[...states].map(([state, count]) => `${count} ${state}`).join(", ")}`).join(" / ");
+    : `${title(preset)}: ${[...states].map(([state, count]) => `${count} ${state}`).join(", ")}`);
+  const burrowed = units.filter(unit => unit.burrowed).length;
+  if (burrowed) lines.push(units.length === 1 ? "Burrowed" : `${burrowed} burrowed`);
+  return lines.join(" / ");
 }

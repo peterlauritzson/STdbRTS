@@ -15,8 +15,6 @@ export const POWER_FIELD_RADIUS = 320;
 export const SENSOR_FIELD_RADIUS = 450;
 /** `rules::POWER_RESTORE_RADIUS`: how far a death in the field restores shields. */
 export const POWER_RESTORE_RADIUS = 180;
-/** `rules::SHIELD_REGEN_DELAY_TICKS`: shields wait this long after a hit. */
-export const SHIELD_REGEN_DELAY_TICKS = 200;
 /** `rules::TELEPORT_CHANNEL_TICKS`. */
 export const TELEPORT_CHANNEL_TICKS = 20;
 /** `rules::TELEPORT_ARRIVAL_TICKS`. */
@@ -69,12 +67,11 @@ export function canTrainAt(kind: string, building: Placed, faction: FactionName,
     && building.constructionRemaining === 0n && powered(building.owner, building.x, building.y, fields);
 }
 
-type Shielded = Pick<Entity, "shields" | "maxShields" | "damagedTick">;
+type Shielded = Pick<Entity, "shields" | "maxShields">;
 
-/** Shields below maximum and past the post-hit delay, so coming back. */
-export function shieldsRegenerating(unit: Shielded, tick: bigint): boolean {
-  return unit.maxShields > 0 && unit.shields < unit.maxShields
-    && (unit.damagedTick === 0n || tick - unit.damagedTick >= BigInt(SHIELD_REGEN_DELAY_TICKS));
+/** Shields below maximum, so coming back: they regenerate in combat too (2/s, 6/s in your own power field), with no delay after a hit. */
+export function shieldsRegenerating(unit: Shielded, _tick?: bigint): boolean {
+  return unit.maxShields > 0 && unit.shields < unit.maxShields;
 }
 
 /** How far through its channel a teleporting unit is, 0 to 1; undefined if it is not channelling. */

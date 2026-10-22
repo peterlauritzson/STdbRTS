@@ -137,6 +137,15 @@ fn sized_missions_recruit_nearest_first_in_id_order_and_rest_takes_the_remainder
 }
 
 #[test]
+fn a_burrowed_unit_is_never_recruited() {
+    let mut world = arena();
+    let near = line(&mut world, 2, POINT, 30.0);
+    world.units.iter_mut().find(|unit| unit.id == near[0]).unwrap().burrowed = true;
+    let id = create(&mut world, "harass", POINT, vec![]);
+    assert_eq!(members(&world, id), vec![near[1]], "the burrowed one was parked on purpose");
+}
+
+#[test]
 fn rest_missions_split_the_remainder_and_a_later_sized_mission_peels_a_rest_one() {
     let mut world = arena();
     let units = line(&mut world, 5, POINT, 40.0);

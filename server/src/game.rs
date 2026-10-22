@@ -126,7 +126,7 @@ pub fn load_world(ctx: &ReducerContext, room: &Room) -> World {
                     let vital = vitals.remove(&row.id)?;
                     let (state, behavior) = states.remove(&row.id)?;
                     Some(rts_core::simulation::Entity::join(
-                        row.data, motion, vital, state, behavior,
+                        row.data, motion, vital, state, behavior, row.burrowed,
                     ))
                 })
                 .collect()
@@ -341,7 +341,7 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
     // moved rewrites (and rebroadcasts) just its small motion row.
     for entity in &world.units {
         let id = (room.id << 32) | entity.id as u64;
-        let (cold, motion, vitals, state, behavior) = entity.split();
+        let (cold, motion, vitals, state, behavior, burrowed) = entity.split();
         let (preset, preset_state) =
             behavior::labels_in(&world.policies, entity.owner, behavior.as_ref());
         let unit_row = |data| Unit {
@@ -350,12 +350,14 @@ pub fn save_world(ctx: &ReducerContext, room: &mut Room, world: &World) {
             data,
             behavior: preset.clone(),
             behavior_state: preset_state.clone(),
+            burrowed,
         };
         match ctx.db.unit().id().find(id) {
             Some(old) => {
                 if old.data != cold
                     || old.behavior != preset
                     || old.behavior_state != preset_state
+                    || old.burrowed != burrowed
                 {
                     ctx.db.unit().id().update(unit_row(cold));
                 }

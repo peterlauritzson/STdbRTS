@@ -22,4 +22,5 @@ export default __t.row({
   },
   behavior: __t.option(__t.string()),
   behaviorState: __t.option(__t.string()).name("behavior_state"),
+  burrowed: __t.bool(),
 });

@@ -14,6 +14,8 @@ export const UNIT_KEYS = {
   teleport: "t",
   ability: "c",
   rally: "y",
+  // Organic burrow toggle. U is otherwise only a build key after B.
+  burrow: "u",
   // Behaviors (src/behaviors.ts): clear of every unit, train and build key.
   harass: "j",
   guard: "k",

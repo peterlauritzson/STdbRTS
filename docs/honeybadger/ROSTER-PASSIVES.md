@@ -54,7 +54,7 @@ Terrazine.
 | lancer | factory | anti-structure | **Overwatch**: after 10s without attacking, +50% damage for its next 1s of attacks. |
 | **arcer** (new) | barracks | chain caster, 140 | **Ricochet**: each hit jumps to up to 2 more enemies within 70, at 50% then 25%. |
 | **phantom** (new) | barracks | assassin, 160 | **Phase Shift**: the first hit it takes every 8s is fully absorbed. |
-| **warden** (new) | factory | support walker, 250 | **Shield Aura**: friendly shields within 110 regenerate 2 per second even while taking damage. |
+| **warden** (new) | factory | support walker, 250 | **Shield Aura**: friendly shields within 110 regenerate 2 per second (4 at tier 3). Since ruleset 26 this stacks on top of ordinary regeneration and also works on a tick the unit is hit (before, it did not stack and only mattered during the old 10s post-hit delay). |
 | **bastion** (new building) | — | static defense, Terrazine 125 | **Ricochet** (as arcer, one bounce). |
 
 ### Organic: large counts, regrowth

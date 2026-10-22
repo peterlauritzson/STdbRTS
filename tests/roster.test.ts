@@ -80,3 +80,10 @@ test("mission members are labelled by their mission, not by the preset it runs",
   const rows = armyRoster([gatherer, striker, free], 0, [hub], new Map([[gatherer.id, "Gather"], [striker.id, "Strike"]]));
   assert.deepEqual(rows.map(row => row.activity).sort(), ["Gather", "Idle", "Strike"]);
 });
+
+test("a burrowed unit is its own activity, and a repair drone is never on the roster", () => {
+  assert.deepEqual(activityOf({ order: { kind: "stop" }, burrowed: true }), ["Burrowed", 2]);
+  assert.deepEqual(activityOf({ order: { kind: "move" }, behavior: "guard", burrowed: true }), ["Burrowed", 2]);
+  const rows = armyRoster([unit("swarmer", 1000, 1000, "stop", { burrowed: true }), unit("swarmer", 1010, 1000), unit("repair_drone", 1000, 1000, "move")], 0, [hub]);
+  assert.deepEqual(rows.map(row => [row.activity, row.count]).sort(), [["Burrowed", 1], ["Idle", 1]]);
+});

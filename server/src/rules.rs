@@ -12,7 +12,7 @@ pub mod spatial;
 /// records the value current at its creation and never re-reads it, so two
 /// matches carrying different ruleset versions were played under different
 /// rules and their replays are not comparable.
-pub const RULESET_VERSION: u32 = 25;
+pub const RULESET_VERSION: u32 = 26;
 
 pub const TICKS_PER_SECOND: u64 = 20;
 pub const TICKS_PER_MINUTE: u64 = TICKS_PER_SECOND * 60;
@@ -710,6 +710,9 @@ pub fn temporary_lifetime(kind: &str) -> Option<u64> {
     match kind {
         "brood" => Some(200),
         "brute" => Some(300),
+        // Longest a repair drone flies; it leaves sooner once its repair is
+        // spent.
+        DRONE_KIND => Some(800),
         _ => None,
     }
 }
@@ -723,7 +726,7 @@ pub fn is_temporary(kind: &str) -> bool {
 /// temporary units creep spawns, which are controllable but are not army: they
 /// cost nothing and must not move an army-value graph.
 pub fn fights(kind: &str) -> bool {
-    is_army(kind) || is_temporary(kind)
+    is_army(kind) || (is_temporary(kind) && !is_drone(kind))
 }
 
 /// Total cost of a known kind in both currencies, the figure death spawns are
@@ -1505,6 +1508,17 @@ pub fn stats(kind: &str) -> Option<Stats> {
             cost: Cost::ZERO,
             training_ticks: 0,
         }),
+        // Industrial's repair drone (see `REPAIR_DRONE`): free, launched by a
+        // hub's energy, unarmed, faster than anything on the ground.
+        DRONE_KIND => Some(Stats {
+            hp: 60,
+            speed: 240.0,
+            range: 0.0,
+            damage: 0,
+            cooldown: 0,
+            cost: Cost::ZERO,
+            training_ticks: 0,
+        }),
         _ => None,
     }
 }
@@ -1533,8 +1547,10 @@ pub fn network_shield_percent(kind: &str) -> i32 {
 }
 
 /// Ticks an entity must go without taking damage before its shields start to
-/// come back. Ten seconds, the reference game's figure.
-pub const SHIELD_REGEN_DELAY_TICKS: u64 = 200;
+/// come back. 0: shields regenerate in combat too, as on the author's sheet
+/// (H0, decided 2026-09-29; the earlier 10 s figure came from SC2). Only a
+/// tick on which the entity is actually hit skips its regeneration step.
+pub const SHIELD_REGEN_DELAY_TICKS: u64 = 0;
 /// Shields regenerate in whole points on ticks that are a multiple of this.
 pub const SHIELD_REGEN_INTERVAL_TICKS: u64 = 10;
 /// Points restored per interval outside a power field: 2 per second.
@@ -1765,8 +1781,9 @@ pub const PHASE_COOLDOWN_TICKS: u64 = 8 * TICKS_PER_SECOND;
 
 /// Reach of the aura.
 pub const SHIELD_AURA_RADIUS: f32 = 110.0;
-/// Shields restored per [`SHIELD_REGEN_INTERVAL_TICKS`] under the aura, with no
-/// damage delay. One per interval is 2 per second. Several wardens do not stack.
+/// Shields restored per [`SHIELD_REGEN_INTERVAL_TICKS`] under the aura, on top
+/// of the ordinary regeneration (and even on a tick the unit is hit). One per
+/// interval is 2 per second. Several wardens do not stack.
 pub const SHIELD_AURA_PER_INTERVAL: i32 = 1;
 
 // --- Predator ----------------------------------------------------------------
@@ -1857,9 +1874,9 @@ pub fn can_teleport(kind: &str) -> bool {
 //
 // SC2's model, by the author's decision (2026-09-25): a caster carries energy
 // that regenerates on its own, and each ability spends some and then recharges
-// on a cooldown. The casters are hubs: Network and Organic hubs carry energy,
-// Industrial hubs carry none because Industrial has no ability yet. Every value
-// is **experimental**.
+// on a cooldown. The casters are hubs, and every faction's hubs carry energy:
+// Network recalls, Organic blooms, Industrial launches repair drones. Every
+// value is **experimental**.
 
 /// Energy a caster holds at most.
 pub const HUB_MAX_ENERGY: i32 = 200;
@@ -1870,8 +1887,8 @@ pub const ENERGY_REGEN_INTERVAL_TICKS: u64 = 25;
 
 /// The most energy `kind` can hold for an owner playing `faction`, or 0 for
 /// anything that casts nothing.
-pub fn max_energy(kind: &str, faction: Faction) -> i32 {
-    if is_hub(kind) && faction != Faction::Industrial {
+pub fn max_energy(kind: &str, _faction: Faction) -> i32 {
+    if is_hub(kind) {
         HUB_MAX_ENERGY
     } else {
         0
@@ -1918,10 +1935,79 @@ pub const BLOOM_RADIUS: u16 = 200;
 /// Ticks a bloom lives before it starts to recede, like a lost hub's patch.
 pub const BLOOM_LIFETIME_TICKS: u64 = 1200;
 
+/// Industrial: launch a repair drone from the casting hub to a point. It flies
+/// there over everything, then mends the owner's most damaged unit near that
+/// point until its repair runs out or it expires (H0's orbital repair drone,
+/// author's decision 2026-09-29).
+pub const REPAIR_DRONE: Ability = Ability {
+    kind: "repair_drone",
+    label: "Repair drone",
+    faction: Faction::Industrial,
+    energy: 75,
+    cooldown_ticks: 100,
+    channel_ticks: 0,
+};
+
 pub fn ability(kind: &str) -> Option<Ability> {
-    [RECALL, BLOOM]
+    [RECALL, BLOOM, REPAIR_DRONE]
         .into_iter()
         .find(|ability| ability.kind == kind)
+}
+
+// --- Industrial: the repair drone --------------------------------------------
+//
+// The drone is an entity of kind `repair_drone`: temporary (it expires and is
+// never a death), unarmed, takes no orders, flies in a straight line over
+// terrain and buildings and is never pushed by other units. It can be shot.
+// Its `energy` holds the repair it has left, and its order's (x, y) is the
+// point it was sent to. Every value is **experimental**.
+
+/// The drone's entity kind.
+pub const DRONE_KIND: &str = "repair_drone";
+/// Hit points the drone can restore in all, the reference's "about 300".
+pub const DRONE_REPAIR_TOTAL: i32 = 300;
+/// Hit points restored per pulse.
+pub const DRONE_HEAL_PER_PULSE: i32 = 4;
+/// Ticks between pulses: 4 every 4 ticks is 20 per second, so a full drone
+/// spends itself in 15 s of mending.
+pub const DRONE_PULSE_TICKS: u64 = 4;
+/// How close the drone must be to its patient to mend it.
+pub const DRONE_BEAM_RANGE: f32 = 60.0;
+/// Patients are looked for within this distance of the point the drone was
+/// sent to, never around the drone, so it stays where it was sent.
+pub const DRONE_LEASH: f32 = 220.0;
+/// How far from the casting hub's centre the drone appears.
+pub const DRONE_LAUNCH_OFFSET: f32 = 50.0;
+
+/// Is `kind` the Industrial repair drone?
+pub fn is_drone(kind: &str) -> bool {
+    kind == DRONE_KIND
+}
+
+// --- Organic: burrow ---------------------------------------------------------
+//
+// H0's Zerg rule (author's decision 2026-09-29): burrowed units move and
+// regenerate faster, and are never hidden. Here a burrowed unit moves slower
+// than above ground, cannot fire, is never pushed by (or pushes) other units,
+// so it can slip through a crowd, and regains hit points quickly. Everyone can
+// still see and shoot it. Every value is **experimental**.
+
+/// The tier an Organic player needs before any unit can burrow (H0 lists
+/// Burrow in its first tier).
+pub const BURROW_TIER: u8 = 1;
+/// Movement speed while burrowed, in percent.
+pub const BURROW_SPEED_PERCENT: u32 = 70;
+/// Percent of maximum hit points regained each second while burrowed, under
+/// fire or not.
+pub const BURROW_REGEN_PERCENT_PER_SECOND: i32 = 4;
+
+/// Can `kind` burrow? Organic army units: not the harvester, not a temporary
+/// unit, not a structure.
+pub fn can_burrow(kind: &str) -> bool {
+    matches!(
+        kind,
+        "swarmer" | "crusher" | "spitter" | "prowler" | "devourer" | "behemoth"
+    )
 }
 
 /// Can `kind` be trained at *any* finished structure standing in its owner's
@@ -2038,6 +2124,14 @@ pub enum ZoneEffect {
     /// each gets `percent` of the dead entity's total health, hit points plus
     /// shields, capped at its own maximum.
     ShieldRestore { percent: i32 },
+    /// Hit points of the owner's entities inside come back by `per_interval`
+    /// every [`SHIELD_REGEN_INTERVAL_TICKS`], in combat too. Combat, like
+    /// shield regeneration. Overlap takes the strongest.
+    LifeRegen { per_interval: i32 },
+    /// Energy of the owner's casters inside gains one extra point every
+    /// `interval_ticks`, on top of the ordinary regeneration. Ability
+    /// eligibility, so connectivity. Overlap takes the shortest interval.
+    EnergyRegen { interval_ticks: u64 },
     /// Power: connectivity and eligibility. Standing in it is what lets a
     /// structure train a drifter and a unit teleport, and both ends of a
     /// teleport must be in it. Blocks and speeds nothing.
@@ -2047,7 +2141,7 @@ pub enum ZoneEffect {
 impl ZoneEffect {
     /// How many variants there are; the length of `ZoneField`'s per-effect
     /// index.
-    pub const SLOTS: usize = 6;
+    pub const SLOTS: usize = 8;
 
     /// Which of the six this effect is an instance of.
     pub const fn concept(self) -> ZoneConcept {
@@ -2057,6 +2151,8 @@ impl ZoneEffect {
             Self::DeathSpawn => ZoneConcept::Death,
             Self::ShieldRegen { .. } => ZoneConcept::Death,
             Self::ShieldRestore { .. } => ZoneConcept::Death,
+            Self::LifeRegen { .. } => ZoneConcept::Death,
+            Self::EnergyRegen { .. } => ZoneConcept::Connectivity,
             Self::Powered => ZoneConcept::Connectivity,
         }
     }
@@ -2072,6 +2168,8 @@ impl ZoneEffect {
             Self::ShieldRegen { .. } => 3,
             Self::ShieldRestore { .. } => 4,
             Self::Powered => 5,
+            Self::LifeRegen { .. } => 6,
+            Self::EnergyRegen { .. } => 7,
         }
     }
 }
@@ -2447,6 +2545,13 @@ pub fn advance_patch(mut patch: CreepPatch, source_alive: bool, tick: u64) -> Op
 pub const POWER_FIELD_RADIUS: f32 = 320.0;
 /// Shield regeneration inside a field, in percent of the base rate: 3x.
 pub const POWER_FIELD_REGEN_PERCENT: i32 = 300;
+/// Hit points regained inside a field per [`SHIELD_REGEN_INTERVAL_TICKS`]: 2
+/// per second (H0: shields, life and energy all regenerate faster in a
+/// powerfield). Outside a field Network hit points never regenerate.
+pub const POWER_FIELD_LIFE_PER_INTERVAL: i32 = 1;
+/// One extra energy point every this many ticks inside a field: half again
+/// the ordinary rate of one per [`ENERGY_REGEN_INTERVAL_TICKS`].
+pub const POWER_FIELD_ENERGY_INTERVAL_TICKS: u64 = 50;
 /// Share of a dying entity's total health restored to each nearby friendly.
 pub const POWER_RESTORE_PERCENT: i32 = 20;
 /// How far from the death point the restoration reaches.
@@ -2467,6 +2572,12 @@ static POWER_FIELD: ZoneTemplate = ZoneTemplate {
         },
         ZoneEffect::ShieldRestore {
             percent: POWER_RESTORE_PERCENT,
+        },
+        ZoneEffect::LifeRegen {
+            per_interval: POWER_FIELD_LIFE_PER_INTERVAL,
+        },
+        ZoneEffect::EnergyRegen {
+            interval_ticks: POWER_FIELD_ENERGY_INTERVAL_TICKS,
         },
         ZoneEffect::Powered,
     ],
@@ -2707,6 +2818,8 @@ impl ZoneField {
                     | ZoneEffect::DeathSpawn
                     | ZoneEffect::ShieldRegen { .. }
                     | ZoneEffect::ShieldRestore { .. }
+                    | ZoneEffect::LifeRegen { .. }
+                    | ZoneEffect::EnergyRegen { .. }
                     | ZoneEffect::Powered => None,
                 })
                 .max()
@@ -2742,6 +2855,34 @@ impl ZoneField {
             .max()
             .unwrap_or(100)
             .max(100)
+    }
+
+    /// Hit points one of `subject`'s entities at `(x, y)` regains per
+    /// regeneration interval: 0 outside every field, the strongest inside.
+    pub fn life_regen(&self, subject: u8, x: f32, y: f32) -> i32 {
+        const LIFE: usize = ZoneEffect::LifeRegen { per_interval: 0 }.slot();
+        self.active(LIFE, subject, x, y)
+            .flat_map(|zone| zone.template.effects.iter())
+            .filter_map(|effect| match effect {
+                ZoneEffect::LifeRegen { per_interval } => Some(*per_interval),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The interval of the extra energy point one of `subject`'s casters at
+    /// `(x, y)` gains, or `None` outside every field. Shortest wins.
+    pub fn energy_bonus_interval(&self, subject: u8, x: f32, y: f32) -> Option<u64> {
+        const ENERGY: usize = ZoneEffect::EnergyRegen { interval_ticks: 0 }.slot();
+        self.active(ENERGY, subject, x, y)
+            .flat_map(|zone| zone.template.effects.iter())
+            .filter_map(|effect| match effect {
+                ZoneEffect::EnergyRegen { interval_ticks } => Some(*interval_ticks),
+                _ => None,
+            })
+            .filter(|interval| *interval > 0)
+            .min()
     }
 
     /// The share of its total health, in percent, that one of `owner`'s
@@ -3403,7 +3544,10 @@ mod tests {
         // shared breadth-first fields (equally short routes may tie-break
         // differently from the old per-unit A*). 25: players' own behavior
         // policies (`policy_set_<n>`), usable as orders, rallies and tactics.
-        assert_eq!(RULESET_VERSION, 25);
+        // 26: faction mechanics: the Industrial repair drone and hub energy,
+        // Organic burrow, Network shields regenerating in combat and the power
+        // field mending hit points and energy.
+        assert_eq!(RULESET_VERSION, 26);
         assert!(RULESET_VERSION > 0);
     }
 

@@ -2,7 +2,7 @@ import type { CreepPatch, Node as Deposit, Order } from "./bindings/types";
 import type { Entity } from "./units";
 import { Session } from "./network";
 import { clamp, clampToMap, countdown, legibleRadius, ownerColor, VISUALS, WORLD_SIZE } from "./presentation";
-import { BUILD_RADIUS, buildReachCircles, buildSite, buildTierError, cargoCapacity, costOf, NO_COST, type Cost, carriesCargo, currencyOf, factionOf, fights, isArmy, isBuilding, isCompletedHub, isVeteran, RALLIES, isLabour, isTemporary, mapIdentity, placementError, shortfallReason, starts, terrain, veteranStacks, type FactionName } from "./catalog";
+import { BUILD_RADIUS, buildReachCircles, buildSite, buildTierError, cargoCapacity, costOf, NO_COST, type Cost, carriesCargo, currencyOf, factionOf, BURROW_TIER, canBurrow, fights, isArmy, isDrone, tierOf, DRONE_REPAIR_TOTAL, isBuilding, isCompletedHub, isVeteran, RALLIES, isLabour, isTemporary, mapIdentity, placementError, shortfallReason, starts, terrain, veteranStacks, type FactionName } from "./catalog";
 import { entrenched, FX_MS, passiveEffects, removalEffects, type Fx } from "./passives";
 import { DOUBLE_TAP_MS, EDGE_SCROLL_DWELL_MS, EDGE_SCROLL_WINDOW_PX, edgeDirection, groupAction, UNIT_KEYS } from "./hotkeys";
 import { creepLabels, lifetimeFraction, offCreep } from "./creep";
@@ -59,6 +59,7 @@ export function orderColor(kind: string): string {
   if (["gather", "rally_gather", "return", "repair"].includes(kind)) return "#f3d570";
   if (kind.startsWith("build_")) return "#8fd8ff";
   if (kind === "recall" || kind === "bloom") return "#c9b2ff";
+  if (kind === "repair_drone") return "#7fe0b0";
   if (isBehavior(kind)) return behaviorInfo(kind).color;
   return "#6ee7a8";
 }
@@ -222,6 +223,7 @@ export class Battlefield {
       else if (key === UNIT_KEYS.attackMove) this.arm("attack_move");
       else if (key === UNIT_KEYS.repair) this.arm("repair");
       else if (key === UNIT_KEYS.hold) this.issue("hold");
+      else if (key === UNIT_KEYS.burrow) this.toggleBurrow();
       else if (key === UNIT_KEYS.returnCargo) this.issue("return");
       else if (key === UNIT_KEYS.teleport) this.arm("teleport");
       else if (key === UNIT_KEYS.rally) this.arm("rally");
@@ -392,10 +394,10 @@ export class Battlefield {
   }
 
   /** The hub that would cast `kind` for you right now, C&C style: see `castingHub`. */
-  caster(kind: AbilityKind): Entity | undefined {
+  caster(kind: AbilityKind, point?: Point): Entity | undefined {
     const { units, commands, room, me } = this.session.snapshot;
     if (!me || this.factionAt(me.slot) !== ABILITIES[kind].faction) return undefined;
-    return castingHub(units, me.slot, ABILITIES[kind], room?.tick ?? 0n, this.selected, scheduledCasts(commands, me.slot));
+    return castingHub(units, me.slot, ABILITIES[kind], room?.tick ?? 0n, this.selected, scheduledCasts(commands, me.slot), kind === "repair_drone" ? point : undefined);
   }
 
   /** Selected units that could start a teleport right now: mobile, powered, not arriving or recharging. */
@@ -419,7 +421,8 @@ export class Battlefield {
   }
 
   ownedSelection(): Entity[] {
-    return this.session.snapshot.units.filter(unit => this.selected.has(unit.id) && unit.owner === this.session.snapshot.me?.slot);
+    // A drone takes no orders (the server refuses any command naming one), so it is never part of a selection.
+    return this.session.snapshot.units.filter(unit => this.selected.has(unit.id) && unit.owner === this.session.snapshot.me?.slot && !isDrone(unit.kind));
   }
 
   /** Every owned unit of `unit`'s kind currently on screen, SC2's double-click. */
@@ -437,7 +440,7 @@ export class Battlefield {
   /** Units a control group holds that still exist. */
   group(key: string): Entity[] {
     const ids = this.groups.get(key);
-    return ids ? this.session.snapshot.units.filter(unit => ids.has(unit.id)) : [];
+    return ids ? this.session.snapshot.units.filter(unit => ids.has(unit.id) && !isDrone(unit.kind)) : [];
   }
 
   /** Every control group that holds a living unit, in key order. */
@@ -522,6 +525,25 @@ export class Battlefield {
     this.onSelection();
   }
 
+  /** Selected units that can burrow (`canBurrow`). */
+  burrowers(): Entity[] {
+    return this.ownedSelection().filter(unit => canBurrow(unit.kind));
+  }
+
+  /** U: burrow the selected burrowable units that are above ground, or, when all are dug in, bring them up. Others in the selection are left alone. */
+  toggleBurrow(): void {
+    const me = this.session.snapshot.me;
+    const dug = this.burrowers();
+    if (!me || !dug.length) return;
+    if (tierOf(me.research) < BURROW_TIER) { this.session.onNotice(`Requires Tier ${BURROW_TIER}`); return; }
+    const kind = dug.some(unit => !unit.burrowed) ? "burrow" : "unburrow";
+    const units = dug.filter(unit => kind === "burrow" ? !unit.burrowed : unit.burrowed);
+    this.targeting = undefined;
+    void this.session.order(units.map(unit => unit.id), { kind, x: 0, y: 0, target: 0 });
+    this.onOrder(kind);
+    this.onSelection();
+  }
+
   private pruneSelection(): void {
     const units = this.unitsById();
     for (const id of this.selected) if (!units.has(id)) this.selected.delete(id);
@@ -601,7 +623,8 @@ export class Battlefield {
 
   /** The topmost unit under a world point, with the same slop a click gets. */
   private unitAt(point: Point): Entity | undefined {
-    return [...this.session.snapshot.units].reverse().find(unit => Math.hypot(unit.x - point.x, unit.y - point.y) <= (VISUALS[unit.kind]?.radius ?? 12) + 6 / this.camera.zoom);
+    const me = this.session.snapshot.me?.slot;
+    return [...this.session.snapshot.units].reverse().find(unit => !(isDrone(unit.kind) && unit.owner === me) && Math.hypot(unit.x - point.x, unit.y - point.y) <= (VISUALS[unit.kind]?.radius ?? 12) + 6 / this.camera.zoom);
   }
 
   /**
@@ -680,7 +703,7 @@ export class Battlefield {
   private boxed(start: Point, end: Point): Entity[] {
     const me = this.session.snapshot.me?.slot;
     const [left, right, top, bottom] = [Math.min(start.x, end.x), Math.max(start.x, end.x), Math.min(start.y, end.y), Math.max(start.y, end.y)];
-    return this.session.snapshot.units.filter(unit => unit.owner === me && unit.x >= left && unit.x <= right && unit.y >= top && unit.y <= bottom);
+    return this.session.snapshot.units.filter(unit => unit.owner === me && !isDrone(unit.kind) && unit.x >= left && unit.x <= right && unit.y >= top && unit.y <= bottom);
   }
 
   /** Leaves an armed targeting mode without sending anything. */
@@ -791,13 +814,13 @@ export class Battlefield {
       this.spend(false);
       return;
     }
-    if ((this.targeting === "recall" || this.targeting === "bloom") && me) {
+    if ((this.targeting === "recall" || this.targeting === "bloom" || this.targeting === "repair_drone") && me) {
       const kind = this.targeting;
-      const refusal = kind === "bloom"
+      const refusal = kind === "repair_drone" ? undefined : kind === "bloom"
         ? onCreep(me.slot, point.x, point.y, this.session.snapshot.creep) ? undefined : "Bloom must be placed on your own creep"
         : recallable(units, me.slot, point.x, point.y, canTeleport) ? undefined : "None of your units are near that point to recall";
       if (refusal) { this.session.onNotice(refusal); return; }
-      const hub = this.caster(kind);
+      const hub = this.caster(kind, point);
       if (!hub) { this.session.onNotice(`No hub can cast ${ABILITIES[kind].label} right now`); return; }
       void this.session.order([hub.id], { kind, x: clampToMap(point.x), y: clampToMap(point.y), target: 0 });
       this.acknowledge(kind, point);
@@ -1061,7 +1084,9 @@ export class Battlefield {
     this.boxPreview = this.drag && !this.drag.pan && Math.hypot(this.drag.start.x - this.drag.end.x, this.drag.start.y - this.drag.end.y) >= 6
       ? new Set((boxed => boxed.some(unit => !isBuilding(unit.kind)) ? boxed.filter(unit => !isBuilding(unit.kind)) : boxed)(this.boxed(this.world(this.drag.start), this.world(this.drag.end))).map(unit => unit.id))
       : undefined;
-    for (const unit of [...units].sort((left, right) => left.y - right.y)) this.drawUnit(unit, now);
+    // Drones fly: drawn after every ground unit and building.
+    for (const unit of [...units].sort((left, right) => left.y - right.y)) if (!isDrone(unit.kind)) this.drawUnit(unit, now);
+    for (const unit of [...units].sort((left, right) => left.y - right.y)) if (isDrone(unit.kind)) this.drawUnit(unit, now);
     this.drawYouTag();
     this.drawBaseLabels();
     this.drawDeaths(now);
@@ -1106,12 +1131,12 @@ export class Battlefield {
       context.fillStyle = ok ? "#cfefff" : "#ed7c8b"; context.textAlign = "center"; context.font = `${12 / this.camera.zoom}px 'IBM Plex Mono'`;
       context.fillText(ok ? "TELEPORT HERE" : "OUTSIDE YOUR FIELD", this.pointer.x, this.pointer.y - 30);
     }
-    if ((this.targeting === "recall" || this.targeting === "bloom") && this.pointer && this.session.snapshot.me) {
+    if ((this.targeting === "recall" || this.targeting === "bloom" || this.targeting === "repair_drone") && this.pointer && this.session.snapshot.me) {
       const slot = this.session.snapshot.me.slot;
       const { x, y } = this.pointer;
       const count = recallable(units, slot, x, y, canTeleport);
-      const ok = this.targeting === "bloom" ? onCreep(slot, x, y, this.session.snapshot.creep) : count > 0;
-      const label = this.targeting === "bloom" ? ok ? "BLOOM HERE" : "NOT ON YOUR CREEP" : ok ? `RECALL ${count}` : "NOTHING TO RECALL";
+      const ok = this.targeting === "repair_drone" ? true : this.targeting === "bloom" ? onCreep(slot, x, y, this.session.snapshot.creep) : count > 0;
+      const label = this.targeting === "repair_drone" ? "REPAIR DRONE" : this.targeting === "bloom" ? ok ? "BLOOM HERE" : "NOT ON YOUR CREEP" : ok ? `RECALL ${count}` : "NOTHING TO RECALL";
       context.strokeStyle = ok ? "#c9b2ff" : "#ed7c8b"; context.lineWidth = 2 / this.camera.zoom;
       context.setLineDash([8 / this.camera.zoom, 6 / this.camera.zoom]);
       context.beginPath(); context.arc(x, y, ABILITIES[this.targeting].radius, 0, Math.PI * 2); context.stroke(); context.setLineDash([]);
@@ -1455,7 +1480,7 @@ export class Battlefield {
 
   private orderTarget(order: Order): Point | undefined {
     if (order.kind.startsWith("build_")) return order;
-    if (["move", "attack_move", "rally_move", "teleport", "recall", "bloom"].includes(order.kind) || isBehavior(order.kind) || rallyBehavior(order.kind)) return order;
+    if (["move", "attack_move", "rally_move", "teleport", "recall", "bloom", "repair_drone"].includes(order.kind) || isBehavior(order.kind) || rallyBehavior(order.kind)) return order;
     if (["gather", "rally_gather"].includes(order.kind)) return this.nodesById().get(order.target);
     if (["attack", "repair"].includes(order.kind)) return this.unitsById().get(order.target);
     return undefined;
@@ -1512,7 +1537,15 @@ export class Battlefield {
     if (radius * this.camera.zoom < FAR_PX) { this.drawFar(unit, point, radius, color); return; }
     context.save(); context.translate(point.x, point.y);
     if (unit.constructionRemaining > 0n) context.globalAlpha = 0.6;
-    context.fillStyle = "#101c1980"; context.beginPath(); context.ellipse(3, radius * 0.6, radius * 1.2, radius * 0.55, 0, 0, Math.PI * 2); context.fill();
+    if (isDrone(unit.kind)) { context.fillStyle = "#101c1960"; context.beginPath(); context.ellipse(6, 12, radius * 0.9, radius * 0.4, 0, 0, Math.PI * 2); context.fill(); }
+    else { context.fillStyle = "#101c1980"; context.beginPath(); context.ellipse(3, radius * 0.6, radius * 1.2, radius * 0.55, 0, 0, Math.PI * 2); context.fill(); }
+    // Burrowed: sunk into a mound of earth, the body faint on top of it.
+    const bodyAlpha = context.globalAlpha;
+    if (unit.burrowed) {
+      context.fillStyle = "#5b4630"; context.strokeStyle = "#3a2c1d"; context.lineWidth = 1.5;
+      context.beginPath(); context.ellipse(0, radius * 0.35, radius * 1.3, radius * 0.7, 0, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.globalAlpha = bodyAlpha * 0.45;
+    }
     const selected = this.selected.has(unit.id);
     const previewed = this.boxPreview?.has(unit.id) ?? false;
     const hovered = this.hovered === unit.id || previewed;
@@ -1529,7 +1562,14 @@ export class Battlefield {
       context.stroke();
     }
     context.fillStyle = color; context.strokeStyle = "#172a26"; context.lineWidth = 2.5;
-    if (unit.kind === "hq") {
+    if (unit.kind === "repair_drone") {
+      // A small quad body lifted off the ground with a faint rotor ring.
+      context.translate(0, -7);
+      context.fillStyle = `${color}40`; context.beginPath(); context.arc(0, 0, radius, 0, Math.PI * 2); context.fill();
+      context.fillStyle = color; context.beginPath(); context.moveTo(0, -7); context.lineTo(7, 0); context.lineTo(0, 7); context.lineTo(-7, 0); context.closePath(); context.fill(); context.stroke();
+      context.fillStyle = "#e8ece1"; context.fillRect(-2, -2, 4, 4);
+      context.translate(0, 7);
+    } else if (unit.kind === "hq") {
       context.fillStyle = "#162a29"; context.fillRect(-36, -30, 72, 60);
       context.fillStyle = color; context.fillRect(-32, -28, 64, 8); context.fillRect(-32, 20, 64, 8);
       context.fillStyle = "#647970"; context.fillRect(-24, -18, 48, 36);
@@ -1765,6 +1805,7 @@ export class Battlefield {
       context.beginPath(); context.moveTo(0, -14); context.lineTo(12, -5); context.lineTo(9, 11); context.lineTo(-9, 11); context.lineTo(-12, -5); context.closePath(); context.fill(); context.stroke();
       context.fillStyle = "#e8ece1"; context.fillRect(-5, -6, 10, 5); context.fillStyle = "#172a26"; context.fillRect(7, -13, 5, 15);
     }
+    context.globalAlpha = bodyAlpha;
     // A hit: the body flashes pale for a moment, so who is taking fire reads
     // in a crowd before any bar moves.
     const hurt = this.hurtAt.get(unit.id);
@@ -1824,7 +1865,12 @@ export class Battlefield {
     }
     // A temporary unit also shows how long it has left, in its own colour,
     // directly under its health: it expires whether or not it is hurt.
-    const life = isTemporary(unit.kind) ? lifetimeFraction(unit, this.session.snapshot.room?.tick ?? 0n) : undefined;
+    if (isDrone(unit.kind)) {
+      // Repair left, out of 300, as a thin bar under the drone.
+      context.fillStyle = "#12201f"; context.fillRect(-radius, radius + 6, radius * 2, 3);
+      context.fillStyle = "#b98cff"; context.fillRect(-radius, radius + 6, radius * 2 * clamp(unit.energy / DRONE_REPAIR_TOTAL, 0, 1), 3);
+    }
+    const life = isTemporary(unit.kind) && !isDrone(unit.kind) ? lifetimeFraction(unit, this.session.snapshot.room?.tick ?? 0n) : undefined;
     if (life !== undefined) {
       context.fillStyle = "#12201f"; context.fillRect(-radius, -radius - 10, radius * 2, 3);
       context.fillStyle = "#c9b2ff"; context.fillRect(-radius, -radius - 10, radius * 2 * life, 3);
@@ -1870,7 +1916,14 @@ export class Battlefield {
         context.setLineDash([3, 4]); context.beginPath(); context.moveTo(point.x, point.y); context.lineTo(target.x, target.y); context.stroke(); context.setLineDash([]);
       }
     }
-    if (unit.shotTick > 0n && tick - unit.shotTick < 3n && now - this.session.tickReceivedAt < 200) {
+    if (isDrone(unit.kind)) {
+      // The heal beam: drone to patient, fading over six ticks.
+      const age = Number(tick - unit.shotTick);
+      if (unit.shotTick > 0n && age >= 0 && age < 6) {
+        context.save(); context.globalAlpha = 1 - age / 6; context.strokeStyle = "#7fe8c4"; context.lineWidth = 1.5;
+        context.beginPath(); context.moveTo(point.x, point.y - 7); context.lineTo(unit.shotX, unit.shotY); context.stroke(); context.restore();
+      }
+    } else if (!unit.burrowed && unit.shotTick > 0n && tick - unit.shotTick < 3n && now - this.session.tickReceivedAt < 200) {
       context.strokeStyle = "#fff6b1"; context.lineWidth = 2;
       context.beginPath(); context.moveTo(point.x, point.y); context.lineTo(unit.shotX, unit.shotY); context.stroke();
     }

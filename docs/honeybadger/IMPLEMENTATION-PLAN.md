@@ -427,9 +427,13 @@ database:
   structure; turrets only in the owner's zone; no building on the opponent's
   half for an opening window. Server validation and client placement preview
   both.
-- **N4 - faction mechanics.** Network: in-combat shield regeneration, power
-  field regenerates hit points and energy, ricochet. Industrial: hub energy and
-  the repair drone (heals any unit's hit points). Organic: burrow.
+- **N4 - faction mechanics.** Built 2026-10-21 (`RULESET_VERSION` 26,
+  experimental). Network: in-combat shield regeneration, power field
+  regenerates hit points and energy (ricochet was built earlier as the arcer
+  and bastion passive). Industrial: hub energy and the repair drone (heals
+  units before buildings). Organic: burrow (tier 1, new `burrowed` column on
+  `unit`). N3's remaining parts (static defense only inside a faction zone; no
+  building on the opponent's half early) are still not built.
 
 Base income and Terrazine touch the conservation audit and the stipend mirror in
 `tests/integration.test.ts`; update both with N1.

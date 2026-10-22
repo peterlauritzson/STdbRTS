@@ -722,8 +722,9 @@ impl World {
             .iter()
             .flat_map(|mission| mission.members.iter().copied())
             .collect();
-        // Idle: no behavior, standing still, finished, in no mission. Units are
-        // id-sorted, so the pool is too.
+        // Idle: no behavior, standing still, finished, in no mission, and not
+        // burrowed (a burrowed unit was parked there on purpose, to heal).
+        // Units are id-sorted, so the pool is too.
         let mut pool: Vec<(u32, f32, f32)> = self
             .units
             .iter()
@@ -733,6 +734,7 @@ impl World {
                     && unit.construction_remaining == 0
                     && unit.behavior.is_none()
                     && unit.order.kind == "stop"
+                    && !unit.burrowed
                     && !taken.contains(&unit.id)
             })
             .map(|unit| (unit.id, unit.x, unit.y))

@@ -1,12 +1,12 @@
 import "../styles.css";
-import { createElement, createIcons, BookOpen, Keyboard, Crosshair, Radio, RadioTower, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare, type IconNode } from "lucide";
+import { createElement, createIcons, BookOpen, Keyboard, Crosshair, Radio, RadioTower, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, ArrowDownToLine, ArrowUpFromLine, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare, type IconNode } from "lucide";
 import { ABILITIES, castRefusal, scheduledCasts, type AbilityKind } from "./abilities";
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
 import { countdown, ownerColor, TICK_MS, VISUALS } from "./presentation";
 import { ALERT_BANNER_MS, alertText } from "./alerts";
 import { availableAfter, pendingLabel, pendingSpend, refusedCurrency } from "./spend";
-import { addCost, NO_COST, buildTierError, LEVELED_RESEARCH, MAX_RESEARCH_LEVEL, researchLevel, researchSummary, isCompletedHub, ROSTER, armyBuilding, armyFaction, describe, passiveLine, veteranStacks, isVeteran, CATALOG, costOf, CURRENCIES, currencyOf, formatCost, RESEARCH_COST, TIERS, TIER_UPGRADES, tierOrder, tierOf, requiredTier, researchReason, shortfall, shortfallReason, TECHNOLOGIES, STANCES, DOCTRINE_DEFAULT_WEIGHT, DOCTRINE_MAX_WEIGHT, DOCTRINE_RESERVE_STEP, DOCTRINE_MAX_RESERVE, DOCTRINE_SWITCH, DOCTRINE_RESERVE_ORDER, DOCTRINE_PRESETS, doctrineWeightOrder, presetWeights, defaultStance, stanceOrder, type StanceName, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_BUILDINGS, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
+import { addCost, BURROW_TIER, NO_COST, buildTierError, LEVELED_RESEARCH, MAX_RESEARCH_LEVEL, researchLevel, researchSummary, isCompletedHub, ROSTER, armyBuilding, armyFaction, describe, passiveLine, veteranStacks, isVeteran, CATALOG, costOf, CURRENCIES, currencyOf, formatCost, RESEARCH_COST, TIERS, TIER_UPGRADES, tierOrder, tierOf, requiredTier, researchReason, shortfall, shortfallReason, TECHNOLOGIES, STANCES, DOCTRINE_DEFAULT_WEIGHT, DOCTRINE_MAX_WEIGHT, DOCTRINE_RESERVE_STEP, DOCTRINE_MAX_RESERVE, DOCTRINE_SWITCH, DOCTRINE_RESERVE_ORDER, DOCTRINE_PRESETS, doctrineWeightOrder, presetWeights, defaultStance, stanceOrder, type StanceName, fights, isBuilding, takesSupply, carriesCargo, factionForSlot, factionOf, FACTION_ECONOMY, FACTION_LABEL, FACTIONS, gathersInPlace, HUB_STOCK_CAP, isHub, isLabour, LABOUR, MAP_HASH, mapIdentity, MAX_BUILDINGS, MAX_UNITS, parseFaction, PRACTICE_SLOT, STOCK_REASON, worldSize, type Cost, type FactionName } from "./catalog";
 import { Practice, type PracticeOpponent } from "./practice";
 import { Feedback } from "./feedback";
 import { ScoreScreen, type ScorePlayer } from "./scorescreen";
@@ -132,7 +132,7 @@ for (const research of RESEARCH_BUTTONS) {
   if (LEVELED_RESEARCH.includes(research.order)) { const tag = text("em", "", "tier-tag"); tag.hidden = true; button.append(tag); }
   element("research-buttons").append(button);
 }
-createIcons({ icons: { Crosshair, Radio, RadioTower, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, BookOpen, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare } });
+createIcons({ icons: { Crosshair, Radio, RadioTower, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, ArrowDownToLine, ArrowUpFromLine, BookOpen, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare } });
 /** Catalogue icon names to icon nodes, for portraits built after `createIcons` has run. */
 const ICON_NODES: Record<string, IconNode> = {
   house: House, hammer: Hammer, radio: Radio, sprout: Sprout, swords: Swords, radar: Radar, crosshair: Crosshair,
@@ -157,7 +157,7 @@ function badge(button: HTMLElement, key: string | undefined): void {
   const label = keyLabel(key);
   if (node.textContent !== label) node.textContent = label;
 }
-for (const [id, key] of [["stop", UNIT_KEYS.stop], ["attack-move", UNIT_KEYS.attackMove], ["hold", UNIT_KEYS.hold], ["mission-harass", UNIT_KEYS.harass], ["mission-guard", UNIT_KEYS.guard], ["mission-raid", UNIT_KEYS.raid], ["mission-rush", UNIT_KEYS.rush], ["mission-gather", UNIT_KEYS.gather], ["repair", UNIT_KEYS.repair], ["return", UNIT_KEYS.returnCargo], ["teleport", UNIT_KEYS.teleport], ["recall", UNIT_KEYS.ability], ["bloom", UNIT_KEYS.ability], ["set-rally", UNIT_KEYS.rally], ["expand", OPERATION_KEYS.expand], ["territory", OPERATION_KEYS.territory], ["auto-labour", OPERATION_KEYS.autoLabour], ["idle-worker", "F1"], ["select-army", "F2"]] as const) {
+for (const [id, key] of [["stop", UNIT_KEYS.stop], ["attack-move", UNIT_KEYS.attackMove], ["hold", UNIT_KEYS.hold], ["mission-harass", UNIT_KEYS.harass], ["mission-guard", UNIT_KEYS.guard], ["mission-raid", UNIT_KEYS.raid], ["mission-rush", UNIT_KEYS.rush], ["mission-gather", UNIT_KEYS.gather], ["repair", UNIT_KEYS.repair], ["return", UNIT_KEYS.returnCargo], ["teleport", UNIT_KEYS.teleport], ["recall", UNIT_KEYS.ability], ["bloom", UNIT_KEYS.ability], ["repair-drone", UNIT_KEYS.ability], ["burrow", UNIT_KEYS.burrow], ["set-rally", UNIT_KEYS.rally], ["expand", OPERATION_KEYS.expand], ["territory", OPERATION_KEYS.territory], ["auto-labour", OPERATION_KEYS.autoLabour], ["idle-worker", "F1"], ["select-army", "F2"]] as const) {
   const button = element(id);
   badge(button, key);
   button.title = `${button.title} (${keyLabel(key)})`;
@@ -455,6 +455,8 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-launch]
 element("repair").addEventListener("click", () => battlefield.arm("repair"));
 element("teleport").addEventListener("click", () => battlefield.arm("teleport"));
 for (const kind of ["recall", "bloom"] as const) element(kind).addEventListener("click", () => battlefield.arm(kind));
+element("repair-drone").addEventListener("click", () => battlefield.arm("repair_drone"));
+element("burrow").addEventListener("click", () => battlefield.toggleBurrow());
 element("set-rally").addEventListener("click", () => battlefield.arm("rally"));
 element("expand").addEventListener("click", () => { battlefield.arm("expand"); });
 element("territory").addEventListener("click", () => { battlefield.arm("territory"); });
@@ -780,9 +782,9 @@ function renderMatch(): void {
   element<HTMLButtonElement>("teleport").disabled = !canOrder || !battlefield.teleporters().length;
   // Hub abilities, C&C style: no hub needs to be selected. The tooltip names
   // the hub that will cast, or the best hub's reason it cannot.
-  for (const kind of ["recall", "bloom"] as AbilityKind[]) {
+  for (const kind of ["recall", "bloom", "repair_drone"] as AbilityKind[]) {
     const rule = ABILITIES[kind];
-    const button = element<HTMLButtonElement>(kind);
+    const button = element<HTMLButtonElement>(kind === "repair_drone" ? "repair-drone" : kind);
     button.hidden = faction !== rule.faction;
     if (button.hidden) continue;
     const hub = battlefield.caster(kind);
@@ -790,9 +792,26 @@ function renderMatch(): void {
     const reason = hubs.length ? castRefusal(hubs[0], rule, room.tick, scheduledCasts(session.snapshot.commands, me.slot)) : "No hub to cast from";
     const summary = kind === "recall"
       ? `Recall (C) / ${rule.energy} energy, ${Number(rule.channelTicks) / 20}s channel, ${Number(rule.cooldownTicks) / 20}s cooldown / your units within ${rule.radius} return to the hub, shields spent`
+      : kind === "repair_drone"
+      ? `Repair drone (C) / ${rule.energy} energy, ${Number(rule.cooldownTicks) / 20}s cooldown / a drone flies to the point and mends your most damaged unit within ${rule.radius} of it: 20 HP/s, 300 in all`
       : `Bloom (C) / ${rule.energy} energy, ${Number(rule.cooldownTicks) / 20}s cooldown / grows creep of ${rule.radius} on your own creep for 60s`;
     button.disabled = !canOrder || !hub;
     button.title = `${summary} / ${hub ? `Casts from ${CATALOG[hub.kind].label} #${hub.id} (${hub.energy} energy)` : reason ?? "Not ready"}`;
+  }
+  // Burrow toggle: for the Organic units that can dig in; "Unburrow" once every such unit in the selection is down.
+  const diggers = battlefield.burrowers();
+  const burrow = element<HTMLButtonElement>("burrow");
+  burrow.hidden = !diggers.length;
+  if (diggers.length) {
+    const up = diggers.some(unit => !unit.burrowed);
+    const early = tierOf(me.research) < BURROW_TIER;
+    burrow.disabled = !canOrder || early;
+    burrow.title = early ? `Requires Tier ${BURROW_TIER}` : up
+      ? `Burrow (${keyLabel(UNIT_KEYS.burrow)}) / sink into the ground: 70% speed, cannot fire, not pushed, regains 4% health a second; attacking brings it up`
+      : `Unburrow (${keyLabel(UNIT_KEYS.burrow)}) / climb out of the ground`;
+    burrow.setAttribute("aria-label", up ? "Burrow" : "Unburrow");
+    const label = burrow.querySelector(".cmd-label");
+    if (label) label.textContent = up ? "Burrow" : "Unburrow";
   }
   element<HTMLButtonElement>("set-rally").disabled = !canOrder;
   element<HTMLButtonElement>("expand").disabled = !canOrder || !battlefield.issuer();
@@ -837,10 +856,10 @@ function renderMatch(): void {
   const missionTags = [...new Set(memberActivities(missions.list, selection).values())];
   const inMission = selection.length > 0 && selection.every(unit => missions.list.some(mission => mission.members.has(unit.id)));
   element("selection-order").textContent = inMission && missionTags.length ? `Mission: ${missionTags.join(", ")}` : selection.length === 1 ? selection[0].constructionRemaining > 0n ? `Constructing / ${(Number(selection[0].constructionRemaining) / 20).toFixed(1)}s left` : selection[0].order.kind.split("_").join(" ") : "";
-  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : battlefield.targeting === "recall" ? "Recall area / your units near it return home" : battlefield.targeting === "bloom" ? "Bloom site / on your own creep" : battlefield.targeting === "rally" ? "Rally target" : battlefield.targeting === "expand" ? "Expand toward / click the map or minimap" : battlefield.targeting === "territory" ? "Extend territory toward / click the map or minimap" : battlefield.targeting === "set_mission_rally" ? "Gather point / click the map or minimap" : battlefield.targeting?.startsWith("mission_") ? `${tacticInfo(battlefield.targeting.slice(8) as Tactic).label} mission / click the map or minimap (selected army joins it)` : "";
+  const targetLabel = battlefield.targeting?.startsWith("build_") ? `Place ${CATALOG[battlefield.targeting.slice(6)].label}` : battlefield.targeting === "attack_move" ? "Attack-move target" : battlefield.targeting === "repair" ? "Repair target" : battlefield.targeting === "teleport" ? "Teleport destination / inside your power field" : battlefield.targeting === "recall" ? "Recall area / your units near it return home" : battlefield.targeting === "bloom" ? "Bloom site / on your own creep" : battlefield.targeting === "repair_drone" ? "Repair drone / it flies to the point and mends your most damaged unit near it" : battlefield.targeting === "rally" ? "Rally target" : battlefield.targeting === "expand" ? "Expand toward / click the map or minimap" : battlefield.targeting === "territory" ? "Extend territory toward / click the map or minimap" : battlefield.targeting === "set_mission_rally" ? "Gather point / click the map or minimap" : battlefield.targeting?.startsWith("mission_") ? `${tacticInfo(battlefield.targeting.slice(8) as Tactic).label} mission / click the map or minimap (selected army joins it)` : "";
   element("targeting-state").hidden = !battlefield.targeting;
   element("targeting-state").textContent = targetLabel;
-  for (const [id, kind] of [["attack-move", "attack_move"], ["repair", "repair"], ["set-rally", "rally"], ["teleport", "teleport"], ["recall", "recall"], ["bloom", "bloom"]]) element(id).setAttribute("aria-pressed", String(battlefield.targeting === kind));
+  for (const [id, kind] of [["attack-move", "attack_move"], ["repair", "repair"], ["set-rally", "rally"], ["teleport", "teleport"], ["recall", "recall"], ["bloom", "bloom"], ["repair-drone", "repair_drone"]]) element(id).setAttribute("aria-pressed", String(battlefield.targeting === kind));
   const result = room.state === "finished" ? room.winner === -1 ? "Draw" : room.winner === me.slot ? "Victory" : "Defeat" : session.matchReady && !alive ? "Eliminated" : "";
   element("result").hidden = !result;
   element("result-title").textContent = result;

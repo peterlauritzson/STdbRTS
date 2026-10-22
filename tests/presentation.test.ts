@@ -15,7 +15,7 @@ import type { Entity } from "../src/units";
 import { creepGoneTick, creepSecondsLeft, lifetimeFraction, offCreep } from "../src/creep";
 import { MAX_QUEUE, scheduledTraining, trainingSite } from "../src/production";
 import { ABILITIES, abilityOf, castingHub, castRefusal, HUB_MAX_ENERGY, maxEnergy, onCreep, recallable } from "../src/abilities";
-import { ARMY, armyBuilding, armyFaction, describe, FACTORY_KINDS, fights, isArmy, isStaticDefense, isTemporary, PASSIVE_OF, PASSIVES, passiveLine, ROSTER, takesSupply, TEMPORARY_LIFETIME, veteranStacks } from "../src/catalog";
+import { BURROW_TIER, canBurrow, ARMY, armyBuilding, armyFaction, describe, FACTORY_KINDS, fights, isArmy, isStaticDefense, isTemporary, PASSIVE_OF, PASSIVES, passiveLine, ROSTER, takesSupply, TEMPORARY_LIFETIME, veteranStacks } from "../src/catalog";
 import { entrenched, passiveEffects, patientOf, removalEffects } from "../src/passives";
 import { readFileSync } from "node:fs";
 import { renderMarkdown, rewriteHref } from "../src/markdown";
@@ -960,9 +960,8 @@ test("a drifter trains at any finished structure in its owner's field; nothing e
 
 test("shield, channel and arrival state read off the unit row", () => {
   const soldier = { ...unit(1, 0, "soldier"), maxHp: 70, shields: 30, maxShields: 70 };
-  assert.ok(shieldsRegenerating({ ...soldier, damagedTick: 0n }, 50n), "never hit");
-  assert.ok(!shieldsRegenerating({ ...soldier, damagedTick: 1000n }, 1199n), "inside the ten-second delay");
-  assert.ok(shieldsRegenerating({ ...soldier, damagedTick: 1000n }, 1200n));
+  assert.ok(shieldsRegenerating(soldier, 50n), "never hit");
+  assert.ok(shieldsRegenerating(soldier, 1001n), "shields regenerate in combat, no delay");
   assert.ok(!shieldsRegenerating({ ...soldier, shields: 70 }, 5000n), "full");
   assert.ok(!shieldsRegenerating({ ...unit(2, 1, "soldier") }, 5000n), "no shields at all");
   const channelling = { ...soldier, order: { kind: "teleport", x: 0, y: 0, target: 0 }, warpTick: 120n };
@@ -1052,11 +1051,11 @@ test("a cast picks a selected ready hub, else the ready hub with the most energy
   assert.equal(castRefusal(hubs[1], recall, 100n), undefined);
   assert.equal(maxEnergy("hq", "network"), HUB_MAX_ENERGY);
   assert.equal(maxEnergy("outpost", "organic"), HUB_MAX_ENERGY);
-  assert.equal(maxEnergy("hq", "industrial"), 0, "Industrial has no ability yet");
+  assert.equal(maxEnergy("hq", "industrial"), HUB_MAX_ENERGY, "every faction's hubs carry energy");
   assert.equal(maxEnergy("barracks", "network"), 0);
   assert.equal(abilityOf("network")?.kind, "recall");
   assert.equal(abilityOf("organic")?.kind, "bloom");
-  assert.equal(abilityOf("industrial"), undefined);
+  assert.equal(abilityOf("industrial")?.kind, "repair_drone");
 });
 
 test("the bot blooms at the edge of its creep towards the enemy, and recalls wounded units far from home", () => {
@@ -1611,4 +1610,29 @@ test("the unit merger carries the behavior beside the cold row", () => {
   assert.equal(merger.collect(tables as never, 1n)[0], first, "unchanged rows reuse the object");
   current = row("harass", "retreat");
   assert.equal(merger.collect(tables as never, 1n)[0].behaviorState, "retreat");
+});
+
+// --- Repair drone and burrow -----------------------------------------------------
+
+test("the repair drone is cast from the ready hub nearest the point; a selected hub still wins", () => {
+  const hub = (id: number, x: number, energy = 100): Entity => ({ ...unit(id, 0, "outpost"), x, y: 0, energy });
+  const hubs = [hub(1, 0, 200), hub(2, 1000), hub(3, 2000), hub(4, 1000)];
+  const drone = ABILITIES.repair_drone;
+  assert.equal(castingHub(hubs, 0, drone, 100n, new Set(), new Set(), { x: 1900, y: 0 })?.id, 3);
+  assert.equal(castingHub(hubs, 0, drone, 100n, new Set(), new Set(), { x: 900, y: 0 })?.id, 2, "ties go to the lowest id");
+  assert.equal(castingHub(hubs, 0, drone, 100n, new Set([1]), new Set(), { x: 1900, y: 0 })?.id, 1, "a selected hub that can cast wins");
+  assert.equal(castingHub(hubs, 0, drone, 100n, new Set(), new Set([3]), { x: 1900, y: 0 })?.id, 2 , "a busy hub is skipped");
+  assert.equal(castingHub([{ ...hub(5, 0), energy: 10 }], 0, drone, 100n, new Set(), new Set(), { x: 0, y: 0 }), undefined, "75 energy needed");
+  assert.equal(abilityOf("industrial")?.radius, 220);
+  assert.equal(maxEnergy("outpost", "industrial"), HUB_MAX_ENERGY);
+  assert.ok(isTemporary("repair_drone") && !fights("repair_drone") && !isArmy("repair_drone") && !takesSupply("repair_drone"));
+});
+
+test("only the Organic army can burrow", () => {
+  for (const kind of ["swarmer", "crusher", "spitter", "prowler", "devourer", "behemoth"]) assert.ok(canBurrow(kind), kind);
+  for (const kind of ["soldier", "sentinel", "harvester", "hq", "repair_drone"]) assert.ok(!canBurrow(kind), kind);
+  assert.equal(BURROW_TIER, 1);
+  assert.equal(UNIT_KEYS.burrow, "u");
+  assert.equal(behaviorLine([{ burrowed: true }]), "Burrowed");
+  assert.equal(behaviorLine([{ burrowed: true }, { burrowed: true }, {}]), "2 burrowed");
 });

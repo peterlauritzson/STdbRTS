@@ -14,7 +14,7 @@ import type { EntityCold, EntityMotion, EntityVitals } from "./bindings/types";
 export type Entity = EntityCold & EntityMotion & EntityVitals & Behaving;
 
 /** A running behavior preset ("harass", "guard", "raid") and its current state, kept on the unit row beside the cold data. */
-export interface Behaving { behavior?: string | undefined; behaviorState?: string | undefined }
+export interface Behaving { behavior?: string | undefined; behaviorState?: string | undefined; burrowed?: boolean | undefined }
 
 interface Keyed<T> extends Behaving { id: bigint; matchId: bigint; data: T }
 interface Table<T> { iter(): Iterable<Keyed<T>>; id: { find(id: bigint): Keyed<T> | null | undefined } }
@@ -42,7 +42,7 @@ export class UnitMerger {
     const cold = row.data;
     const merged = hit && hit.row === row && hit.cold === cold && hit.motion === motion && hit.vitals === vitals
       ? hit
-      : { row, cold, motion, vitals, entity: { ...cold, ...motion, ...vitals, behavior: row.behavior, behaviorState: row.behaviorState } };
+      : { row, cold, motion, vitals, entity: { ...cold, ...motion, ...vitals, behavior: row.behavior, behaviorState: row.behaviorState, burrowed: row.burrowed ?? false } };
     next.set(id, merged);
     return merged.entity;
   }
@@ -71,6 +71,6 @@ export class UnitMerger {
     const motion = db.unit_motion.id.find(key);
     const vitals = db.unit_vitals.id.find(key);
     if (!cold || !motion || !vitals) return undefined;
-    return { ...cold.data, ...motion.data, ...vitals.data, behavior: cold.behavior, behaviorState: cold.behaviorState };
+    return { ...cold.data, ...motion.data, ...vitals.data, behavior: cold.behavior, behaviorState: cold.behaviorState, burrowed: cold.burrowed ?? false };
   }
 }

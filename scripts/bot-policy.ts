@@ -16,6 +16,12 @@ const RECALL_WOUNDED = 3;
 const RECALL_HEALTH = 0.35;
 const RECALL_AWAY = 700;
 
+/** A repair drone is worth casting once this many army units within DRONE_GROUP of each other are below DRONE_HEALTH and more than DRONE_AWAY from home. */
+const DRONE_WOUNDED = 3;
+const DRONE_HEALTH = 0.6;
+const DRONE_GROUP = 300;
+const DRONE_AWAY = 500;
+
 /**
  * The bot's one ability cast this pass, if any. Organic blooms at the edge of
  * its creep on the line to the nearest enemy hub, so creep (and its death
@@ -25,7 +31,25 @@ const RECALL_AWAY = 700;
 function castAbility(owner: number, faction: FactionName, owned: Entity[], units: Entity[], busy: Set<number>, view: AbilityView): Decision | undefined {
   const rule = abilityOf(faction);
   if (!rule) return;
-  const hub = castingHub(owned.filter(unit => !busy.has(unit.id)), owner, rule, view.tick, new Set());
+  const hubs = owned.filter(unit => !busy.has(unit.id));
+  if (rule.kind === "repair_drone") {
+    // Industrial: a drone for a hurt group away from home. Centre on the unit
+    // whose neighbours (within 300) are most numerous below 60% health.
+    const base = owned.find(unit => unit.kind === "hq");
+    const hurt = owned.filter(unit => isArmy(unit.kind) && unit.maxHp > 0 && unit.hp < unit.maxHp * DRONE_HEALTH && (!base || Math.hypot(unit.x - base.x, unit.y - base.y) > DRONE_AWAY));
+    let best: Entity[] = [];
+    for (const unit of hurt) {
+      const group = hurt.filter(other => Math.hypot(other.x - unit.x, other.y - unit.y) <= DRONE_GROUP);
+      if (group.length > best.length) best = group;
+    }
+    if (best.length < DRONE_WOUNDED) return;
+    const x = best.reduce((sum, unit) => sum + unit.x, 0) / best.length;
+    const y = best.reduce((sum, unit) => sum + unit.y, 0) / best.length;
+    const caster = castingHub(hubs, owner, rule, view.tick, new Set(), new Set(), { x, y });
+    if (!caster) return;
+    return { units: [caster.id], order: { kind: "repair_drone", x: Math.round(x), y: Math.round(y), target: 0 } };
+  }
+  const hub = castingHub(hubs, owner, rule, view.tick, new Set());
   if (!hub) return;
   const home = owned.find(unit => unit.kind === "hq") ?? hub;
   if (rule.kind === "bloom") {
