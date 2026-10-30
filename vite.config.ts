@@ -9,10 +9,11 @@ export default defineConfig({
   build: {
     target: 'esnext',
     rollupOptions: {
-      // index.html is the game; guide.html is the in-game player guide.
+      // index.html is the game; guide.html is the in-game player guide; behaviors.html is the standalone behavior editor.
       input: {
         main: resolve(__dirname, 'index.html'),
         guide: resolve(__dirname, 'guide.html'),
+        behaviors: resolve(__dirname, 'behaviors.html'),
       },
     },
   },

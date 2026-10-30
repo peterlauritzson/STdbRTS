@@ -1,5 +1,5 @@
 import "../styles.css";
-import { createElement, createIcons, BookOpen, Keyboard, Crosshair, Radio, RadioTower, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, ArrowDownToLine, ArrowUpFromLine, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare, type IconNode } from "lucide";
+import { createElement, createIcons, Workflow, BookOpen, Keyboard, Crosshair, Radio, RadioTower, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, ArrowDownToLine, ArrowUpFromLine, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare, type IconNode } from "lucide";
 import { ABILITIES, castRefusal, scheduledCasts, type AbilityKind } from "./abilities";
 import { Battlefield } from "./battlefield";
 import { Session } from "./network";
@@ -18,20 +18,15 @@ import { Missions, MAX_SIZE, PERCENT_STEP, TACTICS, TACTIC_IDS, tacticInfo, cust
 import type { Entity } from "./units";
 import { armyRoster, visibleRows, type RosterRow } from "./roster";
 import { behaviorLine, setCustomLabels } from "./behaviors";
-import { ACTIONS, BLANK_TEXT, CONDITIONS, MAX_CONDITIONS, MAX_STATES, MAX_TRANSITIONS, PRESET_TEXTS, TICKS_PER_SECOND, cleanName, clonePolicy, describeState, parsePolicy, policyLabels, policyOrders, serializePolicy, type ActionId, type ConditionType, type Policy } from "./policies";
+import { BLANK_TEXT, MAX_STATES, PRESET_TEXTS, clonePolicy, parsePolicy, policyLabels, policyOrders, serializePolicy, cleanName, type Policy } from "./policies";
+import { LIBRARY_KEY, addEntry, createEntry, entryName, entryStatus, loadLibrary, loadoutTexts, saveLibrary } from "./behavior-library";
 import { ChatPanel } from "./chat";
+import { policyForm, text } from "./policy-form";
 
 function element<Type extends HTMLElement = HTMLElement>(id: string): Type {
   const value = document.getElementById(id);
   if (!value) throw new Error(`Missing UI element: ${id}`);
   return value as Type;
-}
-
-function text(tag: string, content: string, className = ""): HTMLElement {
-  const node = document.createElement(tag);
-  node.textContent = content;
-  node.className = className;
-  return node;
 }
 
 /**
@@ -132,7 +127,7 @@ for (const research of RESEARCH_BUTTONS) {
   if (LEVELED_RESEARCH.includes(research.order)) { const tag = text("em", "", "tier-tag"); tag.hidden = true; button.append(tag); }
   element("research-buttons").append(button);
 }
-createIcons({ icons: { Crosshair, Radio, RadioTower, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, ArrowDownToLine, ArrowUpFromLine, BookOpen, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare } });
+createIcons({ icons: { Workflow, Crosshair, Radio, RadioTower, Plus, Play, LogOut, House, Maximize2, ZoomIn, ZoomOut, MousePointer2, Move, Square, CornerDownLeft, Swords, Hammer, Shield, Wrench, Flag, FlagOff, X, Radar, Tent, Factory, Warehouse, FlaskConical, HardHat, Trash2, Bot, Volume2, Boxes, Gem, Hexagon, Fuel, Sprout, SatelliteDish, Zap, Sparkles, ShieldHalf, Wind, Bug, Droplets, Undo2, Flower, ArrowDownToLine, ArrowUpFromLine, BookOpen, Keyboard, Target, HeartPulse, BrickWall, Waypoints, Ghost, Eye, Footprints, Flame, Skull, Castle, Triangle, Repeat, Rabbit, ShieldCheck, MessageSquare } });
 /** Catalogue icon names to icon nodes, for portraits built after `createIcons` has run. */
 const ICON_NODES: Record<string, IconNode> = {
   house: House, hammer: Hammer, radio: Radio, sprout: Sprout, swords: Swords, radar: Radar, crosshair: Crosshair,
@@ -600,6 +595,40 @@ function renderLobby(): void {
   factionPicker.disabled = !session.ready;
 }
 
+/** Sends the library's loadout slots as policy_set orders; `onlyMissing` skips slots that already hold a row. */
+function installLoadout(rows: ReadonlySet<number>, onlyMissing: boolean, attempt?: (number: number) => boolean): number {
+  const issuer = battlefield.issuer();
+  if (!issuer) return 0;
+  let sent = 0;
+  for (const { number, text: policy } of loadoutTexts(loadLibrary())) {
+    if (onlyMissing && rows.has(number)) continue;
+    if (attempt && !attempt(number)) continue;
+    void session.order([issuer.id], policyOrders.set(number, policy));
+    sent += 1;
+  }
+  return sent;
+}
+
+/** True the first time for this database, match and slot in this tab's session; remembered before anything is sent. */
+function firstAttempt(room: bigint, number: number): boolean {
+  const key = `stdbrts:v1:loadout:${database.value.trim()}:${room}:${number}`;
+  try {
+    if (sessionStorage.getItem(key)) return false;
+    sessionStorage.setItem(key, "1");
+  } catch { return false; }
+  return true;
+}
+
+/** The match the loadout was last offered to; renderMatch runs on every snapshot, the install only once per match. */
+let loadoutRoom: bigint | undefined;
+function autoInstallLoadout(room: bigint, slot: number): void {
+  if (loadoutRoom === room) return;
+  loadoutRoom = room;
+  if (!loadLibrary().autoInstall) return;
+  const rows = new Set(session.snapshot.policies.filter(row => row.slot === slot).map(row => row.number));
+  installLoadout(rows, true, number => firstAttempt(room, number));
+}
+
 function renderMatch(): void {
   const { room, me, units, players } = session.snapshot;
   if (!room || !me) return;
@@ -618,6 +647,7 @@ function renderMatch(): void {
   const mobile = owned.filter(unit => takesSupply(unit.kind));
   const pending = owned.reduce((count, unit) => count + unit.production.filter(item => !item.kind.startsWith("research_")).length, 0);
   const canOrder = session.ready && session.matchReady && room.state === "playing" && alive;
+  if (canOrder && battlefield.issuer()) autoInstallLoadout(room.id, me.slot);
   const balance: Cost = { material: me.material, catalyst: me.catalyst, terrazine: me.terrazine };
   // Orders sent but not yet executed have not been charged, yet the money is
   // spoken for: buttons and readouts work from what is actually left.
@@ -1116,6 +1146,14 @@ function renderCustomLaunch(): void {
  */
 const behaviorDrafts = new Map<number, Policy>();
 let behaviorSignature = "";
+// Edits made in the editor tab show up here without a reload.
+window.addEventListener("storage", event => { if (event.key === LIBRARY_KEY || event.key === null) renderBehaviors(true); });
+element("behavior-install").addEventListener("click", () => {
+  const rows = new Set<number>();
+  const count = installLoadout(rows, false);
+  if (!battlefield.issuer()) { element("behavior-install-note").textContent = "Join a match first"; return; }
+  element("behavior-install-note").textContent = count ? `Sent ${count} behavior${count === 1 ? "" : "s"} from your loadout` : "Nothing to send: assign library behaviors to slots in the editor";
+});
 function renderBehaviors(force = false): void {
   const { me, policies } = session.snapshot;
   if (!me) return;
@@ -1154,6 +1192,16 @@ function behaviorCard(number: number, rowText: string | undefined): HTMLElement 
       });
       starts.append(button);
     }
+    for (const entry of loadLibrary().entries) {
+      if (!entryStatus(entry).ok) continue;
+      const button = text("button", entryName(entry), "strategy-tool") as HTMLButtonElement;
+      button.title = "From your library (made in the behavior editor)";
+      button.addEventListener("click", () => {
+        const parsed = parsePolicy(entry.text);
+        if (parsed.ok) { behaviorDrafts.set(number, parsed.policy); renderBehaviors(true); }
+      });
+      starts.append(button);
+    }
     card.append(starts);
     return card;
   }
@@ -1171,11 +1219,8 @@ function behaviorCard(number: number, rowText: string | undefined): HTMLElement 
   labourLabel.append(labour, document.createTextNode(" Prefer enemy labour"));
   head.append(name, labourLabel, mark);
 
-  const list = text("div", "", "behavior-states");
   const touch = (): void => { behaviorDrafts.set(number, draft); refresh(); };
   const structural = (change: () => void): void => { change(); behaviorDrafts.set(number, draft); rebuild(); };
-  const summaries: HTMLElement[] = [];
-  const targets: HTMLSelectElement[] = [];
   const add = (parent: HTMLElement, label: string, title: string, action: () => void, disabled = false): HTMLButtonElement => {
     const button = text("button", label, "strategy-tool") as HTMLButtonElement;
     button.title = title; button.setAttribute("aria-label", title); button.disabled = disabled;
@@ -1183,76 +1228,8 @@ function behaviorCard(number: number, rowText: string | undefined): HTMLElement 
     parent.append(button);
     return button;
   };
-
-  draft.states.forEach((state, index) => {
-    const box = text("div", "", "behavior-state");
-    const line = text("div", "", "behavior-line");
-    const stateName = document.createElement("input");
-    stateName.type = "text"; stateName.maxLength = 12; stateName.value = state.name; stateName.setAttribute("aria-label", `State ${index} name`);
-    stateName.addEventListener("input", () => { const clean = cleanName(stateName.value); if (clean !== stateName.value) stateName.value = clean; state.name = clean; touch(); });
-    const action = document.createElement("select");
-    action.setAttribute("aria-label", `State ${index} action`);
-    for (const entry of ACTIONS) action.append(new Option(entry.label, entry.id, false, entry.id === state.action));
-    action.addEventListener("change", () => { state.action = action.value as ActionId; touch(); });
-    line.append(text("span", index === 0 ? "#0 start" : `#${index}`, "index mono"), stateName, action);
-    add(line, "×", `Remove state ${index}`, () => structural(() => {
-      draft.states.splice(index, 1);
-      for (const other of draft.states) other.transitions = other.transitions.filter(transition => transition.to !== index).map(transition => ({ ...transition, to: transition.to > index ? transition.to - 1 : transition.to }));
-    }), draft.states.length <= 1);
-    box.append(line);
-
-    state.transitions.forEach((transition, at) => {
-      const row = text("div", "", "behavior-line behavior-transition");
-      row.append(text("span", "go to", "behavior-ok"));
-      const target = document.createElement("select");
-      target.className = "behavior-target"; target.setAttribute("aria-label", `State ${index} transition ${at + 1} target`);
-      draft.states.forEach((other, to) => target.append(new Option(`#${to} ${other.name}`, String(to), false, to === transition.to)));
-      target.addEventListener("change", () => { transition.to = Number(target.value); touch(); });
-      targets.push(target);
-      row.append(target);
-      if (!transition.when.length) row.append(text("span", "after 1 s", "behavior-ok"));
-      transition.when.forEach((condition, which) => {
-        row.append(text("span", which ? "and" : "when", "behavior-ok"));
-        const kind = document.createElement("select");
-        kind.setAttribute("aria-label", `Condition ${which + 1} type`);
-        for (const entry of CONDITIONS) kind.append(new Option(entry.label, entry.id, false, entry.id === condition.type));
-        const info = (): (typeof CONDITIONS)[number] => CONDITIONS.find(entry => entry.id === condition.type)!;
-        const amount = document.createElement("input");
-        amount.type = "number"; amount.setAttribute("aria-label", `Condition ${which + 1} value`);
-        const sync = (): void => {
-          const { unit } = info();
-          amount.min = unit === "radius" ? "1" : "0";
-          amount.max = unit === "percent" ? "100" : unit === "radius" ? "600" : unit === "ticks" ? "600" : "";
-          amount.step = unit === "ticks" ? "0.5" : "1";
-          amount.value = String(unit === "ticks" ? condition.value / TICKS_PER_SECOND : condition.value);
-        };
-        sync();
-        kind.addEventListener("change", () => {
-          const before = info().unit;
-          condition.type = kind.value as ConditionType;
-          if (info().unit !== before) condition.value = info().fallback;
-          sync(); touch();
-        });
-        amount.addEventListener("input", () => {
-          const entered = amount.valueAsNumber;
-          condition.value = Number.isFinite(entered) ? (info().unit === "ticks" ? Math.round(entered * TICKS_PER_SECOND) : entered) : NaN;
-          touch();
-        });
-        row.append(kind, amount);
-        add(row, "−", `Remove condition ${which + 1}`, () => structural(() => { transition.when.splice(which, 1); }));
-      });
-      add(row, "+ when", "Add a condition (up to 2; all must hold)", () => structural(() => { transition.when.push({ type: CONDITIONS[0].id, value: CONDITIONS[0].fallback }); }), transition.when.length >= MAX_CONDITIONS);
-      add(row, "×", `Remove transition ${at + 1}`, () => structural(() => { state.transitions.splice(at, 1); }));
-      box.append(row);
-    });
-    const tools = text("div", "", "behavior-line behavior-transition");
-    add(tools, "+ transition", "Add a transition (up to 4; the first that holds wins)", () => structural(() => { state.transitions.push({ to: (index + 1) % draft.states.length, when: [{ type: CONDITIONS[0].id, value: CONDITIONS[0].fallback }] }); }), state.transitions.length >= MAX_TRANSITIONS);
-    box.append(tools);
-    const summary = text("p", "", "behavior-summary");
-    summaries.push(summary);
-    box.append(summary);
-    list.append(box);
-  });
+  const form = policyForm(draft, { onChange: touch, onStructure: () => { behaviorDrafts.set(number, draft); rebuild(); } });
+  const list = form.element;
   card.append(list);
 
   const foot = text("div", "", "behavior-line");
@@ -1266,6 +1243,13 @@ function behaviorCard(number: number, rowText: string | undefined): HTMLElement 
     if (issuer) void session.order([issuer.id], policyOrders.set(number, serializePolicy(draft)));
   });
   const revert = add(foot, "Revert", rowText === undefined ? "Discard this draft" : "Throw away unsaved edits", () => { behaviorDrafts.delete(number); rebuild(); });
+  const keep = add(foot, "Save to library", "Keep a copy of this behavior in your browser's library (shared with the behavior editor)", () => {
+    const serialized = serializePolicy(draft);
+    const library = loadLibrary();
+    const known = library.entries.some(entry => entry.text === serialized);
+    if (!known) saveLibrary(addEntry(library, createEntry(serialized)));
+    message.className = "behavior-ok"; message.textContent = known ? "Already in your library" : "Saved to library";
+  });
   add(foot, "Clear", "Remove this behavior; units running it go idle. Refused while a mission uses it.", () => {
     const issuer = battlefield.issuer();
     behaviorDrafts.delete(number);
@@ -1284,9 +1268,9 @@ function behaviorCard(number: number, rowText: string | undefined): HTMLElement 
     message.className = check.ok ? "behavior-ok" : "behavior-error";
     message.textContent = check.ok ? `OK: ${draft.states.length} state${draft.states.length === 1 ? "" : "s"}` : check.error;
     save.disabled = !check.ok || !dirty;
+    keep.disabled = !check.ok;
     revert.disabled = !dirty && rowText !== undefined;
-    for (const select of targets) [...select.options].forEach((option, to) => { option.textContent = `#${to} ${draft.states[to]?.name ?? ""}`; });
-    draft.states.forEach((state, index) => { summaries[index].textContent = describeState(draft, state); });
+    form.refresh();
   };
   refresh();
   return card;

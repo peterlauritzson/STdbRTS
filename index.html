@@ -10,6 +10,7 @@
   <header class="masthead">
     <a class="brand" href="/" aria-label="Spacetime RTS"><i data-lucide="crosshair"></i><span>SPACETIME <b>RTS</b></span></a>
     <a class="guide-link" href="guide.html" target="_blank" rel="noopener" title="Player guide (opens in a new tab)"><i data-lucide="book-open"></i><span>Guide</span></a>
+    <a class="guide-link" href="behaviors.html" target="_blank" rel="noopener" title="Behavior editor (opens in a new tab)"><i data-lucide="workflow"></i><span>Behaviors</span></a>
     <div class="connection-status"><span id="connection-dot"></span><span id="status" role="status">Connecting</span></div>
     <details id="connection-settings">
       <summary>Connection</summary>
@@ -139,6 +140,7 @@
           </section>
           <section id="sw-behaviors" class="sw-pane" role="tabpanel" aria-labelledby="sw-tab-behaviors" hidden>
             <p class="sw-intro">Your own behaviors: up to four state machines for army units. A unit starts in the first state and does its action; each state lists transitions, and the first one whose conditions all hold moves it on (after at least 1 s in the state). Goal is where you click or the mission is; home is beside your nearest hub when it started. Once saved, a slot is also a mission tactic and a Missions launch card.</p>
+            <div class="behavior-tools"><a href="behaviors.html" target="_blank" rel="noopener">Open the behavior editor</a><button id="behavior-install" class="strategy-tool" type="button" title="Send every slot of your saved loadout now. Slots that already hold a behavior are overwritten, and units running them restart at their first state.">Install loadout</button><span id="behavior-install-note" class="behavior-ok" role="status"></span></div>
             <div id="behavior-list" class="behavior-list"></div>
           </section>
           <section id="sw-stances" class="sw-pane" role="tabpanel" aria-labelledby="sw-tab-stances" hidden>

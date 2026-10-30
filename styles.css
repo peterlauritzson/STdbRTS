@@ -592,3 +592,13 @@ dialog p { margin-top: 14px; color: var(--muted); font-size: 14px; }
 .behavior-line input[type="number"] { width: 72px; }
 .behavior-transition { margin-left: 16px; }
 .behavior-summary { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.35; }
+
+.guide-link + .guide-link { margin-left: 0; }
+.behavior-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.behavior-tools a { color: var(--accent); }
+.behavior-priority { min-width: 14px; font-family: "IBM Plex Mono", monospace; }
+/* The base rule makes every select full width; in a behavior row they share the line. */
+.behavior-line select { width: auto; max-width: 100%; }
+.behavior-line select, .behavior-line input[type="text"], .behavior-line input[type="number"], .behavior-head input[type="text"] { min-height: 32px; padding: 4px 8px; font-size: 13px; }
+.behavior-head label { display: inline-flex; align-items: center; gap: 6px; }
+.behavior-transition.selected { background: #243a2d; outline: 1px solid #7cf0b0; outline-offset: 2px; border-radius: 3px; }

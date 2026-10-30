@@ -243,6 +243,18 @@ Strategy window (F3), **Behaviors** tab. Four slots; each is a behavior you buil
 | Use | As a mission tactic (default size 6; its members just run your behavior at the mission point). Using an empty slot is refused |
 | Changing it | Saving a new version restarts every unit running it at its first state. Clearing it stops them, and is refused while a mission uses it |
 
+### Behavior editor and library
+
+Page `behaviors.html` (lobby header link, or the Behaviors tab). It never talks to the server; everything it does is stored in this browser's localStorage under `stdbrts:v1:behavior-library`, shared with the game's Behaviors tab (open tabs update each other). Clearing site data or using another browser or device starts an empty library; **Export** (a JSON file) and **Import** (that file, or pasted behavior text, one behavior per line) move a library between them.
+
+| Part | Rules |
+| --- | --- |
+| Library | Any number of behaviors; each is its one-line text plus the diagram positions. Changes that parse are saved at once; a draft that does not parse stays on the page, marked "Not saved". An entry whose text no longer parses is shown as broken and can be fixed or deleted |
+| Diagram | Boxes show state name and action (red attack-move, blue move, amber hold); the first state is marked START. Arrows show their conditions ("after 1 s" if none) and a small number: the transition's priority in its source state. Delete or Backspace removes the selected state or arrow; the last state cannot be removed; at most 8 states and 4 transitions per state |
+| Loadout | Four slots, each one library behavior (a behavior fills at most one slot). With "Install my loadout when a match starts" on, once per match, for each slot whose behavior is valid and which holds nothing yet, the game sends it as `policy_set_<n>`. It never overwrites a slot you already filled, and does not resend after you clear one in the same match. **Install loadout** in the Behaviors tab sends every slot now, overwriting; units running those slots restart at their first state |
+| Try it | A what-if check of one state's transitions, not a battle simulation. You set health %, distances to goal and home, the nearest enemy (or none), enemies near, other friends near and seconds in the state. Nothing fires before 1 s in a state; then the first transition (in the listed order) whose conditions all hold fires, and a transition with no conditions fires at once. Enemies are all treated as at the nearest enemy's distance and friends as within any radius; "outnumbered" is true when enemies within the radius outnumber friends plus the unit itself. Step moves to the target and restarts the clock |
+| Library in the game | Empty Behaviors slots list valid library entries as starting points; "Save to library" on a slot adds its behavior (unless an identical one is already there) |
+
 ## Stances
 
 Per player, per army kind; set by the order `stance_<kind>_<stance>` (free, delayed like any command, validated against your faction's army). Only non-default choices are stored (table `stance`). Applies only while a unit's order is `attack_move` (missions included); `move`, `hold`, `attack` and idle units are untouched. Every number is **experimental**.

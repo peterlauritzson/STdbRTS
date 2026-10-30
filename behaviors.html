@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#182421" />
+  <title>Behavior Editor</title>
+</head>
+<body class="be-body">
+  <header class="guide-masthead">
+    <a class="brand" href="/" aria-label="Back to the game"><span>SPACETIME <b>RTS</b></span></a>
+    <span class="guide-title">Behavior Editor</span>
+    <a class="guide-back" href="/">Back to the game</a>
+  </header>
+  <div class="be-app">
+    <aside class="be-library" aria-label="Library">
+      <div class="be-head"><h2>Library</h2><span id="be-library-count" class="be-count mono"></span></div>
+      <div class="be-toolbar">
+        <details id="be-new" class="be-menu">
+          <summary class="be-button primary"><i data-lucide="plus"></i>New</summary>
+          <div class="be-menu-list" id="be-new-list"></div>
+        </details>
+        <button id="be-duplicate" type="button" title="Duplicate the selected behavior"><i data-lucide="copy"></i>Duplicate</button>
+        <button id="be-delete" type="button" class="danger" title="Delete the selected behavior"><i data-lucide="trash-2"></i>Delete</button>
+        <button id="be-import" type="button" title="Paste behavior text or a library file"><i data-lucide="upload"></i>Import</button>
+        <button id="be-export" type="button" title="Download the whole library as a JSON file"><i data-lucide="download"></i>Export</button>
+      </div>
+      <ul id="be-list" class="be-list" role="listbox" aria-label="Your behaviors"></ul>
+      <p id="be-empty" class="be-hint" hidden>Nothing here yet. Press New and pick a template. The library lives in this browser; Export makes a file you can share.</p>
+      <section class="be-loadout" aria-label="Loadout">
+        <h3>Loadout</h3>
+        <p class="be-hint">The behaviors your game slots get. A behavior sits in one slot at most.</p>
+        <div id="be-slots" class="be-slots"></div>
+        <label class="be-check"><input id="be-auto" type="checkbox" /><span>Install my loadout when a match starts</span></label>
+      </section>
+    </aside>
+    <section class="be-stage" aria-label="State diagram">
+      <div class="be-head">
+        <h2 id="be-stage-title">State diagram</h2>
+        <div class="be-toolbar be-stage-tools">
+          <button id="be-add-state" type="button"><i data-lucide="plus"></i>State</button>
+          <button id="be-layout" type="button" title="Arrange the states again"><i data-lucide="layout-grid"></i>Auto-layout</button>
+        </div>
+      </div>
+      <p id="be-notice" class="be-notice" role="status"></p>
+      <div id="be-canvas" class="be-canvas"></div>
+      <p class="be-hint be-legend">Drag a box to move it. Drag from the dot on its right edge to another box to add a transition. Click a box or arrow to edit it; Delete removes it. The small number on an arrow is its priority: the first transition that holds wins.</p>
+    </section>
+    <aside class="be-inspector" aria-label="Inspector">
+      <div id="be-inspector-empty" class="be-hint be-placeholder">Select or create a behavior in the library.</div>
+      <div id="be-inspector-body">
+        <div class="be-head"><h2>Inspector</h2></div>
+        <div class="be-fields">
+          <label>Name<input id="be-name" type="text" maxlength="20" aria-label="Behavior name" /></label>
+          <label class="be-check"><input id="be-labour" type="checkbox" /><span>Prefer enemy labour</span></label>
+        </div>
+        <div id="be-selected" class="be-selected"></div>
+        <div id="be-form" class="be-form"></div>
+        <details id="be-try" class="be-try">
+          <summary>Try it</summary>
+          <div id="be-try-body"></div>
+        </details>
+        <section class="be-text" aria-label="Behavior text">
+          <div class="be-status-line"><span id="be-valid" role="status"></span><span id="be-counts" class="mono"></span></div>
+          <textarea id="be-raw" rows="4" spellcheck="false" aria-label="Behavior text (one line)"></textarea>
+          <div class="be-toolbar"><button id="be-apply" type="button">Apply text</button><button id="be-copy" type="button"><i data-lucide="clipboard-copy"></i>Copy</button><span id="be-save-state" class="be-hint"></span></div>
+        </section>
+      </div>
+    </aside>
+  </div>
+  <dialog id="be-import-dialog" class="be-dialog">
+    <form method="dialog">
+      <h2>Import behaviors</h2>
+      <p class="be-hint">Paste behavior text (one per line) or an exported library file.</p>
+      <textarea id="be-import-text" rows="7" spellcheck="false" aria-label="Text to import"></textarea>
+      <label class="be-file">Or choose a .json file<input id="be-import-file" type="file" accept=".json,application/json,.txt,text/plain" /></label>
+      <p id="be-import-result" class="be-hint" role="status"></p>
+      <div class="be-toolbar"><button id="be-import-go" type="button" class="primary">Import</button><button value="cancel">Close</button></div>
+    </form>
+  </dialog>
+  <script type="module" src="/src/behavior-editor.ts"></script>
+</body>
+</html>

@@ -232,3 +232,66 @@ export const policyOrders = {
   set: (number: number, text: string) => ({ kind: `policy_set_${number}:${text}`, x: 0, y: 0, target: 0 }),
   clear: (number: number) => ({ kind: `policy_clear_${number}`, x: 0, y: 0, target: 0 }),
 };
+
+/** Removes state `index` in place and fixes the rest: transitions into it go, later targets shift down by one. */
+export function removeState(policy: Policy, index: number): void {
+  policy.states.splice(index, 1);
+  for (const other of policy.states) other.transitions = other.transitions.filter(transition => transition.to !== index).map(transition => ({ ...transition, to: transition.to > index ? transition.to - 1 : transition.to }));
+}
+
+/** What a unit senses, for the what-if check of a state's transitions (see `nextTransition`). */
+export interface Situation {
+  /** Current hit points plus shields as a percentage of the maximum. */
+  healthPercent: number;
+  goalDistance: number;
+  homeDistance: number;
+  /** Distance to the nearest armed enemy; Infinity for none. */
+  enemyDistance: number;
+  /** Armed enemies nearby, all treated as being at `enemyDistance`. */
+  enemies: number;
+  /** Other armed friendly units nearby, treated as within any radius. */
+  allies: number;
+  secondsInState: number;
+}
+
+export interface TransitionCheck { holds: boolean; conditions: boolean[] }
+export interface TransitionVerdict {
+  /** Index of the transition that fires, if any. */
+  fired: number | undefined;
+  /** False until the 1 s minimum in a state has passed: nothing fires before. */
+  ready: boolean;
+  checks: TransitionCheck[];
+}
+
+/** Does one condition hold? Mirrors server/src/behavior.rs `holds` and simulation.rs `outnumbered`. */
+export function conditionHolds(condition: Condition, situation: Situation): boolean {
+  const { value } = condition;
+  switch (condition.type) {
+    case "health_below": return situation.healthPercent < value;
+    case "health_at_least": return !(situation.healthPercent < value);
+    // Friends start at 1: the unit itself.
+    case "outnumbered": return (situation.enemyDistance <= value ? situation.enemies : 0) > situation.allies + 1;
+    case "no_enemy": return !(situation.enemyDistance <= value);
+    case "near_goal": return situation.goalDistance <= value;
+    case "near_home": return situation.homeDistance <= value;
+    case "far_goal": return situation.goalDistance > value;
+    case "far_home": return situation.homeDistance > value;
+    case "dwell": return situation.secondsInState * TICKS_PER_SECOND >= value;
+  }
+}
+
+/**
+ * The server's choice of transition for a unit in `stateIndex`: after the 1 s
+ * minimum, the first transition (declaration order) whose conditions all hold;
+ * a transition with no conditions holds as soon as that minimum has passed.
+ */
+export function nextTransition(policy: Pick<Policy, "states">, stateIndex: number, situation: Situation): TransitionVerdict {
+  const state = policy.states[stateIndex];
+  const ready = situation.secondsInState * TICKS_PER_SECOND >= 20;
+  const checks = (state?.transitions ?? []).map(transition => {
+    const conditions = transition.when.map(condition => conditionHolds(condition, situation));
+    return { holds: conditions.every(Boolean), conditions };
+  });
+  const at = ready ? checks.findIndex(check => check.holds) : -1;
+  return { fired: at < 0 ? undefined : at, ready, checks };
+}

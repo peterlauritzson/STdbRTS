@@ -1,0 +1,107 @@
+/* The standalone behavior editor. Base controls, colours and the .behavior-* form rules come from styles.css; the masthead from guide.css. */
+.be-body { min-height: 100vh; display: flex; flex-direction: column; }
+.be-app { flex: 1; display: grid; grid-template-columns: 270px minmax(0, 1fr) 420px; gap: 0; min-height: 0; }
+.be-app > aside, .be-stage { padding: 16px; min-width: 0; }
+.be-library { border-right: 1px solid var(--line); background: #141f1b; display: flex; flex-direction: column; gap: 12px; }
+.be-inspector { border-left: 1px solid var(--line); background: #141f1b; display: flex; flex-direction: column; gap: 12px; }
+.be-stage { display: flex; flex-direction: column; gap: 10px; }
+.be-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.be-head h2 { font-size: 17px; }
+.be-count { font-size: 12px; color: var(--muted); }
+.be-hint { color: var(--muted); font-size: 12px; line-height: 1.45; margin: 0; }
+.be-placeholder { padding: 28px 8px; text-align: center; font-size: 14px; }
+.be-error { color: #f6c3c6; font-size: 12px; line-height: 1.4; }
+.be-ok { color: var(--accent); font-size: 12px; line-height: 1.4; }
+.be-toolbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.be-body button, .be-body summary.be-button { min-height: 34px; padding: 5px 10px; font-size: 13px; }
+.be-body button svg, .be-body summary svg { width: 15px; height: 15px; }
+.be-menu { position: relative; }
+.be-menu summary { list-style: none; border: 1px solid var(--accent); border-radius: 4px; background: var(--accent); color: #18241c; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.be-menu summary::-webkit-details-marker { display: none; }
+.be-menu-list { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; min-width: 150px; padding: 4px; border: 1px solid #586858; border-radius: 6px; background: #1b2a24; box-shadow: 0 8px 24px #0009; }
+.be-menu-item { justify-content: flex-start; border: 0; background: none; }
+.be-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; max-height: 38vh; }
+.be-entry { width: 100%; justify-content: space-between; text-align: left; min-height: 48px; padding: 6px 10px; background: #1b2a24; gap: 8px; }
+.be-entry[aria-selected="true"] { border-color: var(--accent); background: #26392f; }
+.be-entry-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.be-entry strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.be-entry small { font-size: 11px; color: var(--muted); }
+.be-broken { color: #f6c3c6 !important; }
+.be-slot-badge { flex: none; font-size: 11px; font-family: "IBM Plex Mono", monospace; padding: 2px 7px; border-radius: 10px; color: #12201a; background: var(--slot); font-weight: 700; }
+.be-loadout { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.be-loadout h3 { margin: 0; font-size: 14px; color: var(--accent); }
+.be-slots { display: flex; flex-direction: column; gap: 6px; }
+.be-slot { display: flex; align-items: center; gap: 8px; }
+.be-swatch { width: 8px; height: 28px; border-radius: 2px; flex: none; }
+.be-slot-name { font-size: 12px; width: 44px; flex: none; color: var(--muted); }
+.be-body select, .be-body input[type="text"], .be-body input[type="number"] { min-height: 32px; padding: 4px 8px; font-size: 13px; }
+.be-check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.be-check input { flex: none; }
+.be-notice { min-height: 18px; margin: 0; color: #f2d94e; font-size: 13px; }
+.be-canvas { flex: 1; min-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: #101b17 radial-gradient(#25362d 1px, transparent 1px) 0 0 / 22px 22px; }
+.be-svg { display: block; width: 100%; height: auto; max-height: none; margin: 0 auto; touch-action: none; user-select: none; }
+.be-box { cursor: grab; }
+.be-box-body { fill: #1b2b24; stroke: #4b5e52; stroke-width: 1.5; }
+.be-box:hover .be-box-body { stroke: #8fa598; }
+.be-box.selected .be-box-body { stroke: var(--accent); stroke-width: 2.5; }
+.be-box.current .be-box-body { fill: #2a4034; stroke: #7cf0b0; stroke-width: 2.5; stroke-dasharray: 6 3; }
+.be-box-name { fill: #eef4e8; font: 700 14px "Space Grotesk", sans-serif; }
+.be-box-action { font: 11px "IBM Plex Mono", monospace; }
+.be-port { fill: #2b3d33; stroke: #8fa598; stroke-width: 1.5; cursor: crosshair; }
+.be-port:hover { fill: var(--accent); }
+.be-start rect { fill: var(--accent); }
+.be-start text { fill: #18241c; font: 700 10px "Space Grotesk", sans-serif; letter-spacing: 0.06em; }
+.be-edge { fill: none; stroke: #8fa598; stroke-width: 1.6; pointer-events: none; }
+.be-edge.selected, .be-edge.fires { stroke: var(--accent); stroke-width: 2.6; }
+.be-edge.fires { stroke: #7cf0b0; }
+.be-edge-hit { fill: none; stroke: transparent; stroke-width: 16; cursor: pointer; }
+.be-rubber { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; pointer-events: none; }
+.be-label { cursor: pointer; }
+.be-label rect { fill: #14211c; stroke: #3d4c43; }
+.be-label text { fill: #cad5cb; font: 11px "IBM Plex Mono", monospace; }
+.be-label.selected rect { stroke: var(--accent); }
+.be-label.selected text { fill: #eef4e8; }
+.be-badge { pointer-events: none; }
+.be-badge circle { fill: #3d4c43; stroke: #14211c; stroke-width: 2; }
+.be-badge text { fill: #eef4e8; font: 700 10px "IBM Plex Mono", monospace; }
+.be-legend { max-width: 760px; }
+.be-fields { display: flex; flex-direction: column; gap: 8px; }
+.be-fields label:not(.be-check) { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.be-selected { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.be-form .behavior-states { display: flex; flex-direction: column; gap: 8px; }
+.be-form .behavior-line { gap: 6px; }
+.be-form .behavior-line input[type="text"] { width: 120px; }
+.be-form .behavior-transition { margin-left: 0; padding: 4px; }
+.be-try { border: 1px solid var(--line); border-radius: 6px; background: #101b17; }
+.be-try summary { padding: 8px 12px; font-size: 14px; font-weight: 500; }
+.be-try > div { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.be-try-grid { align-items: start; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.be-try-grid label { font-size: 12px; gap: 3px; }
+.be-none { margin-top: 2px; font-size: 12px; }
+.be-none input { width: 16px; height: 16px; }
+.be-try-row { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 6px 8px; border-left: 3px solid var(--line); background: #14211c; font-size: 12px; align-items: baseline; }
+.be-try-row.fires { border-left-color: #7cf0b0; background: #203629; }
+.be-try-row em { color: var(--muted); font-style: normal; }
+.be-yes { color: #7cf0b0; }
+.be-no { color: #f09aa3; }
+.be-try-verdict, .be-try-now { margin: 0; font-size: 13px; }
+.be-text { display: flex; flex-direction: column; gap: 8px; }
+.be-status-line { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.be-status-line .mono { font-size: 11px; color: var(--muted); }
+.be-text textarea, .be-dialog textarea { width: 100%; resize: vertical; padding: 8px 10px; color: #eef4e8; background: #17231d; border: 1px solid #586858; border-radius: 3px; font: 12px/1.45 "IBM Plex Mono", monospace; }
+.be-dialog { width: min(560px, calc(100% - 32px)); }
+.be-dialog form { display: flex; flex-direction: column; gap: 10px; }
+.be-dialog p { margin: 0; }
+.be-file { font-size: 12px; }
+@media (max-width: 1100px) {
+  .be-app { grid-template-columns: 240px minmax(0, 1fr); }
+  .be-inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 760px) {
+  .be-app { display: flex; flex-direction: column; }
+  .be-library { border-right: 0; border-bottom: 1px solid var(--line); }
+  .be-list { max-height: 30vh; }
+  .be-canvas { min-height: 0; }
+  .be-svg { min-width: 440px; }
+  .be-try-grid { grid-template-columns: 1fr 1fr; }
+}
